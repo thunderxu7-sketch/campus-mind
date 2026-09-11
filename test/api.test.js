@@ -264,6 +264,7 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   const mediaPublic = await request('/v1/content/public?age=15');
   const publicMediaItem = mediaPublic.body.data.find((item) => item.id === mediaContent.body.data.id);
   assert.equal(publicMediaItem.media.id, media.body.data.id);
+  assert.equal(publicMediaItem.media.url, `/v1/content/public/${media.body.data.id}/media`);
   const mediaBytes = await fetch(`${base}/v1/content/public/${media.body.data.id}/media`);
   assert.equal(mediaBytes.status, 200);
   assert.equal(mediaBytes.headers.get('content-type'), 'image/png');
