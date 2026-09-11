@@ -56,12 +56,17 @@ test('health and browser surfaces expose safety headers', async () => {
   assert.match(pageHtml, /心理教育资源/);
   assert.match(pageHtml, /咨询预约/);
   assert.match(pageHtml, /预约此时段/);
+  assert.match(pageHtml, /我的反馈/);
+  assert.match(pageHtml, /资料权利申请/);
   const adminPage = await fetch(base + '/admin');
   assert.equal(adminPage.status, 200);
   const adminHtml = await adminPage.text();
   assert.match(adminHtml, /咨询排班与预约/);
   assert.match(adminHtml, /教育内容管理/);
   assert.match(adminHtml, /危机线索工作台/);
+  assert.match(adminHtml, /专业报告与心理档案/);
+  assert.match(adminHtml, /隐私权利处理队列/);
+  assert.match(adminHtml, /运行接续与保留任务/);
 });
 
 test('state-changing requests reject an untrusted browser origin', async () => {
@@ -468,6 +473,12 @@ test('rights requests are auditable and privacy staff can complete non-destructi
   const privacy = await login('privacy@campus-mind.demo');
   const created = await request('/v1/rights-requests', { method: 'POST', headers: auth(student), body: JSON.stringify({ studentId: 'student-demo', kind: 'access', reason: '合成演示查阅申请' }) });
   assert.equal(created.response.status, 201);
+  const ownRequests = await request('/v1/me/rights-requests', { headers: auth(student) });
+  assert.equal(ownRequests.response.status, 200, JSON.stringify(ownRequests.body));
+  assert.equal(ownRequests.body.data.some((item) => item.id === created.body.data.id), true);
+  assert.equal(ownRequests.body.data.find((item) => item.id === created.body.data.id).resultReady, false);
+  const privacyOwn = await request('/v1/me/rights-requests', { headers: auth(privacy) });
+  assert.equal(privacyOwn.response.status, 403);
   const listed = await request('/v1/admin/rights-requests', { headers: auth(privacy) });
   assert.equal(listed.response.status, 200);
   const completed = await request(`/v1/admin/rights-requests/${created.body.data.id}/complete`, { method: 'POST', headers: auth(privacy), body: JSON.stringify({ decision: 'complete' }) });
@@ -478,6 +489,9 @@ test('rights requests are auditable and privacy staff can complete non-destructi
   const result = await request(`/v1/rights-requests/${created.body.data.id}/result`, { headers: auth(student) });
   assert.equal(result.response.status, 200);
   assert.match(result.body.data.note, /不包含原始答卷/);
+  const after = await request('/v1/me/rights-requests', { headers: auth(student) });
+  assert.equal(after.response.status, 200);
+  assert.equal(after.body.data.find((item) => item.id === created.body.data.id).resultReady, true);
   const audit = await request('/v1/admin/audit?limit=20', { headers: auth(privacy) });
   assert.equal(audit.response.status, 200, JSON.stringify(audit.body));
   assert.ok(audit.body.data.some((event) => event.action === 'rights.completed'));

@@ -53,8 +53,34 @@
     <p id="appointmentStatus" class="status" role="status" aria-live="polite"></p>
   </section>
 
+  <section id="reports" hidden aria-labelledby="reports-title">
+    <h2 id="reports-title">我的反馈</h2>
+    <p class="muted">这里只显示已由心理专业人员审核并发布的反馈；内容用于支持，不构成医学诊断。</p>
+    <div id="reportList" aria-live="polite"><p class="muted">正在加载反馈…</p></div>
+  </section>
+
+  <section id="rights" hidden aria-labelledby="rights-title">
+    <h2 id="rights-title">资料权利申请</h2>
+    <p class="muted">你可以申请查阅、更正、删除或撤回。学校会先核验身份；删除/撤回可能影响正在进行的测评，请在提交前确认。</p>
+    <form id="rightsForm">
+      <label for="rights-kind">申请类型</label>
+      <select id="rights-kind" name="kind">
+        <option value="access">查阅已发布反馈</option>
+        <option value="correct">更正资料</option>
+        <option value="withdraw">撤回测评参与</option>
+        <option value="delete">删除资料</option>
+      </select>
+      <label for="rights-reason">说明（可选，请勿填写紧急隐私细节）</label>
+      <textarea id="rights-reason" name="reason" rows="3" maxlength="1000"></textarea>
+      <button type="submit">提交申请</button>
+    </form>
+    <p id="rightsStatus" class="status" role="status" aria-live="polite"></p>
+    <div id="rightsList" aria-live="polite"><p class="muted">暂无申请记录。</p></div>
+  </section>
+
   <script>
     let token = '';
+    let currentUserId = '';
     let attempt = null;
     let revision = 0;
     let saveTimer = null;
@@ -119,6 +145,31 @@
         $('#appointmentStatus').textContent = '';
       } catch (error) { $('#appointmentStatus').textContent = error.message || '预约信息暂时不可用'; }
     }
+
+    const reportStateLabel = { draft: '草稿', pending_review: '待专业审核', approved: '已审核', released: '已发布', revoked: '已撤回' };
+    async function loadReports() {
+      try {
+        const reports = await api('/v1/reports');
+        $('#reportList').innerHTML = reports.length ? reports.map((report) => `<article class="task"><h3>${esc(report.title)}</h3><p class="muted">${esc(reportStateLabel[report.state] || report.state)} · ${esc(formatWhen(report.releasedAt || report.createdAt))}</p><p>${esc(report.summary?.text || report.summary?.note || '')}</p></article>`).join('') : '<p class="muted">暂无已发布反馈。完成测评后，需等待专业人员审核。</p>';
+      } catch (error) { $('#reportList').innerHTML = `<p class="muted">${esc(error.message || '反馈暂时不可用')}</p>`; }
+    }
+
+    const rightsStateLabel = { open: '待处理', processing: '处理中', completed: '已完成', rejected: '已拒绝' };
+    const rightsKindLabel = { access: '查阅', correct: '更正', withdraw: '撤回参与', delete: '删除' };
+    async function loadRights() {
+      try {
+        const requests = await api('/v1/me/rights-requests');
+        $('#rightsList').innerHTML = requests.length ? requests.map((request) => `<article class="task"><b>${esc(rightsKindLabel[request.kind] || request.kind)}</b> · ${esc(rightsStateLabel[request.status] || request.status)}<br><span class="muted">提交于 ${esc(formatWhen(request.createdAt))}${request.completedAt ? ` · 完成于 ${esc(formatWhen(request.completedAt))}` : ''}</span>${request.resultReady ? `<br><button type="button" data-rights-result="${esc(request.id)}">查看处理结果</button>` : ''}</article>`).join('') : '<p class="muted">暂无申请记录。</p>';
+        document.querySelectorAll('[data-rights-result]').forEach((button) => { button.onclick = () => downloadRightsResult(button.dataset.rightsResult); });
+      } catch (error) { $('#rightsList').innerHTML = `<p class="muted">${esc(error.message || '申请记录暂时不可用')}</p>`; }
+    }
+    async function downloadRightsResult(requestId) {
+      try {
+        const result = await api('/v1/rights-requests/' + encodeURIComponent(requestId) + '/result');
+        const message = result.note || '申请已完成。';
+        $('#rightsStatus').textContent = message;
+      } catch (error) { $('#rightsStatus').textContent = error.message || '结果暂时不可用'; }
+    }
     async function bookAppointment(slotId, button) {
       if (!slotId) return;
       button.disabled = true;
@@ -140,6 +191,7 @@
 
     function clearClient() {
       token = '';
+      currentUserId = '';
       attempt = null;
       revision = 0;
       dirty = false;
@@ -147,6 +199,8 @@
       saveTimer = null;
       $('#tasks').hidden = true;
       $('#appointments').hidden = true;
+      $('#reports').hidden = true;
+      $('#rights').hidden = true;
       $('#taskList').replaceChildren();
       $('#questions').replaceChildren();
       $('#appointmentSlots').replaceChildren();
@@ -218,9 +272,12 @@
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error?.message || '登录失败');
         token = payload.data.token;
+        currentUserId = payload.data.user.id;
         setStatus('已登录');
         $('#tasks').hidden = false;
         $('#appointments').hidden = false;
+        $('#reports').hidden = false;
+        $('#rights').hidden = false;
         const tasks = await api('/v1/me/tasks');
         $('#taskList').innerHTML = tasks.length ? tasks.map((task) => {
           const terminal = task.availabilityReason === 'terminal';
@@ -230,7 +287,7 @@
           return `<div class="task"><b>${esc(task.name)}</b> · ${esc(task.status)}<br><span class="muted">${esc(task.scaleTitle || '')}</span>${statusText ? `<br><span class="muted">${esc(statusText)}</span>` : ''}<br><button type="button" data-id="${esc(task.id)}" aria-label="${esc(label)} ${esc(task.name)}" ${available ? '' : 'disabled'}>${esc(label)}</button></div>`;
         }).join('') : '<p class="muted">当前没有可完成的任务。</p>';
         document.querySelectorAll('[data-id]').forEach((button) => { button.onclick = () => start(button.dataset.id); });
-        await loadAppointments();
+        await Promise.all([loadAppointments(), loadReports(), loadRights()]);
       } catch (error) { setStatus(error.message); }
     };
 
@@ -262,6 +319,18 @@
         await api('/v1/risk-signals', { method: 'POST', body: JSON.stringify({ studentId: me.id, level: 'attention', reason: '学生主动申请人工支持' }) });
         setStatus('求助请求已提交给学校支持流程。');
       } catch (error) { setStatus(error.message); }
+    };
+
+    $('#rightsForm').onsubmit = async (event) => {
+      event.preventDefault();
+      const form = Object.fromEntries(new FormData(event.target));
+      if (['delete', 'withdraw'].includes(form.kind) && !window.confirm('确认提交该申请？学校核验后可能停止测评处理或删除相关资料。')) return;
+      try {
+        const result = await api('/v1/rights-requests', { method: 'POST', body: JSON.stringify({ studentId: currentUserId, kind: form.kind, reason: form.reason || undefined }) });
+        $('#rightsStatus').textContent = `申请已提交（编号 ${result.id}），请等待学校处理。`;
+        event.target.reset();
+        await loadRights();
+      } catch (error) { $('#rightsStatus').textContent = error.message || '申请提交失败'; }
     };
 
     $('#logout').onclick = async () => {

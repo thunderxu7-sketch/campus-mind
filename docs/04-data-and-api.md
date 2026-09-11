@@ -74,7 +74,7 @@ erDiagram
 | `POST /v1/guardian-links/verify` | 监护关系核验 | 经确认渠道、限流，不以学号为验证凭据 |
 | `POST /v1/guardian-links` | 建立待核验监护关系 | 校务账号只能关联本租户的监护账号与学生；未核验前不能记录监护同意 |
 | `POST /v1/me/consents`、`POST /v1/me/consents/{id}/withdraw` | 同意与撤回 | 目的/版本/主体/年龄验证，撤回触发权限与任务更新 |
-| `POST /v1/rights-requests`、`GET /v1/rights-requests/{id}/result` | 查阅/更正/删除申请与结果 | 便捷提交、身份核验、时限跟踪、拒绝依据；查阅结果只含基本资料与已发布报告，不含原始答卷 |
+| `POST /v1/rights-requests`、`GET /v1/me/rights-requests`、`GET /v1/rights-requests/{id}/result` | 查阅/更正/删除申请与结果 | 便捷提交、身份核验、时限跟踪、拒绝依据；主体只能查看自己提交的申请，查阅结果只含基本资料与已发布报告，不含原始答卷 |
 | `POST /v1/admin/retention/run` | 过期导出/导入预检失效与删除台账重放 | 仅运维指标权限；预检元数据 24 小时后清理，恢复备份后先重放，再开放服务；重复执行幂等 |
 | `GET /v1/admin/operations/status`、`POST /v1/admin/operations/requeue-dead-letters` | 队列/通知运行状态与死信补投 | 仅运维指标权限；返回计数和时间，不返回学生或风险正文 |
 | `GET /v1/admin/audit` | 读取审计事件元数据 | 仅审计/隐私权限，数量 1–200；不返回答案、报告或咨询正文，读取行为本身写入追加审计 |

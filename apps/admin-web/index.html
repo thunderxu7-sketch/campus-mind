@@ -72,6 +72,24 @@
     <label for="case-note">复核/支持说明</label><textarea id="case-note" rows="3" maxlength="4000" placeholder="请记录最小必要的人工依据"></textarea>
     <label for="case-assignee">指派给（专业用户编号）</label><input id="case-assignee" value="user-counselor-demo">
     <div id="caseList" aria-live="polite"><p class="muted">暂无待处理线索，或当前账号没有专业权限。</p></div>
+    <h2>专业报告与心理档案</h2>
+    <p class="muted">仅获批心理专业角色可按用途读取个案档案；校务、班主任和运维账号会被服务端拒绝。</p>
+    <form id="archiveForm">
+      <label for="archive-student">学生编号</label><input id="archive-student" name="studentId" value="student-demo" required>
+      <label for="archive-purpose">查看用途</label><select id="archive-purpose" name="purpose"><option value="case_review">线索复核</option><option value="report_review">报告审核</option><option value="support_follow_up">支持与随访</option></select>
+      <button type="submit">读取授权档案</button>
+    </form>
+    <p id="archiveStatus" class="status" role="status" aria-live="polite"></p>
+    <div id="professionalReports" aria-live="polite"><p class="muted">尚未读取报告。</p></div>
+    <pre id="archiveView" hidden style="white-space:pre-wrap;background:#fff;padding:.75rem;border-radius:8px;max-height:24rem;overflow:auto"></pre>
+    <h2>隐私权利处理队列</h2>
+    <p class="muted">仅隐私/权利管理角色可处理申请；结果正文不会出现在队列或审计列表中。</p>
+    <div id="rightsAdminList" aria-live="polite"><p class="muted">暂无待处理申请，或当前账号没有权利管理权限。</p></div>
+    <h2>运行接续与保留任务</h2>
+    <p class="muted">仅运维角色可查看队列计数、补投死信、执行超时升级和保留重放；这些操作不会显示学生心理正文。</p>
+    <div class="actions"><button id="operationsRefresh" type="button" class="secondary">刷新运行状态</button><button id="operationsRequeue" type="button" class="secondary">补投死信</button><button id="operationsEscalate" type="button" class="secondary">按 30 分钟生成升级提醒</button><button id="operationsRetention" type="button" class="secondary">运行保留重放</button></div>
+    <p id="operationsStatus" class="status" role="status" aria-live="polite"></p>
+    <div id="operationsView" aria-live="polite"><p class="muted">尚未读取运行状态，或当前账号没有运维权限。</p></div>
     <h2>无手机学生凭证</h2>
     <form id="credentialForm">
       <label for="credential-student">学生编号</label><input id="credential-student" name="studentId" value="student-demo" required>
@@ -113,13 +131,14 @@
         const overview = await fetch('/v1/admin/overview', { headers }).then((response) => response.json());
         if (!overview.data) throw new Error(overview.error?.message || '无权访问');
         $('#metrics').innerHTML = Object.entries(overview.data).filter(([key]) => key !== 'note').map(([key, value]) => `<span class="metric"><b>${esc(key)}</b><br>${esc(value === null ? '已抑制' : value)}</span>`).join('');
-        const [campaigns, scales, slots, appointments, content, cases] = await Promise.all([
+        const [campaigns, scales, slots, appointments, content, cases, rights] = await Promise.all([
           fetch('/v1/admin/campaigns', { headers }).then((response) => response.json()),
           fetch('/v1/admin/scales', { headers }).then((response) => response.json()),
           fetch('/v1/availability-slots', { headers }).then((response) => response.json()),
           fetch('/v1/appointments', { headers }).then((response) => response.json()),
           fetch('/v1/content', { headers }).then((response) => response.json()),
           fetch('/v1/cases', { headers }).then((response) => response.json()),
+          fetch('/v1/admin/rights-requests', { headers }).then((response) => response.json()),
         ]);
         $('#campaigns').innerHTML = (campaigns.data || []).map((campaign) => `<p><b>${esc(campaign.name)}</b> · ${esc(campaign.state)} · ${esc(campaign.participantCount)} 人</p>`).join('') || '<p class="muted">暂无任务</p>';
         $('#scale').innerHTML = (scales.data || []).filter((scale) => scale.status === 'approved').map((scale) => `<option value="${esc(scale.id)}">${esc(scale.title)} ${esc(scale.version)}</option>`).join('');
@@ -127,6 +146,7 @@
         renderAppointments(appointments.data || []);
         renderContent(content.data || []);
         renderCases(cases.data || []);
+        renderRightsAdmin(rights.data || []);
       } catch (error) { setStatus(error.message); }
     }
 
@@ -223,7 +243,95 @@
       } catch (error) { setStatus(error.message); }
     }
 
+    const rightsStateLabel = { open: '待处理', processing: '处理中', completed: '已完成', rejected: '已拒绝' };
+    const rightsKindLabel = { access: '查阅', correct: '更正', withdraw: '撤回参与', delete: '删除' };
+    function renderRightsAdmin(requests) {
+      $('#rightsAdminList').innerHTML = requests.length ? requests.map((request) => {
+        const action = ['open', 'processing'].includes(request.status) ? `<button type="button" data-rights-id="${esc(request.id)}" data-rights-decision="complete">完成</button> <button type="button" class="secondary" data-rights-id="${esc(request.id)}" data-rights-decision="reject">拒绝</button>` : '';
+        return `<article class="task"><b>${esc(rightsKindLabel[request.kind] || request.kind)}</b> · ${esc(rightsStateLabel[request.status] || request.status)} · ${esc(request.id)}<br><span class="muted">提交于 ${esc(formatWhen(request.createdAt))}${request.reason ? ` · 已记录说明` : ''}</span>${request.resultReady ? '<br><span class="muted">结果已准备</span>' : ''}${action ? `<br>${action}` : ''}</article>`;
+      }).join('') : '<p class="muted">暂无待处理申请，或当前账号没有权利管理权限。</p>';
+      document.querySelectorAll('[data-rights-id]').forEach((button) => { button.onclick = () => updateRights(button.dataset.rightsId, button.dataset.rightsDecision); });
+    }
+    async function updateRights(requestId, decision) {
+      if (decision === 'complete' && !window.confirm('确认完成该权利请求？请确保已完成身份、范围和保留依据核验。')) return;
+      try {
+        const response = await fetch('/v1/admin/rights-requests/' + encodeURIComponent(requestId) + '/complete', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ decision }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '权利请求操作失败');
+        setStatus(decision === 'complete' ? '权利请求已完成' : '权利请求已拒绝');
+        await load();
+      } catch (error) { setStatus(error.message || '权利请求操作失败'); }
+    }
+
+    function renderProfessionalReports(reports) {
+      $('#professionalReports').innerHTML = reports.length ? reports.map((report) => {
+        const actions = report.state === 'pending_review' ? `<button type="button" data-report-id="${esc(report.id)}" data-report-action="approve">审核通过</button>` : report.state === 'approved' ? `<button type="button" data-report-id="${esc(report.id)}" data-report-action="release">发布给学生</button>` : report.state === 'released' ? `<button type="button" class="secondary" data-report-id="${esc(report.id)}" data-report-action="revoke">撤回</button>` : '';
+        return `<article class="metric"><b>${esc(report.title)}</b><br>${esc(report.state)} · ${esc(formatWhen(report.releasedAt || report.createdAt))}<br><span class="muted">${esc(report.summary?.text || '')}</span>${actions ? `<br>${actions}` : ''}</article>`;
+      }).join('') : '<p class="muted">该范围暂无报告，或当前账号没有访问权限。</p>';
+      document.querySelectorAll('[data-report-id]').forEach((button) => { button.onclick = () => updateProfessionalReport(button.dataset.reportId, button.dataset.reportAction); });
+    }
+    async function loadProfessionalData() {
+      const studentId = $('#archive-student').value.trim();
+      const purpose = $('#archive-purpose').value;
+      if (!studentId) { $('#archiveStatus').textContent = '请输入学生编号'; return; }
+      $('#archiveStatus').textContent = '正在按用途读取…';
+      $('#archiveView').hidden = true;
+      try {
+        const [reportsResponse, archiveResponse] = await Promise.all([
+          fetch('/v1/reports?studentId=' + encodeURIComponent(studentId), { headers: { authorization: 'Bearer ' + token } }),
+          fetch('/v1/students/' + encodeURIComponent(studentId) + '/archive?purpose=' + encodeURIComponent(purpose), { headers: { authorization: 'Bearer ' + token } }),
+        ]);
+        const reports = await reportsResponse.json();
+        const archive = await archiveResponse.json();
+        if (!reportsResponse.ok) throw new Error(reports.error?.message || '报告暂时不可用');
+        if (!archiveResponse.ok) throw new Error(archive.error?.message || '档案暂时不可用');
+        renderProfessionalReports(reports.data || []);
+        $('#archiveView').textContent = JSON.stringify(archive.data, null, 2);
+        $('#archiveView').hidden = false;
+        $('#archiveStatus').textContent = '已按用途记录读取审计。';
+      } catch (error) { $('#archiveStatus').textContent = error.message || '专业资料暂时不可用'; $('#professionalReports').innerHTML = '<p class="muted">未读取报告。</p>'; }
+    }
+    async function updateProfessionalReport(reportId, action) {
+      if (action === 'revoke' && !window.confirm('确认撤回该报告？已生成的相关导出也会失效。')) return;
+      const path = action === 'approve' ? 'approve' : action === 'release' ? 'release' : 'revoke';
+      const body = action === 'revoke' ? { reason: '合成演示：专业复核后撤回' } : {};
+      try {
+        const response = await fetch('/v1/reports/' + encodeURIComponent(reportId) + '/' + path, { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '报告操作失败');
+        setStatus(action === 'approve' ? '报告已审核' : action === 'release' ? '报告已发布' : '报告已撤回');
+        await loadProfessionalData();
+      } catch (error) { setStatus(error.message || '报告操作失败'); }
+    }
+
+    function renderOperations(value) {
+      $('#operationsView').innerHTML = value ? Object.entries(value).filter(([key]) => key !== 'note').map(([key, item]) => `<span class="metric"><b>${esc(key)}</b><br>${esc(item === null ? '无' : item)}</span>`).join('') + `<p class="muted">${esc(value.note || '')}</p>` : '<p class="muted">尚未读取运行状态，或当前账号没有运维权限。</p>';
+    }
+    async function loadOperations() {
+      try {
+        const response = await fetch('/v1/admin/operations/status', { headers: { authorization: 'Bearer ' + token } });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '运行状态暂时不可用');
+        renderOperations(result.data);
+        $('#operationsStatus').textContent = '运行状态已刷新。';
+      } catch (error) { $('#operationsStatus').textContent = error.message || '运行状态暂时不可用'; renderOperations(null); }
+    }
+    async function operationsAction(path, body = {}) {
+      try {
+        const response = await fetch(path, { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '运行操作失败');
+        $('#operationsStatus').textContent = '运行操作已执行。';
+        await loadOperations();
+      } catch (error) { $('#operationsStatus').textContent = error.message || '运行操作失败'; }
+    }
+
     $('#refresh').onclick = load;
+    $('#archiveForm').onsubmit = async (event) => { event.preventDefault(); await loadProfessionalData(); };
+    $('#operationsRefresh').onclick = loadOperations;
+    $('#operationsRequeue').onclick = () => operationsAction('/v1/admin/operations/requeue-dead-letters', { limit: 50 });
+    $('#operationsEscalate').onclick = () => operationsAction('/v1/admin/operations/escalate', { thresholdMinutes: 30 });
+    $('#operationsRetention').onclick = () => { if (window.confirm('确认运行保留与删除台账重放？该操作可能使到期导出失效。')) operationsAction('/v1/admin/retention/run'); };
     $('#campaignForm').onsubmit = async (event) => {
       event.preventDefault();
       try {

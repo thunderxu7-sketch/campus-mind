@@ -24,6 +24,11 @@ const importPreviewHash = (rows: Array<Record<string, unknown>>): string => crea
 type PublicRightsRequest = Omit<RightsRequest, 'resultCiphertext'> & { resultReady: boolean };
 type PublicExportJob = Omit<ExportJob, 'payloadCiphertext'> & { ready: boolean };
 
+function publicRightsRequest(request: RightsRequest): PublicRightsRequest {
+  const { resultCiphertext: _resultCiphertext, ...publicRequest } = request;
+  return { ...publicRequest, resultReady: Boolean(_resultCiphertext) };
+}
+
 function audit(state: DatabaseState, actor: User | undefined, action: string, objectType: string, objectId: string, metadata: Record<string, string | number | boolean | null> = {}, purpose?: string, tenantIdOverride?: string): void {
   const safeMetadata = Object.fromEntries(Object.entries(metadata).map(([key, value]) => {
     // Free-text reasons/notes and credential-like fields do not belong in an
@@ -852,8 +857,22 @@ export async function createRightsRequest(store: Store, auth: AuthenticatedUser,
 export async function listRightsRequests(store: Store, auth: AuthenticatedUser): Promise<PublicRightsRequest[]> {
   requirePermission(auth.user, 'rights:read');
   return store.transaction((state) => {
-    const requests = state.rightsRequests.filter((request) => request.tenantId === auth.user.tenantId && (!auth.user.schoolId || state.students.some((student) => student.id === request.studentId && student.schoolId === auth.user.schoolId))).map(({ resultCiphertext: _resultCiphertext, ...request }) => ({ ...request, resultReady: Boolean(_resultCiphertext) }));
+    const requests = state.rightsRequests.filter((request) => request.tenantId === auth.user.tenantId && (!auth.user.schoolId || state.students.some((student) => student.id === request.studentId && student.schoolId === auth.user.schoolId))).map(publicRightsRequest);
     audit(state, auth.user, 'rights.listed', 'rights_request', 'tenant', { count: requests.length }, 'rights:read');
+    return requests;
+  });
+}
+
+/** Return only the requests submitted by the authenticated student/guardian.
+ * This avoids making the admin queue a de-facto subject-access endpoint while
+ * still allowing a requester to track status and fetch a completed result. */
+export async function listMyRightsRequests(store: Store, auth: AuthenticatedUser): Promise<PublicRightsRequest[]> {
+  if (!isStudent(auth.user) && auth.user.role !== 'guardian') throw forbidden();
+  return store.transaction((state) => {
+    const requests = state.rightsRequests
+      .filter((request) => request.tenantId === auth.user.tenantId && request.requesterId === auth.user.id)
+      .map(publicRightsRequest);
+    audit(state, auth.user, 'rights.own_listed', 'rights_request', 'self', { count: requests.length }, 'rights:request');
     return requests;
   });
 }
@@ -889,8 +908,7 @@ export async function completeRightsRequest(store: Store, auth: AuthenticatedUse
       audit(state, auth.user, 'rights.withdraw_applied', 'student', request.studentId, {});
     }
     audit(state, auth.user, 'rights.completed', 'rights_request', request.id, { kind: request.kind, decision });
-    const { resultCiphertext: _resultCiphertext, ...publicRequest } = request;
-    return { ...publicRequest, resultReady: Boolean(_resultCiphertext) };
+    return publicRightsRequest(request);
   });
 }
 

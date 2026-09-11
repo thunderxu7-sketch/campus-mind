@@ -39,6 +39,14 @@ paths:
     post: {summary: Verify a guardian relationship, parameters: [{$ref: '#/components/parameters/linkId'}], responses: {'200': {description: Verified relationship}}}
   /v1/rights-requests/{requestId}/result:
     get: {summary: Download an approved access or correction result after authorization, parameters: [{$ref: '#/components/parameters/requestId'}], responses: {'200': {description: Rights result}, '403': {description: Not the requester or privacy role}}}
+  /v1/me/rights-requests:
+    get: {summary: List rights requests created by the authenticated student or guardian, responses: {'200': {description: Own request metadata without encrypted results}, '403': {description: Student or guardian role required}}}
+  /v1/rights-requests:
+    post: {summary: Submit an access, correction, deletion or withdrawal request, responses: {'201': {description: Request receipt}, '403': {description: Subject or rights permission required}}}
+  /v1/admin/rights-requests:
+    get: {summary: List scoped rights requests for privacy staff, responses: {'200': {description: Request queue without encrypted result bodies}, '403': {description: Privacy permission required}}}
+  /v1/admin/rights-requests/{requestId}/complete:
+    post: {summary: Complete or reject a rights request, parameters: [{$ref: '#/components/parameters/requestId'}], responses: {'200': {description: Updated request metadata}, '403': {description: Rights management permission required}}}
   /v1/admin/operations/status:
     get: {summary: Read redacted outbox and delivery counters, responses: {'200': {description: Operational status}, '403': {description: Operations permission required}}}
   /v1/admin/operations/requeue-dead-letters:
