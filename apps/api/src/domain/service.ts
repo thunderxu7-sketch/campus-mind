@@ -131,11 +131,17 @@ export async function currentUser(store: Store, auth: AuthenticatedUser): Promis
 export async function listMyTasks(store: Store, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
   requirePermission(auth.user, 'self:assessment');
   return store.read((state) => {
+    const currentTime = new Date();
     const assignments = state.assignments.filter((assignment) => sameTenant(assignment, auth.user.tenantId) && assignment.studentId === auth.user.id);
     return assignments.map((assignment) => {
       const campaign = state.campaigns.find((candidate) => candidate.id === assignment.campaignId && sameTenant(candidate, auth.user.tenantId));
       const scale = campaign ? state.scales.find((candidate) => candidate.id === campaign.scaleVersionId && sameTenant(candidate, auth.user.tenantId)) : undefined;
       const attempt = state.attempts.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.assignmentId === assignment.id);
+      const reservation = assignment.frequencyReservationId ? state.frequencyReservations.find((candidate) => candidate.id === assignment.frequencyReservationId && candidate.tenantId === auth.user.tenantId) : undefined;
+      const terminal = ['completed', 'declined', 'expired'].includes(assignment.status) || Boolean(attempt && ['submitted', 'scoring_pending', 'scored', 'scoring_failed', 'invalid', 'withdrawn', 'expired'].includes(attempt.state));
+      const inWindow = Boolean(campaign && ['open', 'scheduled'].includes(campaign.state) && validDate(campaign.opensAt) && validDate(campaign.closesAt) && new Date(campaign.opensAt) <= currentTime && new Date(campaign.closesAt) > currentTime);
+      const available = !terminal && ['assigned', 'started'].includes(assignment.status) && inWindow && Boolean(reservation && ['reserved', 'exception'].includes(reservation.status));
+      const availabilityReason = terminal ? 'terminal' : !['assigned', 'started'].includes(assignment.status) ? 'assignment_unavailable' : !inWindow ? 'outside_window' : !reservation || !['reserved', 'exception'].includes(reservation.status) ? 'frequency_review' : 'available';
       return {
         id: assignment.id,
         name: campaign?.name ?? '测评任务',
@@ -145,6 +151,8 @@ export async function listMyTasks(store: Store, auth: AuthenticatedUser): Promis
         closesAt: campaign?.closesAt,
         scaleTitle: scale?.title,
         status: assignment.status,
+        available,
+        availabilityReason,
         attempt: attempt ? { id: attempt.id, state: attempt.state, currentRevision: attempt.currentRevision } : null,
       };
     });

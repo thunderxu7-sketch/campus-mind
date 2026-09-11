@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { approveFrequencyException, approveScale, beginAttempt, createCampaign, createScale, createSelfScreening, publishCampaign, revokeScale, saveAnswers, updateCampaignState, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
+import { approveFrequencyException, approveScale, beginAttempt, createCampaign, createScale, createSelfScreening, listMyTasks, publishCampaign, revokeScale, saveAnswers, updateCampaignState, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
 import { JsonStore } from '../dist/apps/api/src/domain/store.js';
 import { DEMO_IDS, seedDemoState } from '../dist/apps/api/src/domain/seed.js';
 
@@ -78,6 +78,9 @@ test('closing an unfinished campaign expires drafts and releases unused frequenc
   const started = await beginAttempt(store, student, store.snapshot().assignments.find((assignment) => assignment.campaignId === campaign.id).id);
   await saveAnswers(store, student, started.attempt.id, { expectedRevision: 0, answers: { q1: 1 } });
   await store.transaction((state) => { state.campaigns.find((candidate) => candidate.id === campaign.id).closesAt = '2020-01-01T00:00:00.000Z'; });
+  const staleTasks = await listMyTasks(store, student);
+  assert.equal(staleTasks[0].available, false);
+  assert.equal(staleTasks[0].availabilityReason, 'outside_window');
   await assert.rejects(() => saveAnswers(store, student, started.attempt.id, { expectedRevision: 1, answers: { q1: 0 } }), (error) => error.code === 'CAMPAIGN_CLOSED');
   await updateCampaignState(store, admin, campaign.id, 'closed');
   assert.equal(store.snapshot().assignments[0].status, 'expired');

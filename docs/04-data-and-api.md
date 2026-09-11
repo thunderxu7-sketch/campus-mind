@@ -84,7 +84,7 @@ erDiagram
 | `POST /v1/campaigns`、`POST /v1/campaigns/{id}/publish` | 创建/发布任务 | 名单快照、频次、值班、所需审批、不可变版本 |
 | `POST /v1/campaigns/{id}/frequency-exceptions` | 必要复评审批 | 专业负责人记录用途/依据；例外与普通学年场次分开留痕 |
 | `POST /v1/scales/{id}/revoke` | 撤销量表版本 | 只阻断新使用，不改写历史答卷和计分；必须记录原因 |
-| `GET /v1/me/tasks` | 当前学生任务 | 仅自己，返回参与状态与可用操作 |
+| `GET /v1/me/tasks` | 当前学生任务 | 仅自己，服务端返回任务窗口、频次状态和 `available/availabilityReason`；前端不得自行推断可作答 |
 | `POST /v1/me/tasks/{id}/attempts` | 开始作答 | 同意/适龄/频次/任务时窗原子验证；已释放场次不能靠旧 assignment 重开 |
 | `GET /v1/attempts/{id}` | 恢复草稿 | 仅本人读取服务端已确认的答案与 revision；已提交/关闭答题不可恢复 |
 | `PUT /v1/attempts/{id}/answers` | 保存答案 | `expectedRevision`、题目白名单、服务端持久化确认；每次写入重新检查任务窗口/场次 |
