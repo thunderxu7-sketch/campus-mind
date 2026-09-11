@@ -15,7 +15,7 @@
 
 ## 2. 备份与恢复演练
 
-参考实现可先运行 `npm run drill:recovery` 和 `npm run drill:capacity`，分别验证加密 JSON 快照复制/恢复和带 p95/错误率的本地合成基线；这些命令只使用合成数据，不能替代目标 PostgreSQL、对象存储、备份供应商的 RPO/RTO 或容量演练。
+参考实现可先运行 `npm run drill:recovery`、`npm run drill:crisis` 和 `npm run drill:capacity`，分别验证加密 JSON 快照复制/恢复、线索人工接续/死信恢复和带 p95/错误率的本地合成基线；这些命令只使用合成数据，不能替代目标 PostgreSQL、对象存储、备份供应商的 RPO/RTO、真实值班或容量演练。
 
 1. 暂停新增任务和导出，记录服务版本与待处理 outbox。
 2. 创建加密备份并验证恢复到隔离环境；恢复身份与网络边界不应获得生产写权限。
