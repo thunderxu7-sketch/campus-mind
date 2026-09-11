@@ -322,7 +322,7 @@
     async function loadSelfScales() {
       try {
         const scales = await api('/v1/me/scales');
-        $('#selfScaleList').innerHTML = scales.length ? scales.map((scale) => `<article class="task"><b>${esc(scale.title)}</b> · ${esc(scale.version)}<br><span class="muted">适用 ${esc(scale.minAge)}–${esc(scale.maxAge)} 岁 · ${(Array.isArray(scale.dimensions) ? esc(scale.dimensions.join('、')) : '')}</span><br><button type="button" data-self-scale="${esc(scale.id)}">申请此方案</button></article>`).join('') : '<p class="muted">当前没有符合年龄或治理条件的自选方案；你仍可以使用人工求助和教育资源。</p>';
+        $('#selfScaleList').innerHTML = scales.length ? scales.map((scale) => `<article class="task"><b>${esc(scale.title)}</b> · ${esc(scale.version)}<br><span class="muted">适用 ${esc(scale.minAge)}–${esc(scale.maxAge)} 岁 · ${(Array.isArray(scale.dimensions) ? esc(scale.dimensions.join('、')) : '')}</span><br><button type="button" data-self-scale="${esc(scale.id)}" data-self-notice="${esc(scale.noticeVersion || '')}">申请此方案</button></article>`).join('') : '<p class="muted">当前没有符合年龄或治理条件的自选方案；你仍可以使用人工求助和教育资源。</p>';
         document.querySelectorAll('[data-self-scale]').forEach((button) => { button.onclick = () => requestSelfScreening(button.dataset.selfScale, button); });
       } catch (error) { $('#selfScaleList').innerHTML = `<p class="muted">${esc(error.message || '自选方案暂时不可用')}</p>`; }
     }
@@ -330,12 +330,21 @@
       if (!scaleId) return;
       button.disabled = true;
       try {
+        // Self-screening may use a newer notice than an assigned task. Align
+        // the participation prompt with the selected scale before attempting
+        // creation so the student can renew stale consent in the same view.
+        if (button.dataset.selfNotice) {
+          currentNoticeVersion = button.dataset.selfNotice;
+          await loadConsent();
+          if (!$('#consentForm').hidden) { $('#consentStatus').textContent = `请先阅读并记录告知版本 ${currentNoticeVersion}，再申请此方案。`; button.disabled = false; return; }
+        }
         // The API derives the current Chinese school year on the server.  Do
         // not let a device clock or a stale tab choose a year and bypass the
         // annual frequency reservation.
         await api('/v1/self-screenings', { method: 'POST', body: JSON.stringify({ scaleId }) });
         $('#selfScreeningStatus').textContent = '自选筛查任务已创建，已按学年频次和同意状态登记。';
         renderTasks(await api('/v1/me/tasks'));
+        await loadConsent();
       } catch (error) { $('#selfScreeningStatus').textContent = error.code === 'FREQUENCY_REVIEW_REQUIRED' ? '本学年已有测评场次，需要学校专业人员复核后才能再次申请。' : error.message || '自选筛查申请失败'; button.disabled = false; }
     }
 
