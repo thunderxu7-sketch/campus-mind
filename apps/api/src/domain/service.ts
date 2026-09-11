@@ -268,14 +268,21 @@ export async function previewImport(store: Store, auth: AuthenticatedUser, input
     const school = state.schools.find((candidate) => candidate.id === input.schoolId && sameTenant(candidate, auth.user.tenantId));
     if (!school) throw notFound();
     const batch: ImportBatch = { id: id(), tenantId: auth.user.tenantId, schoolId: school.id, createdBy: auth.user.id, filename: input.filename.slice(0, 200), status: 'previewed', mappingVersion: 1, rowCount: input.rows.length, validRowCount: 0, errorCount: 0, previewHash: importPreviewHash(input.rows), createdAt: now() };
+    const seenExternalRefs = new Set<string>();
     const output: ImportRowResult[] = input.rows.map((raw, index) => {
       const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
       const externalId = typeof source.externalId === 'string' ? source.externalId.trim() : '';
       const displayName = typeof source.displayName === 'string' ? source.displayName.trim() : '';
       const age = typeof source.age === 'number' ? source.age : Number(source.age);
       const classId = typeof source.classId === 'string' ? source.classId.trim() : '';
-      const valid = Boolean(externalId && displayName && classId && Number.isInteger(age) && age >= 6 && age <= 19);
-      const row: ImportRowResult = { id: id(), tenantId: auth.user.tenantId, batchId: batch.id, rowNumber: index + 1, status: valid ? 'valid' : 'error', message: valid ? undefined : '需要 externalId、displayName、classId 和 6–19 岁整数 age' };
+      const guardianValueValid = source.guardianVerified === undefined || typeof source.guardianVerified === 'boolean';
+      const baseValid = Boolean(externalId && displayName && classId && externalId.length <= 200 && displayName.length <= 200 && classId.length <= 200 && Number.isInteger(age) && age >= 6 && age <= 19 && guardianValueValid);
+      const externalRef = externalId ? hashExternal(externalId) : '';
+      const duplicate = Boolean(externalRef && seenExternalRefs.has(externalRef));
+      if (externalRef) seenExternalRefs.add(externalRef);
+      const valid = baseValid && !duplicate;
+      const message = valid ? undefined : duplicate ? '本批次 externalId 重复' : '需要 externalId、displayName、classId 和 6–19 岁整数 age；字段长度和 guardianVerified 类型也必须有效';
+      const row: ImportRowResult = { id: id(), tenantId: auth.user.tenantId, batchId: batch.id, rowNumber: index + 1, status: valid ? 'valid' : 'error', message };
       if (valid) batch.validRowCount += 1; else batch.errorCount += 1;
       state.importRows.push(row);
       return row;

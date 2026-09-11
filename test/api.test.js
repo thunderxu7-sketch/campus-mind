@@ -307,6 +307,11 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   const preview = await request('/v1/imports/preview', { method: 'POST', headers: auth(admin), body: JSON.stringify({ schoolId: 'school-demo', filename: 'synthetic-students.csv', rows: [{ externalId: 'synthetic-new-001', displayName: '合成学生甲', age: 14, classId: 'class-demo-1', guardianVerified: false }, { externalId: '', displayName: '缺失编号', age: 14, classId: 'class-demo-1' }] }) });
   assert.equal(preview.response.status, 201, JSON.stringify(preview.body));
   assert.equal(preview.body.data.batch.validRowCount, 1);
+  const duplicatePreview = await request('/v1/imports/preview', { method: 'POST', headers: auth(admin), body: JSON.stringify({ schoolId: 'school-demo', filename: 'duplicate.csv', rows: [{ externalId: 'synthetic-duplicate-001', displayName: '合成重复甲', age: 14, classId: 'class-demo-1' }, { externalId: 'synthetic-duplicate-001', displayName: '合成重复乙', age: 14, classId: 'class-demo-1' }] }) });
+  assert.equal(duplicatePreview.response.status, 201, JSON.stringify(duplicatePreview.body));
+  assert.equal(duplicatePreview.body.data.batch.validRowCount, 1);
+  assert.equal(duplicatePreview.body.data.rows[1].status, 'error');
+  assert.match(duplicatePreview.body.data.rows[1].message, /重复/);
   const mismatchedCommit = await request(`/v1/imports/${preview.body.data.batch.id}/commit`, { method: 'POST', headers: auth(admin), body: JSON.stringify({ rows: [{ externalId: 'synthetic-different-001', displayName: '不应绕过预检', age: 14, classId: 'class-demo-1', guardianVerified: false }, { externalId: '', displayName: '缺失编号', age: 14, classId: 'class-demo-1' }] }) });
   assert.equal(mismatchedCommit.response.status, 409);
   assert.equal(mismatchedCommit.body.error.code, 'IMPORT_VERSION_CONFLICT');
