@@ -12,6 +12,11 @@
   <h1>校园心晴 · 学生端</h1>
   <p class="notice">这是合成演示。测评反馈不是诊断；如果你现在需要帮助，请联系学校心理老师或页面提供的人工支持渠道。</p>
 
+  <section id="education" aria-labelledby="education-title">
+    <h2 id="education-title">心理教育资源</h2>
+    <div id="educationList" aria-live="polite"><p class="muted">正在加载公开教育内容…</p></div>
+  </section>
+
   <section aria-labelledby="login-title">
     <h2 id="login-title">登录</h2>
     <form id="login">
@@ -64,6 +69,26 @@
         throw error;
       }
       return payload.data;
+    }
+
+    async function loadEducation() {
+      const target = $('#educationList');
+      try {
+        const response = await fetch('/v1/content/public');
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error?.message || '教育内容暂时不可用');
+        const items = Array.isArray(payload.data) ? payload.data : [];
+        if (!items.length) { target.innerHTML = '<p class="muted">暂时没有已发布的教育资源。</p>'; return; }
+        target.innerHTML = items.map((item) => {
+          const media = item.media;
+          let mediaMarkup = '';
+          if (media?.kind === 'image') mediaMarkup = `<img src="${esc(media.url)}" alt="${esc(item.altText || item.title)}" loading="lazy" style="max-width:100%;height:auto;border-radius:8px">`;
+          if (media?.kind === 'audio') mediaMarkup = `<audio controls preload="none" src="${esc(media.url)}" aria-label="${esc(item.title)}"></audio>`;
+          if (media?.kind === 'video') mediaMarkup = `<video controls preload="none" playsinline src="${esc(media.url)}" aria-label="${esc(item.title)}" style="max-width:100%"></video>`;
+          const caption = item.captionText ? `<p class="muted">${esc(item.captionText)}</p>` : '';
+          return `<article class="task"><h3>${esc(item.title)}</h3><p>${esc(item.body || '')}</p>${mediaMarkup}${caption}</article>`;
+        }).join('');
+      } catch (error) { target.innerHTML = `<p class="muted">${esc(error.message || '教育内容暂时不可用')}</p>`; }
     }
 
     function clearClient() {
@@ -193,6 +218,8 @@
     window.addEventListener('beforeunload', (event) => {
       if (dirty) { event.preventDefault(); event.returnValue = ''; }
     });
+
+    loadEducation();
   </script>
 </body>
 </html>

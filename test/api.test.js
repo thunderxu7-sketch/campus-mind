@@ -51,7 +51,9 @@ test('health and browser surfaces expose safety headers', async () => {
   const page = await fetch(base + '/student');
   assert.equal(page.status, 200);
   assert.equal(page.headers.get('cache-control'), 'no-store');
-  assert.match(await page.text(), /不是诊断/);
+  const pageHtml = await page.text();
+  assert.match(pageHtml, /不是诊断/);
+  assert.match(pageHtml, /心理教育资源/);
 });
 
 test('state-changing requests reject an untrusted browser origin', async () => {
