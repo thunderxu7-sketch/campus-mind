@@ -69,6 +69,7 @@ test('health and browser surfaces expose safety headers', async () => {
   assert.match(adminHtml, /处理说明（拒绝时必填）/);
   assert.match(adminHtml, /运行接续与保留任务/);
   assert.match(adminHtml, /隐私保护统计/);
+  assert.match(adminHtml, /复评例外审批/);
 });
 
 test('state-changing requests reject an untrusted browser origin', async () => {

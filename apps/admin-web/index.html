@@ -40,6 +40,13 @@
       <label for="scale">量表版本</label><select name="scaleVersionId" id="scale" required></select>
       <button type="submit">创建草稿</button>
     </form>
+    <form id="frequencyForm">
+      <label for="frequency-campaign">需要复评例外的任务编号</label><input id="frequency-campaign" name="campaignId" value="campaign-demo" required>
+      <label for="frequency-student">学生编号</label><input id="frequency-student" name="studentId" value="student-demo" required>
+      <label for="frequency-reason">复评用途与依据</label><textarea id="frequency-reason" name="reason" rows="2" maxlength="1000" required placeholder="由专业负责人记录必要复评的依据"></textarea>
+      <button type="submit" class="secondary">提交复评例外审批</button>
+    </form>
+    <p id="frequencyStatus" class="status" role="status" aria-live="polite"></p>
     <p class="muted">发布前仍需满足适龄、参与、频次、量表和专业门槛；校务账号不能查看分数。</p>
     <h2>隐私保护统计</h2>
     <p class="muted">仅显示批准维度的聚合计数；小样本会抑制，不展示个体分数或风险等级。</p>
@@ -169,7 +176,7 @@
         const publish = ['draft', 'approved'].includes(campaign.state) ? `<button type="button" data-campaign-id="${esc(campaign.id)}" data-campaign-action="publish">发布任务</button>` : '';
         const pause = ['scheduled', 'open'].includes(campaign.state) ? `<button type="button" class="secondary" data-campaign-id="${esc(campaign.id)}" data-campaign-action="paused">暂停</button>` : '';
         const progress = `<button type="button" class="secondary" data-campaign-id="${esc(campaign.id)}" data-campaign-action="progress">查看进度</button>`;
-        return `<article class="metric"><b>${esc(campaign.name)}</b><br>${esc(campaignStateLabel[campaign.state] || campaign.state)} · ${esc(campaign.purpose)} · ${esc(campaign.participantCount)} 人${publish || pause || progress ? `<br>${publish} ${pause} ${progress}` : ''}</article>`;
+        return `<article class="metric"><b>${esc(campaign.name)}</b><br>${esc(campaignStateLabel[campaign.state] || campaign.state)} · ${esc(campaign.purpose)} · ${esc(campaign.participantCount)} 人<br><span class="muted">编号：${esc(campaign.id)}</span>${publish || pause || progress ? `<br>${publish} ${pause} ${progress}` : ''}</article>`;
       }).join('') : '<p class="muted">暂无任务</p>';
       document.querySelectorAll('[data-campaign-id]').forEach((button) => { button.onclick = () => updateCampaign(button.dataset.campaignId, button.dataset.campaignAction); });
     }
@@ -400,6 +407,18 @@
         setStatus(response.ok ? '已创建草稿' : result.error?.message || '创建失败');
         if (response.ok) await load();
       } catch (error) { setStatus(error.message); }
+    };
+
+    $('#frequencyForm').onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        const form = Object.fromEntries(new FormData(event.target));
+        const response = await fetch('/v1/campaigns/' + encodeURIComponent(form.campaignId) + '/frequency-exceptions', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ studentId: form.studentId, reason: form.reason }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '复评例外审批失败');
+        $('#frequencyStatus').textContent = '复评例外已记录，发布任务时仍会再次校验。';
+        $('#frequency-reason').value = '';
+      } catch (error) { $('#frequencyStatus').textContent = error.message || '复评例外审批失败'; }
     };
 
     $('#slotForm').onsubmit = async (event) => {
