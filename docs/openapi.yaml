@@ -88,7 +88,7 @@ paths:
   /v1/me/scales:
     get: {summary: List only age-eligible, usable self-screening scale versions, responses: {'200': {description: Available scale catalog}}}
   /v1/self-screenings:
-    post: {summary: Create a current-academic-year frequency-checked student self-screening task, responses: {'201': {description: Self-screening campaign and assignment}, '400': {description: Consent, age or annual frequency review required; the server rejects arbitrary academic years}}}
+    post: {summary: Create a current-academic-year frequency-checked student self-screening task, responses: {'201': {description: Self-screening campaign and assignment metadata without tenant, participant or reservation internals}, '400': {description: Consent, age or annual frequency review required; the server rejects arbitrary academic years}}}
   /v1/me/tasks/{assignmentId}/attempts:
     post: {summary: Start an age/consent/frequency-checked attempt, parameters: [{$ref: '#/components/parameters/assignmentId'}], responses: {'201': {description: Attempt}, '400': {description: Consent, age, frequency or time-window failure}}}
   /v1/attempts/{attemptId}/answers:
@@ -130,15 +130,15 @@ paths:
   /v1/cases:
     get: {summary: Professional case work queue without raw answers, responses: {'200': {description: Cases}}}
   /v1/cases/{caseId}/reviews:
-    post: {summary: Confirm or dismiss a signal with a professional note, parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'200': {description: Reviewed}}}
+    post: {summary: Confirm or dismiss a signal with a professional note, parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'200': {description: Reviewed metadata only; encrypted notes and signal IDs are never returned}}}
   /v1/cases/{caseId}/acknowledgements:
-    post: {summary: Record human receipt (not just message delivery), parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'201': {description: Acknowledged}}}
+    post: {summary: Record human receipt (not just message delivery), parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'201': {description: Acknowledged metadata only}}}
   /v1/cases/{caseId}/assign:
     post: {summary: Assign a confirmed case to a scoped professional, parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'200': {description: Assigned}, '403': {description: Case assignment permission required}}}
   /v1/cases/{caseId}/follow-ups:
-    post: {summary: Record an authorized support, referral or follow-up note, parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'201': {description: Follow-up recorded}, '403': {description: Case scope or care permission required}}}
+    post: {summary: Record an authorized support, referral or follow-up note, parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'201': {description: Follow-up metadata with hasNote only; note plaintext/ciphertext is never returned}, '403': {description: Case scope or care permission required}}}
   /v1/cases/{caseId}/closure-requests:
-    post: {summary: Request case closure with a bounded professional rationale, parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'200': {description: Closure pending independent review}}}
+    post: {summary: Request case closure with a bounded professional rationale, parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'200': {description: Closure metadata only; encrypted rationale is never returned}}}
   /v1/cases/{caseId}/closure-approvals:
     post: {summary: Independently approve a closure request, parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'200': {description: Closed}}}
   /v1/imports/preview:

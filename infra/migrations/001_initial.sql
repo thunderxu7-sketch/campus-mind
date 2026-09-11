@@ -350,6 +350,29 @@ create table if not exists rights_requests (
 alter table rights_requests add column if not exists reason_ciphertext text;
 alter table rights_requests add column if not exists decision_reason_ciphertext text;
 alter table rights_requests add column if not exists result_ciphertext text;
+
+-- If an early database still has a plaintext `reason` column, fail closed
+-- until a controlled application job encrypts each value and drops the legacy
+-- column.  The function uses JSON conversion so the fresh schema (which has
+-- no `reason` column) remains migration-safe.
+create or replace function reject_legacy_plaintext_reason() returns trigger language plpgsql as $$
+begin
+  if to_jsonb(new) ? 'reason' and nullif(to_jsonb(new)->>'reason', '') is not null then
+    raise exception 'plaintext reason column must be re-encrypted before writes';
+  end if;
+  return new;
+end;
+$$;
+do $$
+declare legacy_table text;
+begin
+  foreach legacy_table in array array['frequency_reservations', 'rights_requests'] loop
+    if exists (select 1 from information_schema.columns c where c.table_schema = 'public' and c.table_name = legacy_table and c.column_name = 'reason') then
+      execute format('drop trigger if exists %I on %I', legacy_table || '_legacy_reason_guard', legacy_table);
+      execute format('create trigger %I before insert or update on %I for each row execute function reject_legacy_plaintext_reason()', legacy_table || '_legacy_reason_guard', legacy_table);
+    end if;
+  end loop;
+end $$;
 create table if not exists deletion_tombstones (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null,
   request_id uuid not null, deleted_at timestamptz not null default now(), retained_categories jsonb not null,

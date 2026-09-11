@@ -51,6 +51,9 @@ test('self screening uses the same consent and academic-year frequency guard', a
   await assert.rejects(() => createSelfScreening(store, auth, 'scale-synthetic-demo-v1', '9999-10000'), (error) => error.code === 'ACADEMIC_YEAR_INVALID');
   const first = await createSelfScreening(store, auth, 'scale-synthetic-demo-v1');
   assert.equal(first.campaign.purpose, 'screening');
+  assert.equal(Object.hasOwn(first.campaign, 'tenantId'), false);
+  assert.equal(Object.hasOwn(first.campaign, 'participantStudentIds'), false);
+  assert.equal(Object.hasOwn(first.assignment, 'frequencyReservationId'), false);
   await assert.rejects(() => createSelfScreening(store, auth, 'scale-synthetic-demo-v1'), (error) => error.code === 'FREQUENCY_REVIEW_REQUIRED');
 });
 

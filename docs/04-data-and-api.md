@@ -92,9 +92,9 @@ erDiagram
 | `GET /v1/reports/{id}`、`POST /v1/reports/{id}/approve`、`POST /v1/reports/{id}/release`、`POST /v1/reports/{id}/revoke` | 查看/发布报告 | 必须先专业审核再发布；字段权限、读者范围和撤回级联在服务端检查；下载单独鉴权 |
 | `GET /v1/students/{id}/archive?purpose=...` | 个案级心理档案 | 仅同租户且在校/个案授权范围内的专业人员；用途必须是批准的 `case_review`、`report_review` 或 `support_follow_up` 并写入审计；班主任/运维拒绝 |
 | `POST /v1/risk-signals` | 主动求助/手工线索 | 合法主体、最小内容、加急独立持久化与通知 |
-| `POST /v1/cases/{id}/reviews`、`POST /v1/cases/{id}/acknowledgements` | 复核与接单 | 授权专业角色、状态版本，接单不等于已处置 |
-| `POST /v1/cases/{id}/follow-ups` | 支持与随访 | 个案范围、记录版本、到期提醒 |
-| `POST /v1/cases/{id}/closure-requests`、`POST /v1/cases/{id}/closure-approvals` | 申请/审批结案 | 独立专业复核、证据、拒绝自动结案 |
+| `POST /v1/cases/{id}/reviews`、`POST /v1/cases/{id}/acknowledgements` | 复核与接单 | 授权专业角色、状态版本；响应只返回工作流元数据，不返回密文或 `signalIds`；接单不等于已处置 |
+| `POST /v1/cases/{id}/follow-ups` | 支持与随访 | 个案范围、记录版本、到期提醒；响应只返回 `hasNote`，不返回随访正文或作者内部标识 |
+| `POST /v1/cases/{id}/closure-requests`、`POST /v1/cases/{id}/closure-approvals` | 申请/审批结案 | 独立专业复核、证据；响应不返回加密结案依据，拒绝自动结案 |
 | `GET /v1/analytics/summary` | 聚合指标 | 固定维度、小样本/互补抑制、查询预算、不支持任意 SQL |
 | `GET /v1/content/public?age=` | 公开教育内容 | 可选年龄筛选仅接受 6–19 周岁整数；无效筛选返回 `CONTENT_AGE_INVALID`，内容仍须专业审核发布 |
 | `POST /v1/exports`、`GET /v1/exports/{id}/download` | 导出 | 记录有限用途、范围与独立审批；受控产物带 job/purpose/时间水印，到期与授权实时校验 |

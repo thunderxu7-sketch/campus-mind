@@ -36,6 +36,13 @@ type PublicRightsRequest = Omit<RightsRequest, 'resultCiphertext' | 'decisionRea
 type PublicExportJob = Omit<ExportJob, 'payloadCiphertext'> & { ready: boolean };
 type PublicConsent = Pick<ConsentRecord, 'id' | 'purpose' | 'noticeVersion' | 'actorType' | 'status' | 'recordedAt' | 'withdrawnAt'>;
 type PublicFrequencyReservation = Omit<FrequencyReservation, 'reason' | 'reasonCiphertext'> & { hasReason: boolean };
+type PublicSelfScreening = {
+  campaign: Pick<Campaign, 'id' | 'name' | 'purpose' | 'state' | 'academicYear' | 'opensAt' | 'closesAt' | 'reportVisibility'>;
+  assignment: Pick<Assignment, 'id' | 'campaignId' | 'status' | 'createdAt'>;
+};
+type PublicRiskCase = Pick<RiskCase, 'id' | 'studentId' | 'state' | 'priority' | 'assignedTo' | 'createdAt' | 'updatedAt'> & { signalCount: number };
+type PublicFollowUp = Pick<FollowUp, 'id' | 'caseId' | 'kind' | 'dueAt' | 'createdAt'> & { hasNote: boolean };
+type PublicCaseAcknowledgement = Pick<CaseAcknowledgement, 'id' | 'caseId' | 'acknowledgedAt'>;
 
 function publicConsent(consent: ConsentRecord): PublicConsent {
   return { id: consent.id, purpose: consent.purpose, noticeVersion: consent.noticeVersion, actorType: consent.actorType, status: consent.status, recordedAt: consent.recordedAt, withdrawnAt: consent.withdrawnAt };
@@ -44,6 +51,18 @@ function publicConsent(consent: ConsentRecord): PublicConsent {
 function publicFrequencyReservation(reservation: FrequencyReservation): PublicFrequencyReservation {
   const { reason: _reason, reasonCiphertext: _reasonCiphertext, ...publicReservation } = reservation;
   return { ...publicReservation, hasReason: Boolean(_reason || _reasonCiphertext) };
+}
+
+function publicRiskCase(riskCase: RiskCase): PublicRiskCase {
+  return { id: riskCase.id, studentId: riskCase.studentId, state: riskCase.state, priority: riskCase.priority, assignedTo: riskCase.assignedTo, signalCount: riskCase.signalIds.length, createdAt: riskCase.createdAt, updatedAt: riskCase.updatedAt };
+}
+
+function publicFollowUp(followUp: FollowUp): PublicFollowUp {
+  return { id: followUp.id, caseId: followUp.caseId, kind: followUp.kind, dueAt: followUp.dueAt, createdAt: followUp.createdAt, hasNote: Boolean(followUp.noteCiphertext) };
+}
+
+function publicCaseAcknowledgement(acknowledgement: CaseAcknowledgement): PublicCaseAcknowledgement {
+  return { id: acknowledgement.id, caseId: acknowledgement.caseId, acknowledgedAt: acknowledgement.acknowledgedAt };
 }
 
 function publicRightsRequest(request: RightsRequest): PublicRightsRequest {
@@ -727,7 +746,7 @@ export async function approveReport(store: Store, auth: AuthenticatedUser, repor
   });
 }
 
-export async function createRiskSignal(store: Store, auth: AuthenticatedUser, input: { studentId: string; level: RiskSignal['level']; reason: string; source?: RiskSignal['source'] }): Promise<RiskCase> {
+export async function createRiskSignal(store: Store, auth: AuthenticatedUser, input: { studentId: string; level: RiskSignal['level']; reason: string; source?: RiskSignal['source'] }): Promise<PublicRiskCase> {
   if (isStudent(auth.user)) requirePermission(auth.user, 'self:help'); else requirePermission(auth.user, 'case:review');
   if (!['attention', 'urgent'].includes(input.level) || (input.source !== undefined && !['score_rule', 'self_request', 'staff_observation', 'external_referral'].includes(input.source)) || typeof input.reason !== 'string' || !input.reason.trim()) throw new DomainError('RISK_SIGNAL_INVALID', '线索等级、来源或说明无效');
   const source = input.source ?? (isStudent(auth.user) ? 'self_request' : 'staff_observation');
@@ -740,7 +759,7 @@ export async function createRiskSignal(store: Store, auth: AuthenticatedUser, in
     if (!riskCase) { riskCase = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, state: 'pending_review', priority: signal.level, signalIds: [], createdAt: now(), updatedAt: now() }; state.riskCases.push(riskCase); }
     riskCase.signalIds.push(signal.id); riskCase.priority = riskCase.priority === 'urgent' || signal.level === 'attention' ? riskCase.priority : signal.level; riskCase.updatedAt = now();
     state.outboxEvents.push({ id: id(), tenantId: auth.user.tenantId, type: 'risk.signal_created', aggregateId: riskCase.id, payload: { signalId: signal.id, level: signal.level }, status: 'pending', attempts: 0, availableAt: now(), createdAt: now() });
-    audit(state, auth.user, 'risk.signal_created', 'risk_case', riskCase.id, { level: signal.level, source: signal.source }, 'support'); return riskCase;
+    audit(state, auth.user, 'risk.signal_created', 'risk_case', riskCase.id, { level: signal.level, source: signal.source }, 'support'); return publicRiskCase(riskCase);
   });
 }
 
@@ -760,7 +779,7 @@ function caseFor(state: DatabaseState, auth: AuthenticatedUser, caseId: string):
   return riskCase;
 }
 
-export async function reviewCase(store: Store, auth: AuthenticatedUser, caseId: string, input: { decision: 'dismiss' | 'confirm'; note: string }): Promise<RiskCase> {
+export async function reviewCase(store: Store, auth: AuthenticatedUser, caseId: string, input: { decision: 'dismiss' | 'confirm'; note: string }): Promise<PublicRiskCase> {
   requirePermission(auth.user, 'case:review');
   if (!isProfessional(auth.user)) throw forbidden();
   if (!['dismiss', 'confirm'].includes(input.decision) || typeof input.note !== 'string' || !input.note.trim()) throw new DomainError('CASE_REVIEW_INVALID', '复核决定或说明无效');
@@ -772,57 +791,57 @@ export async function reviewCase(store: Store, auth: AuthenticatedUser, caseId: 
     state.riskReviews.push(review);
     riskCase.state = input.decision === 'dismiss' ? 'dismissed' : 'confirmed'; riskCase.updatedAt = now();
     for (const signal of state.riskSignals.filter((candidate) => candidate.tenantId === auth.user.tenantId && riskCase.signalIds.includes(candidate.id))) signal.status = input.decision === 'dismiss' ? 'dismissed' : 'reviewed';
-    audit(state, auth.user, 'risk.case_reviewed', 'risk_case', caseId, { decision: input.decision }, 'support'); return riskCase;
+    audit(state, auth.user, 'risk.case_reviewed', 'risk_case', caseId, { decision: input.decision }, 'support'); return publicRiskCase(riskCase);
   });
 }
 
-export async function assignCase(store: Store, auth: AuthenticatedUser, caseId: string, assigneeId: string): Promise<RiskCase> {
+export async function assignCase(store: Store, auth: AuthenticatedUser, caseId: string, assigneeId: string): Promise<PublicRiskCase> {
   requirePermission(auth.user, 'case:assign');
   return store.transaction((state) => {
     const riskCase = caseFor(state, auth, caseId);
     const assignee = state.users.find((candidate) => candidate.id === assigneeId && sameTenant(candidate, auth.user.tenantId) && isProfessional(candidate));
     if (!assignee || (auth.user.schoolId && assignee.schoolId !== auth.user.schoolId)) throw notFound();
     if (!['confirmed', 'assigned'].includes(riskCase.state)) throw new DomainError('CASE_STATE_INVALID', '个案尚未确认');
-    riskCase.assignedTo = assignee.id; riskCase.state = 'assigned'; riskCase.updatedAt = now(); audit(state, auth.user, 'risk.case_assigned', 'risk_case', caseId, { assigneeId }); return riskCase;
+    riskCase.assignedTo = assignee.id; riskCase.state = 'assigned'; riskCase.updatedAt = now(); audit(state, auth.user, 'risk.case_assigned', 'risk_case', caseId, { assigneeId }); return publicRiskCase(riskCase);
   });
 }
 
-export async function acknowledgeCase(store: Store, auth: AuthenticatedUser, caseId: string): Promise<CaseAcknowledgement> {
+export async function acknowledgeCase(store: Store, auth: AuthenticatedUser, caseId: string): Promise<PublicCaseAcknowledgement> {
   requirePermission(auth.user, 'case:ack');
   return store.transaction((state) => {
     const riskCase = caseFor(state, auth, caseId);
     if (riskCase.assignedTo !== auth.user.id && auth.user.role !== 'professional_lead') throw forbidden();
     if (!['assigned', 'confirmed'].includes(riskCase.state)) throw new DomainError('CASE_STATE_INVALID', '个案当前不可接单');
     const existing = state.acknowledgements.find((ack) => ack.tenantId === auth.user.tenantId && ack.caseId === caseId && ack.userId === auth.user.id);
-    if (existing) return existing;
+    if (existing) return publicCaseAcknowledgement(existing);
     const acknowledgement: CaseAcknowledgement = { id: id(), tenantId: auth.user.tenantId, caseId, userId: auth.user.id, acknowledgedAt: now() }; state.acknowledgements.push(acknowledgement);
-    riskCase.state = 'in_support'; riskCase.updatedAt = now(); audit(state, auth.user, 'risk.case_acknowledged', 'risk_case', caseId, {}); return acknowledgement;
+    riskCase.state = 'in_support'; riskCase.updatedAt = now(); audit(state, auth.user, 'risk.case_acknowledged', 'risk_case', caseId, {}); return publicCaseAcknowledgement(acknowledgement);
   });
 }
 
-export async function addFollowUp(store: Store, auth: AuthenticatedUser, caseId: string, input: { kind: FollowUp['kind']; note: string; dueAt?: string }): Promise<FollowUp> {
+export async function addFollowUp(store: Store, auth: AuthenticatedUser, caseId: string, input: { kind: FollowUp['kind']; note: string; dueAt?: string }): Promise<PublicFollowUp> {
   requirePermission(auth.user, 'care:write');
   if (!['support', 'referral', 'follow_up'].includes(input.kind) || typeof input.note !== 'string' || !input.note.trim() || (input.dueAt !== undefined && !validDate(input.dueAt))) throw new DomainError('FOLLOW_UP_INVALID', '随访类型、说明或日期无效');
   return store.transaction((state) => {
     const riskCase = caseFor(state, auth, caseId);
     if (riskCase.assignedTo && riskCase.assignedTo !== auth.user.id && auth.user.role !== 'professional_lead') throw forbidden();
     if (!['in_support', 'follow_up'].includes(riskCase.state)) throw new DomainError('CASE_STATE_INVALID', '个案尚未接单');
-    const followUp: FollowUp = { id: id(), tenantId: auth.user.tenantId, caseId, authorId: auth.user.id, kind: input.kind, noteCiphertext: encrypt({ note: input.note.slice(0, 4000) }), dueAt: input.dueAt, createdAt: now() }; state.followUps.push(followUp); riskCase.state = 'follow_up'; riskCase.updatedAt = now(); audit(state, auth.user, 'care.follow_up_added', 'risk_case', caseId, { kind: input.kind }); return followUp;
+    const followUp: FollowUp = { id: id(), tenantId: auth.user.tenantId, caseId, authorId: auth.user.id, kind: input.kind, noteCiphertext: encrypt({ note: input.note.slice(0, 4000) }), dueAt: input.dueAt, createdAt: now() }; state.followUps.push(followUp); riskCase.state = 'follow_up'; riskCase.updatedAt = now(); audit(state, auth.user, 'care.follow_up_added', 'risk_case', caseId, { kind: input.kind }); return publicFollowUp(followUp);
   });
 }
 
-export async function requestClosure(store: Store, auth: AuthenticatedUser, caseId: string, reason: string): Promise<RiskCase> {
+export async function requestClosure(store: Store, auth: AuthenticatedUser, caseId: string, reason: string): Promise<PublicRiskCase> {
   requirePermission(auth.user, 'care:write');
   if (typeof reason !== 'string' || !reason.trim()) throw new DomainError('CLOSURE_REASON_REQUIRED', '申请结案需要记录依据');
   return store.transaction((state) => {
     const riskCase = caseFor(state, auth, caseId);
     if (riskCase.assignedTo && riskCase.assignedTo !== auth.user.id && auth.user.role !== 'professional_lead') throw forbidden();
     if (!['follow_up', 'in_support'].includes(riskCase.state)) throw new DomainError('CASE_STATE_INVALID', '个案当前不能申请结案');
-    riskCase.state = 'closure_requested'; riskCase.closureRequestedBy = auth.user.id; riskCase.closureReasonCiphertext = encrypt({ reason: reason.slice(0, 4000) }); riskCase.updatedAt = now(); audit(state, auth.user, 'risk.closure_requested', 'risk_case', caseId, {}); return riskCase;
+    riskCase.state = 'closure_requested'; riskCase.closureRequestedBy = auth.user.id; riskCase.closureReasonCiphertext = encrypt({ reason: reason.slice(0, 4000) }); riskCase.updatedAt = now(); audit(state, auth.user, 'risk.closure_requested', 'risk_case', caseId, {}); return publicRiskCase(riskCase);
   });
 }
 
-export async function approveClosure(store: Store, auth: AuthenticatedUser, caseId: string): Promise<RiskCase> {
+export async function approveClosure(store: Store, auth: AuthenticatedUser, caseId: string): Promise<PublicRiskCase> {
   requirePermission(auth.user, 'case:review');
   return store.transaction((state) => {
     const riskCase = caseFor(state, auth, caseId);
@@ -832,7 +851,7 @@ export async function approveClosure(store: Store, auth: AuthenticatedUser, case
     // Legacy snapshots may not have the requester marker.  Fail closed for
     // non-lead roles rather than inferring the actor from an arbitrary note.
     if (requester === auth.user.id || (auth.user.role !== 'professional_lead' && !requester)) throw new DomainError('SEPARATION_OF_DUTIES_REQUIRED', '结案审批需要独立专业复核', 403);
-    riskCase.state = 'closed'; riskCase.updatedAt = now(); audit(state, auth.user, 'risk.case_closed', 'risk_case', caseId, {}); return riskCase;
+    riskCase.state = 'closed'; riskCase.updatedAt = now(); audit(state, auth.user, 'risk.case_closed', 'risk_case', caseId, {}); return publicRiskCase(riskCase);
   });
 }
 
@@ -1605,7 +1624,7 @@ export async function campaignProgress(store: Store, auth: AuthenticatedUser, ca
   });
 }
 
-export async function createSelfScreening(store: Store, auth: AuthenticatedUser, scaleId: string, requestedAcademicYear?: string): Promise<{ campaign: Campaign; assignment: Assignment }> {
+export async function createSelfScreening(store: Store, auth: AuthenticatedUser, scaleId: string, requestedAcademicYear?: string): Promise<PublicSelfScreening> {
   if (!isStudent(auth.user)) throw forbidden();
   requirePermission(auth.user, 'self:assessment');
   const academicYear = currentAcademicYear();
@@ -1621,7 +1640,11 @@ export async function createSelfScreening(store: Store, auth: AuthenticatedUser,
     const campaign: Campaign = { id: id(), tenantId: auth.user.tenantId, schoolId: student.schoolId, name: '学生自选支持筛查（需专业复核）', purpose: 'screening', state: 'open', academicYear, opensAt: now(), closesAt: new Date(Date.now() + 24 * 60 * 60_000).toISOString(), scaleVersionId: scale.id, reportVisibility: 'professional_review', participantStudentIds: [student.id], createdBy: auth.user.id, publishedAt: now(), createdAt: now() };
     const reservation = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, academicYear, purpose: 'assessment' as const, status: 'reserved' as const, campaignId: campaign.id, createdAt: now() };
     const assignment: Assignment = { id: id(), tenantId: auth.user.tenantId, campaignId: campaign.id, studentId: student.id, frequencyReservationId: reservation.id, status: 'assigned', createdAt: now() };
-    state.campaigns.push(campaign); state.frequencyReservations.push(reservation); state.assignments.push(assignment); audit(state, auth.user, 'self_screening.created', 'campaign', campaign.id, { scaleVersionId: scale.id }); return { campaign, assignment };
+    state.campaigns.push(campaign); state.frequencyReservations.push(reservation); state.assignments.push(assignment); audit(state, auth.user, 'self_screening.created', 'campaign', campaign.id, { scaleVersionId: scale.id });
+    return {
+      campaign: { id: campaign.id, name: campaign.name, purpose: campaign.purpose, state: campaign.state, academicYear: campaign.academicYear, opensAt: campaign.opensAt, closesAt: campaign.closesAt, reportVisibility: campaign.reportVisibility },
+      assignment: { id: assignment.id, campaignId: assignment.campaignId, status: assignment.status, createdAt: assignment.createdAt },
+    };
   });
 }
 
