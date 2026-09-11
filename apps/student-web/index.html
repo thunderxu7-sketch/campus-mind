@@ -325,7 +325,10 @@
       if (!scaleId) return;
       button.disabled = true;
       try {
-        await api('/v1/self-screenings', { method: 'POST', body: JSON.stringify({ scaleId, academicYear: String(new Date().getFullYear()) + '-' + String(new Date().getFullYear() + 1) }) });
+        // The API derives the current Chinese school year on the server.  Do
+        // not let a device clock or a stale tab choose a year and bypass the
+        // annual frequency reservation.
+        await api('/v1/self-screenings', { method: 'POST', body: JSON.stringify({ scaleId }) });
         $('#selfScreeningStatus').textContent = '自选筛查任务已创建，已按学年频次和同意状态登记。';
         renderTasks(await api('/v1/me/tasks'));
       } catch (error) { $('#selfScreeningStatus').textContent = error.code === 'FREQUENCY_REVIEW_REQUIRED' ? '本学年已有测评场次，需要学校专业人员复核后才能再次申请。' : error.message || '自选筛查申请失败'; button.disabled = false; }

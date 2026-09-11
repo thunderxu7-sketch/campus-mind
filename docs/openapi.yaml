@@ -124,7 +124,7 @@ paths:
   /v1/campaigns/{campaignId}/progress:
     get: {summary: Return operational completion counts without scores or risk levels, parameters: [{$ref: '#/components/parameters/campaignId'}], responses: {'200': {description: Campaign progress}}}
   /v1/campaigns/{campaignId}/frequency-exceptions:
-    post: {summary: Record an independently approved same-year re-evaluation exception, parameters: [{$ref: '#/components/parameters/campaignId'}], responses: {'201': {description: Exception recorded}, '400': {description: Missing professional approval evidence}}}
+    post: {summary: Record an independently approved same-year re-evaluation exception, parameters: [{$ref: '#/components/parameters/campaignId'}], responses: {'201': {description: Exception recorded; response includes only hasReason and never the approval explanation}, '400': {description: Missing professional approval evidence}}}
   /v1/risk-signals:
     post: {summary: Student self-help or professional manual signal, responses: {'201': {description: Human-review case created}}}
   /v1/cases:

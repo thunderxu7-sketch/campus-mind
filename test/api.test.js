@@ -60,6 +60,7 @@ test('health and browser surfaces expose safety headers', async () => {
   assert.match(pageHtml, /资料权利申请/);
   assert.match(pageHtml, /测评参与说明/);
   assert.match(pageHtml, /自选支持筛查/);
+  assert.doesNotMatch(pageHtml, /academicYear/);
   const adminPage = await fetch(base + '/admin');
   assert.equal(adminPage.status, 200);
   const adminHtml = await adminPage.text();

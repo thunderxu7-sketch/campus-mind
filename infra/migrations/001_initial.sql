@@ -152,12 +152,19 @@ create table if not exists frequency_reservations (
   status text not null check (status in ('reserved','consumed','released','exception')),
   campaign_id uuid not null,
   approved_by uuid,
-  reason text,
+  -- Exception evidence is encrypted by the application/KMS boundary.  Do not
+  -- store the submitted explanation in a plaintext column.
+  reason_ciphertext text,
   created_at timestamptz not null default now(),
   unique (tenant_id, id),
   foreign key (tenant_id, student_id) references students(tenant_id, id),
   foreign key (tenant_id, campaign_id) references campaigns(tenant_id, id)
 );
+-- Upgrade databases created from an early draft that used `reason` in
+-- plaintext.  The legacy column is retained only for a controlled
+-- application re-encryption/drop migration; new writes must use the encrypted
+-- column and the application never reads the legacy value.
+alter table frequency_reservations add column if not exists reason_ciphertext text;
 -- A reviewed exception may coexist with the ordinary annual reservation. Normal
 -- reservations remain unique while an exception row is kept as an audit marker.
 alter table frequency_reservations drop constraint if exists frequency_reservations_tenant_id_student_id_academic_year_key;
@@ -336,10 +343,11 @@ create table if not exists follow_ups (
 );
 create table if not exists rights_requests (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null,
-  kind text not null, requester_id uuid not null, status text not null, reason text, decision_reason_ciphertext text, result_ciphertext text, created_at timestamptz not null default now(), completed_at timestamptz,
+  kind text not null, requester_id uuid not null, status text not null, reason_ciphertext text, decision_reason_ciphertext text, result_ciphertext text, created_at timestamptz not null default now(), completed_at timestamptz,
   foreign key (tenant_id, student_id) references students(tenant_id, id), unique (tenant_id, id)
 );
 -- Keep the reference migration safe to rerun after an earlier draft of the table.
+alter table rights_requests add column if not exists reason_ciphertext text;
 alter table rights_requests add column if not exists decision_reason_ciphertext text;
 alter table rights_requests add column if not exists result_ciphertext text;
 create table if not exists deletion_tombstones (

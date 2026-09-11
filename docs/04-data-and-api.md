@@ -12,7 +12,7 @@
 | 身份 | User、Membership、RoleGrant、ScopeGrant、AccessApproval | 用户可有多租户成员关系；授权含用途、到期和授予人，职务不自动获得专业访问权 |
 | 学生 | Student、GuardianLink | 身份资料加密；监护关系含独立监护账号、核验人、生效/撤销时间；年龄未知 fail closed |
 | 采集 | ImportBatch、ImportRowResult、ProfileSchemaVersion、ProfileResponse | 导入幂等；拒绝行可追溯；自定义字段禁止任意扩大敏感采集 |
-| 参与治理 | NoticeVersion、ConsentRecord、ProcessingBasis、RightsRequest | 主体/监护人、目的、版本、方式、时间与撤回；权利申请说明加密保存并只返回 `hasReason` 标记；其他合法依据不能由前端随意勾选 |
+| 参与治理 | NoticeVersion、ConsentRecord、ProcessingBasis、RightsRequest | 主体/监护人、目的、版本、方式、时间与撤回；权利申请说明使用 `reason_ciphertext` 加密保存并只返回 `hasReason` 标记；其他合法依据不能由前端随意勾选 |
 | 量表 | Scale、ScaleVersion、NormVersion、ScoringVersion、ScaleLicense | 适龄/语言/地区/报告人、题目与反向题规则 hash、有效期、专业审批；正文受限存储 |
 | 方案 | AssessmentPlanVersion、WarningRuleVersion、ReportTemplateVersion | 不同版本拆分；草稿可编辑，已发布冻结；不允许运行任意管理员脚本 |
 | 任务 | Campaign、CampaignParticipant、FrequencyReservation、ExceptionApproval | 学年、场次、成员快照、方案版本；学生/学年频次占用受事务约束 |
@@ -82,7 +82,7 @@ erDiagram
 | `POST /v1/scales/{id}/versions` | 创建量表草稿版本 | 仅专业授权人员，正文不进入普通日志 |
 | `POST /v1/scale-versions/{id}/approve` | 专业审定 | 作者/审批人分离；版权、适龄和金标准记录必填 |
 | `POST /v1/campaigns`、`POST /v1/campaigns/{id}/publish` | 创建/发布任务 | 名单快照、频次、值班、所需审批、不可变版本 |
-| `POST /v1/campaigns/{id}/frequency-exceptions` | 必要复评审批 | 专业负责人记录用途/依据；依据加密保存，仅返回 `hasReason`；例外与普通学年场次分开留痕 |
+| `POST /v1/campaigns/{id}/frequency-exceptions` | 必要复评审批 | 专业负责人记录用途/依据；依据使用 `reason_ciphertext` 加密保存，仅返回 `hasReason`；例外与普通学年场次分开留痕 |
 | `POST /v1/scales/{id}/revoke` | 撤销量表版本 | 只阻断新使用，不改写历史答卷和计分；必须记录原因 |
 | `GET /v1/me/tasks` | 当前学生任务 | 仅自己，服务端返回适龄、任务窗口、频次状态、量表授权/撤回状态和 `available/availabilityReason`（包括 `scale_unavailable`）；前端不得自行推断可作答 |
 | `POST /v1/me/tasks/{id}/attempts` | 开始作答 | 同意/适龄/频次/任务时窗原子验证；已释放场次不能靠旧 assignment 重开 |
