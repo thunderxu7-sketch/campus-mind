@@ -407,6 +407,10 @@ export interface Appointment {
   slotId: string;
   state: AppointmentState;
   noteCiphertext?: string;
+  /** Optional client idempotency key for safe retry of a booking request. */
+  idempotencyKey?: string;
+  /** Hash of the request shape used to reject key reuse with different data. */
+  idempotencyHash?: string;
   createdAt: string;
   updatedAt: string;
 }

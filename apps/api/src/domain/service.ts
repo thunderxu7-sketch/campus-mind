@@ -1212,16 +1212,26 @@ export async function createAvailabilitySlot(store: Store, auth: AuthenticatedUs
   });
 }
 
-export async function requestAppointment(store: Store, auth: AuthenticatedUser, input: { slotId: string; note?: string }): Promise<Appointment> {
+export async function requestAppointment(store: Store, auth: AuthenticatedUser, input: { slotId: string; note?: string; idempotencyKey?: string }): Promise<Appointment> {
   requirePermission(auth.user, 'self:appointment');
   if (!isStudent(auth.user)) throw forbidden();
   if (input.note !== undefined && typeof input.note !== 'string') throw new DomainError('APPOINTMENT_INVALID', '预约说明格式无效');
+  const idempotencyKey = input.idempotencyKey?.trim();
+  if (idempotencyKey !== undefined && (!idempotencyKey || idempotencyKey.length > 128 || /[\r\n]/.test(idempotencyKey))) throw new DomainError('APPOINTMENT_IDEMPOTENCY_INVALID', '预约幂等键格式无效');
+  const idempotencyHash = idempotencyKey ? contentHash({ slotId: input.slotId, note: input.note ?? null }) : undefined;
   return store.transaction((state) => {
+    if (idempotencyKey) {
+      const previous = state.appointments.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.studentId === auth.user.id && candidate.idempotencyKey === idempotencyKey);
+      if (previous) {
+        if (previous.idempotencyHash !== idempotencyHash) throw new DomainError('IDEMPOTENCY_CONFLICT', '相同幂等键不能用于不同预约内容', 409);
+        return previous;
+      }
+    }
     const slot = state.availabilitySlots.find((candidate) => candidate.id === input.slotId && candidate.tenantId === auth.user.tenantId && candidate.status === 'available');
     const student = state.students.find((candidate) => candidate.id === auth.user.id && candidate.tenantId === auth.user.tenantId && candidate.active);
     if (!slot || !student || (auth.user.schoolId && student.schoolId !== auth.user.schoolId) || new Date(slot.startsAt) <= new Date()) throw new DomainError('SLOT_UNAVAILABLE', '该时段不可预约', 409);
     if (state.appointments.some((appointment) => appointment.tenantId === auth.user.tenantId && appointment.slotId === slot.id && ['requested', 'confirmed'].includes(appointment.state))) throw new DomainError('SLOT_UNAVAILABLE', '该时段刚刚被预约', 409);
-    const appointment: Appointment = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, counselorId: slot.counselorId, slotId: slot.id, state: 'requested', noteCiphertext: input.note ? encrypt({ note: input.note.slice(0, 1000) }) : undefined, createdAt: now(), updatedAt: now() }; state.appointments.push(appointment); slot.status = 'held'; audit(state, auth.user, 'appointment.requested', 'appointment', appointment.id, {}); return appointment;
+    const appointment: Appointment = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, counselorId: slot.counselorId, slotId: slot.id, state: 'requested', noteCiphertext: input.note ? encrypt({ note: input.note.slice(0, 1000) }) : undefined, ...(idempotencyKey ? { idempotencyKey, idempotencyHash } : {}), createdAt: now(), updatedAt: now() }; state.appointments.push(appointment); slot.status = 'held'; audit(state, auth.user, 'appointment.requested', 'appointment', appointment.id, {}); return appointment;
   });
 }
 
@@ -1245,6 +1255,88 @@ export async function updateAppointment(store: Store, auth: AuthenticatedUser, a
     if (slot && ['cancelled', 'completed', 'no_show'].includes(stateValue)) slot.status = 'available';
     if (slot && stateValue === 'confirmed') slot.status = 'held';
     audit(state, auth.user, `appointment.${stateValue}`, 'appointment', appointment.id, {}); return appointment;
+  });
+}
+
+type PublicAvailabilitySlot = {
+  id: string;
+  startsAt: string;
+  endsAt: string;
+  room?: string;
+  counselorName: string;
+  status: AvailabilitySlot['status'];
+};
+
+/**
+ * Return future appointment windows without exposing internal staff records or
+ * any student notes. Students only receive genuinely available slots; staff
+ * with appointment management permission receive the scoped operational view.
+ */
+export async function listAvailabilitySlots(store: Store, auth: AuthenticatedUser): Promise<PublicAvailabilitySlot[]> {
+  if (!isStudent(auth.user) && !can(auth.user, 'appointment:manage')) throw forbidden();
+  return store.transaction((state) => {
+    const currentTime = new Date();
+    const slots = state.availabilitySlots
+      .filter((slot) => slot.tenantId === auth.user.tenantId && validDate(slot.startsAt) && validDate(slot.endsAt) && new Date(slot.startsAt) > currentTime && new Date(slot.endsAt) > currentTime && (!auth.user.schoolId || state.users.find((user) => user.id === slot.counselorId && user.tenantId === auth.user.tenantId)?.schoolId === auth.user.schoolId))
+      .filter((slot) => isStudent(auth.user) ? slot.status === 'available' : true)
+      .map((slot) => {
+        const counselor = state.users.find((user) => user.id === slot.counselorId && user.tenantId === auth.user.tenantId && isProfessional(user));
+        return { id: slot.id, startsAt: slot.startsAt, endsAt: slot.endsAt, ...(slot.room ? { room: slot.room } : {}), counselorName: counselor?.displayName ?? '心理支持人员', status: slot.status };
+      });
+    audit(state, auth.user, 'availability.listed', 'availability_slot', isStudent(auth.user) ? 'self' : 'school', { count: slots.length }, 'appointment:read');
+    return slots;
+  });
+}
+
+type PublicAppointment = {
+  id: string;
+  state: AppointmentState;
+  startsAt?: string;
+  endsAt?: string;
+  room?: string;
+  counselorName: string;
+  createdAt: string;
+  updatedAt: string;
+  studentId?: string;
+};
+
+/**
+ * List appointment status and time metadata. Notes stay encrypted and are not
+ * returned by a list endpoint; a future counselor detail view must authorize
+ * a purpose before decrypting them.
+ */
+export async function listAppointments(store: Store, auth: AuthenticatedUser): Promise<PublicAppointment[]> {
+  if (!isStudent(auth.user) && !can(auth.user, 'appointment:manage')) throw forbidden();
+  return store.transaction((state) => {
+    const appointments = state.appointments
+      .filter((appointment) => appointment.tenantId === auth.user.tenantId && (isStudent(auth.user) ? appointment.studentId === auth.user.id : true))
+      .filter((appointment) => {
+        const student = state.students.find((candidate) => candidate.id === appointment.studentId && candidate.tenantId === auth.user.tenantId);
+        const counselor = state.users.find((candidate) => candidate.id === appointment.counselorId && candidate.tenantId === auth.user.tenantId && isProfessional(candidate));
+        return !auth.user.schoolId || (student?.schoolId === auth.user.schoolId && counselor?.schoolId === auth.user.schoolId);
+      })
+      .map((appointment) => {
+        const slot = state.availabilitySlots.find((candidate) => candidate.id === appointment.slotId && candidate.tenantId === auth.user.tenantId);
+        const counselor = state.users.find((user) => user.id === appointment.counselorId && user.tenantId === auth.user.tenantId && isProfessional(user));
+        return { id: appointment.id, state: appointment.state, ...(slot ? { startsAt: slot.startsAt, endsAt: slot.endsAt, ...(slot.room ? { room: slot.room } : {}) } : {}), counselorName: counselor?.displayName ?? '心理支持人员', createdAt: appointment.createdAt, updatedAt: appointment.updatedAt, ...(!isStudent(auth.user) ? { studentId: appointment.studentId } : {}) };
+      });
+    audit(state, auth.user, 'appointment.listed', 'appointment', isStudent(auth.user) ? 'self' : 'school', { count: appointments.length }, 'appointment:read');
+    return appointments;
+  });
+}
+
+/** Block or reopen an unheld slot while preserving any booked appointment. */
+export async function updateAvailabilitySlot(store: Store, auth: AuthenticatedUser, slotId: string, status: 'available' | 'blocked'): Promise<AvailabilitySlot> {
+  requirePermission(auth.user, 'appointment:manage');
+  if (status !== 'available' && status !== 'blocked') throw new DomainError('SLOT_STATUS_INVALID', '排班状态无效');
+  return store.transaction((state) => {
+    const slot = state.availabilitySlots.find((candidate) => candidate.id === slotId && candidate.tenantId === auth.user.tenantId);
+    const counselor = slot ? state.users.find((user) => user.id === slot.counselorId && user.tenantId === auth.user.tenantId && isProfessional(user)) : undefined;
+    if (!slot || !counselor || (auth.user.schoolId && counselor.schoolId !== auth.user.schoolId)) throw notFound();
+    if (slot.status === 'held') throw new DomainError('SLOT_HELD', '已有预约的时段不能直接改排班状态', 409);
+    slot.status = status;
+    audit(state, auth.user, `availability.${status}`, 'availability_slot', slot.id, {});
+    return slot;
   });
 }
 

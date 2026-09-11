@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>校园心晴｜学生端</title>
   <style>
-    :root{color-scheme:light}body{font:16px system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem;color:#172033;line-height:1.55}section{background:#f5f7fb;padding:1rem;margin:1rem 0;border-radius:12px}button{padding:.65rem 1rem;border:0;border-radius:8px;background:#2854d7;color:#fff;cursor:pointer;font:inherit}button.secondary{background:#57657d}button:disabled{opacity:.55;cursor:not-allowed}button:focus-visible,input:focus-visible{outline:3px solid #f59e0b;outline-offset:2px}label{display:block;padding:.7rem;background:#fff;border-radius:8px;margin:.5rem 0}fieldset{border:0;padding:0;margin:0}legend{font-weight:700;margin-bottom:.5rem}input{margin-right:.5rem}.notice{border-left:4px solid #2854d7;padding-left:.8rem}.muted{color:#5f6b82}.status,.save-status{min-height:1.6em}.save-status{margin:.5rem 0;color:#2854d7}.task{padding:.75rem;background:#fff;border-radius:8px;margin:.5rem 0}.task button{margin-top:.35rem}.actions{display:flex;gap:.5rem;flex-wrap:wrap}@media (max-width:480px){body{margin:1rem auto}button{width:100%}.actions button{flex:1 1 100%}}
+    :root{color-scheme:light}body{font:16px system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem;color:#172033;line-height:1.55}section{background:#f5f7fb;padding:1rem;margin:1rem 0;border-radius:12px}button{padding:.65rem 1rem;border:0;border-radius:8px;background:#2854d7;color:#fff;cursor:pointer;font:inherit}button.secondary{background:#57657d}button:disabled{opacity:.55;cursor:not-allowed}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid #f59e0b;outline-offset:2px}label{display:block;padding:.7rem;background:#fff;border-radius:8px;margin:.5rem 0}fieldset{border:0;padding:0;margin:0}legend{font-weight:700;margin-bottom:.5rem}input,textarea{margin-right:.5rem;font:inherit}textarea{width:100%;box-sizing:border-box;padding:.6rem;border:1px solid #ccd3e0;border-radius:6px}.notice{border-left:4px solid #2854d7;padding-left:.8rem}.muted{color:#5f6b82}.status,.save-status{min-height:1.6em}.save-status{margin:.5rem 0;color:#2854d7}.task{padding:.75rem;background:#fff;border-radius:8px;margin:.5rem 0}.task button{margin-top:.35rem}.actions{display:flex;gap:.5rem;flex-wrap:wrap}@media (max-width:480px){body{margin:1rem auto}button{width:100%}.actions button{flex:1 1 100%}}
   </style>
 </head>
 <body>
@@ -41,6 +41,18 @@
     <div id="questions" aria-live="polite"></div>
   </section>
 
+  <section id="appointments" hidden aria-labelledby="appointments-title">
+    <h2 id="appointments-title">咨询预约</h2>
+    <p class="muted">预约不是即时咨询或紧急救助。如需立即帮助，请使用“我想找人聊聊”或联系学校提供的人工支持渠道。</p>
+    <label for="appointment-note">预约说明（可选，不要填写紧急或隐私细节）</label>
+    <textarea id="appointment-note" rows="3" maxlength="1000" placeholder="例如：希望了解可用的支持时段"></textarea>
+    <h3>可预约时段</h3>
+    <div id="appointmentSlots" aria-live="polite"><p class="muted">正在加载排班…</p></div>
+    <h3>我的预约</h3>
+    <div id="myAppointments" aria-live="polite"><p class="muted">暂无预约</p></div>
+    <p id="appointmentStatus" class="status" role="status" aria-live="polite"></p>
+  </section>
+
   <script>
     let token = '';
     let attempt = null;
@@ -48,6 +60,7 @@
     let saveTimer = null;
     let saveInFlight = false;
     let dirty = false;
+    const appointmentKeys = new Map();
     const $ = (selector) => document.querySelector(selector);
     const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     const setStatus = (message) => { $('#status').textContent = message; };
@@ -91,6 +104,40 @@
       } catch (error) { target.innerHTML = `<p class="muted">${esc(error.message || '教育内容暂时不可用')}</p>`; }
     }
 
+    const appointmentStateLabel = { requested: '待学校确认', confirmed: '已确认', completed: '已完成', cancelled: '已取消', no_show: '未到访' };
+    const formatWhen = (value) => { const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString() : '时间不可用'; };
+    async function loadAppointments() {
+      try {
+        const [slots, appointments] = await Promise.all([api('/v1/availability-slots'), api('/v1/appointments')]);
+        $('#appointmentSlots').innerHTML = slots.length ? slots.map((slot) => `<article class="task"><b>${esc(slot.counselorName)}</b><br>${esc(formatWhen(slot.startsAt))}–${esc(formatWhen(slot.endsAt))}${slot.room ? `<br>地点：${esc(slot.room)}` : ''}<br><button type="button" data-book-slot="${esc(slot.id)}">预约此时段</button></article>`).join('') : '<p class="muted">暂无可预约时段，请稍后查看。</p>';
+        document.querySelectorAll('[data-book-slot]').forEach((button) => { button.onclick = () => bookAppointment(button.dataset.bookSlot, button); });
+        $('#myAppointments').innerHTML = appointments.length ? appointments.map((appointment) => {
+          const cancel = ['requested', 'confirmed'].includes(appointment.state) ? `<button type="button" class="secondary" data-cancel-appointment="${esc(appointment.id)}">取消预约</button>` : '';
+          return `<article class="task"><b>${esc(appointmentStateLabel[appointment.state] || appointment.state)}</b><br>${esc(formatWhen(appointment.startsAt))}–${esc(formatWhen(appointment.endsAt))} · ${esc(appointment.counselorName)}${appointment.room ? ` · ${esc(appointment.room)}` : ''}${cancel ? `<br>${cancel}` : ''}</article>`;
+        }).join('') : '<p class="muted">暂无预约。</p>';
+        document.querySelectorAll('[data-cancel-appointment]').forEach((button) => { button.onclick = () => cancelAppointment(button.dataset.cancelAppointment); });
+        $('#appointmentStatus').textContent = '';
+      } catch (error) { $('#appointmentStatus').textContent = error.message || '预约信息暂时不可用'; }
+    }
+    async function bookAppointment(slotId, button) {
+      if (!slotId) return;
+      button.disabled = true;
+      const idempotencyKey = appointmentKeys.get(slotId) || crypto.randomUUID();
+      appointmentKeys.set(slotId, idempotencyKey);
+      try {
+        await api('/v1/appointments', { method: 'POST', body: JSON.stringify({ slotId, note: $('#appointment-note').value.trim() || undefined, idempotencyKey }) });
+        $('#appointmentStatus').textContent = '预约请求已提交，请等待学校确认。';
+        await loadAppointments();
+      } catch (error) { $('#appointmentStatus').textContent = error.message || '预约失败'; button.disabled = false; }
+    }
+    async function cancelAppointment(appointmentId) {
+      try {
+        await api('/v1/appointments/' + encodeURIComponent(appointmentId) + '/state', { method: 'POST', body: JSON.stringify({ state: 'cancelled' }) });
+        $('#appointmentStatus').textContent = '预约已取消。';
+        await loadAppointments();
+      } catch (error) { $('#appointmentStatus').textContent = error.message || '取消失败'; }
+    }
+
     function clearClient() {
       token = '';
       attempt = null;
@@ -99,8 +146,13 @@
       if (saveTimer) clearTimeout(saveTimer);
       saveTimer = null;
       $('#tasks').hidden = true;
+      $('#appointments').hidden = true;
       $('#taskList').replaceChildren();
       $('#questions').replaceChildren();
+      $('#appointmentSlots').replaceChildren();
+      $('#myAppointments').replaceChildren();
+      $('#appointment-note').value = '';
+      appointmentKeys.clear();
       $('#login').reset();
     }
 
@@ -168,6 +220,7 @@
         token = payload.data.token;
         setStatus('已登录');
         $('#tasks').hidden = false;
+        $('#appointments').hidden = false;
         const tasks = await api('/v1/me/tasks');
         $('#taskList').innerHTML = tasks.length ? tasks.map((task) => {
           const terminal = task.availabilityReason === 'terminal';
@@ -177,6 +230,7 @@
           return `<div class="task"><b>${esc(task.name)}</b> · ${esc(task.status)}<br><span class="muted">${esc(task.scaleTitle || '')}</span>${statusText ? `<br><span class="muted">${esc(statusText)}</span>` : ''}<br><button type="button" data-id="${esc(task.id)}" aria-label="${esc(label)} ${esc(task.name)}" ${available ? '' : 'disabled'}>${esc(label)}</button></div>`;
         }).join('') : '<p class="muted">当前没有可完成的任务。</p>';
         document.querySelectorAll('[data-id]').forEach((button) => { button.onclick = () => start(button.dataset.id); });
+        await loadAppointments();
       } catch (error) { setStatus(error.message); }
     };
 

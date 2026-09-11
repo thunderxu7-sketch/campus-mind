@@ -60,7 +60,7 @@ npm install
 CAMPMIND_DEMO_MFA=true CAMPMIND_MASTER_KEY=local-only-key npm start
 # 管理端 http://localhost:8787/admin；学生端 http://localhost:8787/student
 
-npm run check       # TypeScript、47 项行为测试、安全扫描与规划校验
+npm run check       # TypeScript、48 项行为测试、安全扫描与规划校验
 npm run drill:capacity  # 合成并发基线（输出 p50/p95/错误率）
 npm run drill:recovery  # 合成快照与加密私有对象恢复演练
 npm run drill:crisis    # 合成危机线索、人工接续与死信恢复演练

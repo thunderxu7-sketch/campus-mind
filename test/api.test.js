@@ -54,6 +54,11 @@ test('health and browser surfaces expose safety headers', async () => {
   const pageHtml = await page.text();
   assert.match(pageHtml, /不是诊断/);
   assert.match(pageHtml, /心理教育资源/);
+  assert.match(pageHtml, /咨询预约/);
+  assert.match(pageHtml, /预约此时段/);
+  const adminPage = await fetch(base + '/admin');
+  assert.equal(adminPage.status, 200);
+  assert.match(await adminPage.text(), /咨询排班与预约/);
 });
 
 test('state-changing requests reject an untrusted browser origin', async () => {
@@ -384,6 +389,57 @@ test('imports, governed schemas, aggregate analytics, exports and public content
 });
 
 
+test('appointment slots are scoped and booking retries are idempotent', async () => {
+  const professional = await login('professional@campus-mind.demo');
+  const student = await login('student@campus-mind.demo');
+  const startsAt = new Date(Date.now() + 10 * 3_600_000).toISOString();
+  const endsAt = new Date(Date.now() + 11 * 3_600_000).toISOString();
+  const created = await request('/v1/availability-slots', { method: 'POST', headers: auth(professional), body: JSON.stringify({ counselorId: 'user-counselor-demo', startsAt, endsAt, room: '合成预约室-幂等' }) });
+  assert.equal(created.response.status, 201, JSON.stringify(created.body));
+  const slotId = created.body.data.id;
+  const visible = await request('/v1/availability-slots', { headers: auth(student) });
+  assert.equal(visible.response.status, 200, JSON.stringify(visible.body));
+  const listedSlot = visible.body.data.find((slot) => slot.id === slotId);
+  assert.equal(listedSlot.counselorName, '演示心理咨询师');
+  assert.equal(listedSlot.status, 'available');
+  const key = 'synthetic-appointment-retry-001';
+  const first = await request('/v1/appointments', { method: 'POST', headers: auth(student), body: JSON.stringify({ slotId, note: '合成预约说明', idempotencyKey: key }) });
+  assert.equal(first.response.status, 201, JSON.stringify(first.body));
+  assert.equal(Object.hasOwn(first.body.data, 'noteCiphertext'), false);
+  assert.equal(Object.hasOwn(first.body.data, 'idempotencyHash'), false);
+  const retry = await request('/v1/appointments', { method: 'POST', headers: auth(student), body: JSON.stringify({ slotId, note: '合成预约说明', idempotencyKey: key }) });
+  assert.equal(retry.response.status, 201, JSON.stringify(retry.body));
+  assert.equal(retry.body.data.id, first.body.data.id);
+  const keyConflict = await request('/v1/appointments', { method: 'POST', headers: auth(student), body: JSON.stringify({ slotId, note: '不同的合成说明', idempotencyKey: key }) });
+  assert.equal(keyConflict.response.status, 409);
+  assert.equal(keyConflict.body.error.code, 'IDEMPOTENCY_CONFLICT');
+  const studentAppointments = await request('/v1/appointments', { headers: auth(student) });
+  assert.equal(studentAppointments.response.status, 200);
+  const ownAppointment = studentAppointments.body.data.find((appointment) => appointment.id === first.body.data.id);
+  assert.ok(ownAppointment);
+  assert.equal(Object.hasOwn(ownAppointment, 'note'), false);
+  const managerAppointments = await request('/v1/appointments', { headers: auth(professional) });
+  assert.equal(managerAppointments.response.status, 200);
+  assert.equal(managerAppointments.body.data.find((appointment) => appointment.id === first.body.data.id).studentId, 'student-demo');
+  const invalidStatus = await request(`/v1/availability-slots/${slotId}/state`, { method: 'POST', headers: auth(professional), body: JSON.stringify({ status: 'bogus' }) });
+  assert.equal(invalidStatus.response.status, 400);
+  assert.equal(invalidStatus.body.error.code, 'SLOT_STATUS_INVALID');
+  const heldBlock = await request(`/v1/availability-slots/${slotId}/state`, { method: 'POST', headers: auth(professional), body: JSON.stringify({ status: 'blocked' }) });
+  assert.equal(heldBlock.response.status, 409);
+  assert.equal(heldBlock.body.error.code, 'SLOT_HELD');
+  const cancelled = await request(`/v1/appointments/${first.body.data.id}/state`, { method: 'POST', headers: auth(student), body: JSON.stringify({ state: 'cancelled' }) });
+  assert.equal(cancelled.response.status, 200);
+  assert.equal(Object.hasOwn(cancelled.body.data, 'noteCiphertext'), false);
+  assert.equal(Object.hasOwn(cancelled.body.data, 'idempotencyKey'), false);
+  const blocked = await request(`/v1/availability-slots/${slotId}/state`, { method: 'POST', headers: auth(professional), body: JSON.stringify({ status: 'blocked' }) });
+  assert.equal(blocked.response.status, 200);
+  const hidden = await request('/v1/availability-slots', { headers: auth(student) });
+  assert.equal(hidden.response.status, 200);
+  assert.equal(hidden.body.data.some((slot) => slot.id === slotId), false);
+  const reopened = await request(`/v1/availability-slots/${slotId}/state`, { method: 'POST', headers: auth(professional), body: JSON.stringify({ status: 'available' }) });
+  assert.equal(reopened.response.status, 200);
+});
+
 test('teacher progress is limited to operational counts', async () => {
   const teacher = await login('teacher@campus-mind.demo');
   const progress = await request('/v1/campaigns/campaign-demo/progress', { headers: auth(teacher) });
@@ -393,6 +449,8 @@ test('teacher progress is limited to operational counts', async () => {
   assert.equal(Object.hasOwn(progress.body.data, 'studentIds'), false);
   const students = await request('/v1/admin/students', { headers: auth(teacher) });
   assert.equal(students.response.status, 403, '班主任不可读取完整学生目录');
+  const slots = await request('/v1/availability-slots', { headers: auth(teacher) });
+  assert.equal(slots.response.status, 403, '班主任不可管理或读取预约排班');
 });
 
 test('rights requests are auditable and privacy staff can complete non-destructive access requests', async () => {

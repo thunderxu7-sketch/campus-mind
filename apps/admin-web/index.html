@@ -39,6 +39,18 @@
       <button type="submit">创建草稿</button>
     </form>
     <p class="muted">发布前仍需满足适龄、参与、频次、量表和专业门槛；校务账号不能查看分数。</p>
+    <h2>咨询排班与预约</h2>
+    <p class="muted">预约不是即时咨询或紧急救助。这里只展示时间、状态和最小身份引用，不展示心理说明。</p>
+    <form id="slotForm">
+      <label for="slot-counselor">咨询师用户编号</label><input id="slot-counselor" name="counselorId" value="user-counselor-demo" required>
+      <label for="slot-starts">开始时间</label><input id="slot-starts" name="startsAt" type="datetime-local" required>
+      <label for="slot-ends">结束时间</label><input id="slot-ends" name="endsAt" type="datetime-local" required>
+      <label for="slot-room">房间（可选）</label><input id="slot-room" name="room" maxlength="100" placeholder="合成咨询室">
+      <button type="submit">创建排班</button>
+    </form>
+    <div id="slotList" aria-live="polite"><p class="muted">暂无未来排班</p></div>
+    <h3>预约记录</h3>
+    <div id="appointmentList" aria-live="polite"><p class="muted">暂无预约</p></div>
     <h2>无手机学生凭证</h2>
     <form id="credentialForm">
       <label for="credential-student">学生编号</label><input id="credential-student" name="studentId" value="student-demo" required>
@@ -80,12 +92,51 @@
         const overview = await fetch('/v1/admin/overview', { headers }).then((response) => response.json());
         if (!overview.data) throw new Error(overview.error?.message || '无权访问');
         $('#metrics').innerHTML = Object.entries(overview.data).filter(([key]) => key !== 'note').map(([key, value]) => `<span class="metric"><b>${esc(key)}</b><br>${esc(value === null ? '已抑制' : value)}</span>`).join('');
-        const [campaigns, scales] = await Promise.all([
+        const [campaigns, scales, slots, appointments] = await Promise.all([
           fetch('/v1/admin/campaigns', { headers }).then((response) => response.json()),
           fetch('/v1/admin/scales', { headers }).then((response) => response.json()),
+          fetch('/v1/availability-slots', { headers }).then((response) => response.json()),
+          fetch('/v1/appointments', { headers }).then((response) => response.json()),
         ]);
         $('#campaigns').innerHTML = (campaigns.data || []).map((campaign) => `<p><b>${esc(campaign.name)}</b> · ${esc(campaign.state)} · ${esc(campaign.participantCount)} 人</p>`).join('') || '<p class="muted">暂无任务</p>';
         $('#scale').innerHTML = (scales.data || []).filter((scale) => scale.status === 'approved').map((scale) => `<option value="${esc(scale.id)}">${esc(scale.title)} ${esc(scale.version)}</option>`).join('');
+        renderSlots(slots.data || []);
+        renderAppointments(appointments.data || []);
+      } catch (error) { setStatus(error.message); }
+    }
+
+    const appointmentStateLabel = { requested: '待确认', confirmed: '已确认', completed: '已完成', cancelled: '已取消', no_show: '未到访' };
+    const formatWhen = (value) => { const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString() : '时间不可用'; };
+    function renderSlots(slots) {
+      $('#slotList').innerHTML = slots.length ? slots.map((slot) => {
+        const action = slot.status === 'held' ? '<span class="muted">已有预约</span>' : `<button type="button" class="secondary" data-slot-id="${esc(slot.id)}" data-slot-status="${slot.status === 'blocked' ? 'available' : 'blocked'}">${slot.status === 'blocked' ? '重新开放' : '停用时段'}</button>`;
+        return `<p class="metric"><b>${esc(slot.counselorName)}</b><br>${esc(formatWhen(slot.startsAt))}–${esc(formatWhen(slot.endsAt))}<br>${slot.room ? `房间：${esc(slot.room)}<br>` : ''}状态：${esc(slot.status)}<br>${action}</p>`;
+      }).join('') : '<p class="muted">暂无未来排班</p>';
+      document.querySelectorAll('[data-slot-id]').forEach((button) => { button.onclick = () => updateSlot(button.dataset.slotId, button.dataset.slotStatus); });
+    }
+    function renderAppointments(appointments) {
+      $('#appointmentList').innerHTML = appointments.length ? appointments.map((appointment) => {
+        const actions = appointment.state === 'requested' ? `<button type="button" data-appointment-id="${esc(appointment.id)}" data-appointment-state="confirmed">确认</button> <button type="button" class="secondary" data-appointment-id="${esc(appointment.id)}" data-appointment-state="cancelled">取消</button>` : appointment.state === 'confirmed' ? `<button type="button" data-appointment-id="${esc(appointment.id)}" data-appointment-state="completed">完成</button> <button type="button" class="secondary" data-appointment-id="${esc(appointment.id)}" data-appointment-state="no_show">标记未到访</button>` : '';
+        return `<p class="task"><b>${esc(appointment.studentId || '学生')}</b> · ${esc(appointmentStateLabel[appointment.state] || appointment.state)}<br>${esc(formatWhen(appointment.startsAt))}–${esc(formatWhen(appointment.endsAt))} · ${esc(appointment.counselorName)}${appointment.room ? ` · ${esc(appointment.room)}` : ''}<br>${actions}</p>`;
+      }).join('') : '<p class="muted">暂无预约</p>';
+      document.querySelectorAll('[data-appointment-id]').forEach((button) => { button.onclick = () => updateAppointment(button.dataset.appointmentId, button.dataset.appointmentState); });
+    }
+    async function updateSlot(slotId, status) {
+      try {
+        const response = await fetch('/v1/availability-slots/' + encodeURIComponent(slotId) + '/state', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ status }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '排班更新失败');
+        setStatus(status === 'blocked' ? '排班已停用' : '排班已重新开放');
+        await load();
+      } catch (error) { setStatus(error.message); }
+    }
+    async function updateAppointment(appointmentId, state) {
+      try {
+        const response = await fetch('/v1/appointments/' + encodeURIComponent(appointmentId) + '/state', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ state }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '预约状态更新失败');
+        setStatus('预约状态已更新');
+        await load();
       } catch (error) { setStatus(error.message); }
     }
 
@@ -99,6 +150,18 @@
         const result = await response.json();
         setStatus(response.ok ? '已创建草稿' : result.error?.message || '创建失败');
         if (response.ok) await load();
+      } catch (error) { setStatus(error.message); }
+    };
+
+    $('#slotForm').onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        const form = Object.fromEntries(new FormData(event.target));
+        const response = await fetch('/v1/availability-slots', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ counselorId: form.counselorId, startsAt: new Date(form.startsAt).toISOString(), endsAt: new Date(form.endsAt).toISOString(), room: form.room || undefined }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '排班创建失败');
+        setStatus('排班已创建');
+        await load();
       } catch (error) { setStatus(error.message); }
     };
 

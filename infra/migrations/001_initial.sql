@@ -366,10 +366,13 @@ create table if not exists availability_slots (
 );
 create table if not exists appointments (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null,
-  counselor_id uuid not null, slot_id uuid not null, state text not null, note_ciphertext text, created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  counselor_id uuid not null, slot_id uuid not null, state text not null, note_ciphertext text, idempotency_key text, idempotency_hash text, created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
   foreign key (tenant_id, student_id) references students(tenant_id, id), foreign key (tenant_id, slot_id) references availability_slots(tenant_id, id)
 );
+alter table appointments add column if not exists idempotency_key text;
+alter table appointments add column if not exists idempotency_hash text;
 create unique index if not exists active_appointment_slot on appointments(tenant_id, slot_id) where state in ('requested','confirmed');
+create unique index if not exists appointments_idempotency_key_unique on appointments(tenant_id, student_id, idempotency_key) where idempotency_key is not null;
 create table if not exists media_assets (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), filename text not null,
   media_type text not null, kind text not null check (kind in ('image','audio','video','subtitle')), byte_size integer not null check (byte_size > 0 and byte_size <= 1500000),

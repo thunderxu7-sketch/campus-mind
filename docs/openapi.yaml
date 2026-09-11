@@ -95,6 +95,21 @@ paths:
     get: {summary: Whitelisted aggregate analytics with suppression, responses: {'200': {description: Aggregate rows}}}
   /v1/exports/{jobId}/download:
     get: {summary: Re-authorize and download an approved export, parameters: [{$ref: '#/components/parameters/jobId'}], responses: {'200': {description: Export payload}, '403': {description: Scope or approval failure}, '410': {description: Expired export or revoked source report; encrypted payload is cleared}}}
+  /v1/availability-slots:
+    get: {summary: List future counselling windows scoped to the student or appointment manager, responses: {'200': {description: Available or operational slots}, '403': {description: Appointment permission required}}}
+    post: {summary: Create a non-overlapping counselling availability window, responses: {'201': {description: Availability slot}, '403': {description: Appointment management permission required}, '409': {description: Counselor or room conflict}}}
+  /v1/availability-slots/{slotId}/state:
+    post: {summary: Block or reopen an unheld counselling window, parameters: [{$ref: '#/components/parameters/slotId'}], responses: {'200': {description: Updated slot}, '409': {description: Slot already has an active booking}}}
+  /v1/appointments:
+    get: {summary: List own or scoped appointment metadata without notes, responses: {'200': {description: Appointment list}, '403': {description: Appointment permission required}}}
+    post:
+      summary: Request a counselling appointment with an optional idempotency key
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [slotId], properties: {slotId: {type: string}, note: {type: string, maxLength: 1000, writeOnly: true}, idempotencyKey: {type: string, maxLength: 128}}}}}
+      responses: {'201': {description: Booking receipt without encrypted note}, '409': {description: Slot unavailable or idempotency conflict}}
+  /v1/appointments/{appointmentId}/state:
+    post: {summary: Cancel own appointment or update a scoped operational state, parameters: [{$ref: '#/components/parameters/appointmentId'}], responses: {'200': {description: Updated appointment}, '403': {description: Scope or role failure}}}
   /v1/content/public:
     get:
       security: []
@@ -131,6 +146,8 @@ components:
     requestId: {name: requestId, in: path, required: true, schema: {type: string}}
     userId: {name: userId, in: path, required: true, schema: {type: string}}
     contentId: {name: contentId, in: path, required: true, schema: {type: string}}
+    slotId: {name: slotId, in: path, required: true, schema: {type: string}}
+    appointmentId: {name: appointmentId, in: path, required: true, schema: {type: string}}
   schemas:
     Login:
       type: object
