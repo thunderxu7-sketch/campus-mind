@@ -74,6 +74,7 @@ function purgeStudentData(state: DatabaseState, tenantId: string, studentId: str
   const deletedUser = state.users.find((user) => user.tenantId === tenantId && user.id === studentId && user.role === 'student');
   if (deletedUser) { deletedUser.active = false; deletedUser.displayName = '已删除'; deletedUser.email = `deleted+${deletedUser.id}@invalid.local`; deletedUser.schoolId = undefined; }
   state.sessions = state.sessions.filter((session) => !(session.tenantId === tenantId && session.userId === studentId));
+  state.studentAccessCredentials = state.studentAccessCredentials.filter((credential) => !(credential.tenantId === tenantId && credential.studentId === studentId));
   state.guardianLinks = state.guardianLinks.filter((link) => !(link.tenantId === tenantId && link.studentId === studentId));
   state.assignments = state.assignments.filter((assignment) => !(assignment.tenantId === tenantId && assignment.studentId === studentId));
   state.frequencyReservations = state.frequencyReservations.filter((reservation) => !(reservation.tenantId === tenantId && reservation.studentId === studentId));

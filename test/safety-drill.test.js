@@ -45,6 +45,7 @@ test('delete rights workflow removes sensitive derivatives and leaves a minimal 
   const studentAuth = authFor(store.snapshot(), 'student-demo');
   const privacyAuth = authFor(store.snapshot(), 'user-privacy-demo');
   await store.transaction((state) => {
+    state.studentAccessCredentials.push({ id: 'delete-credential-drill', tenantId: 'tenant-demo', studentId: 'student-demo', codeHash: 'synthetic-code-hash', expiresAt: new Date(Date.now() + 60_000).toISOString(), issuedBy: 'user-admin-demo', createdAt: new Date().toISOString() });
     state.importBatches.push({ id: 'expired-import-drill', tenantId: 'tenant-demo', schoolId: 'school-demo', createdBy: 'user-admin-demo', filename: 'synthetic.csv', status: 'previewed', mappingVersion: 1, rowCount: 1, validRowCount: 1, errorCount: 0, previewHash: 'synthetic-hash', createdAt: '2020-01-01T00:00:00.000Z' });
     state.importRows.push({ id: 'expired-import-row-drill', tenantId: 'tenant-demo', batchId: 'expired-import-drill', rowNumber: 1, status: 'valid' });
     state.exportJobs.push({ id: 'student-export-drill', tenantId: 'tenant-demo', requestedBy: 'student-demo', kind: 'report', studentId: 'student-demo', status: 'ready', expiresAt: new Date(Date.now() + 60_000).toISOString(), payloadCiphertext: 'synthetic-ciphertext', createdAt: new Date().toISOString() });
@@ -74,6 +75,7 @@ test('delete rights workflow removes sensitive derivatives and leaves a minimal 
   assert.equal(state.frequencyReservations.some((reservation) => reservation.studentId === 'student-demo'), false);
   assert.equal(state.guardianLinks.some((link) => link.studentId === 'student-demo'), false);
   assert.equal(state.users.find((user) => user.id === 'student-demo').active, false);
+  assert.equal(state.studentAccessCredentials.some((credential) => credential.studentId === 'student-demo'), false);
   assert.equal(state.campaigns.every((campaign) => !campaign.participantStudentIds.includes('student-demo')), true);
   assert.equal(state.outboxEvents.some((event) => event.type === 'risk.triage'), false);
   assert.equal(state.outboxEvents.some((event) => event.type === 'risk.escalation'), false);
