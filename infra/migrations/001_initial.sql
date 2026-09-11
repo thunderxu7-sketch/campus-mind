@@ -464,6 +464,11 @@ exception when duplicate_object then null;
 end $$;
 do $$
 begin
+  alter table export_jobs add constraint export_jobs_purpose_check check (char_length(btrim(purpose)) between 1 and 120 and purpose !~ E'[\\r\\n]');
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
   alter table availability_slots add constraint availability_slots_status_check check (status in ('available','held','blocked'));
 exception when duplicate_object then null;
 end $$;
