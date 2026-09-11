@@ -312,6 +312,10 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   assert.equal(mediaBytes.status, 200);
   assert.equal(mediaBytes.headers.get('content-type'), 'image/png');
   assert.equal((await mediaBytes.arrayBuffer()).byteLength > 8, true);
+  const retiredMedia = await request(`/v1/content/${mediaContent.body.data.id}/retire`, { method: 'POST', headers: auth(professional), body: '{}' });
+  assert.equal(retiredMedia.response.status, 200);
+  const hiddenMedia = await fetch(`${base}/v1/content/public/${media.body.data.id}/media`);
+  assert.equal(hiddenMedia.status, 404);
 });
 
 
