@@ -41,6 +41,38 @@ test('outbox failures leave a redacted delivery attempt and a retryable dead let
   assert.doesNotMatch(state.deliveryAttempts.find((attempt) => attempt.outboxEventId === 'broken-scoring-event').errorCode, /missing-attempt/);
 });
 
+test('notification provider failures remain retryable and never claim delivery', async () => {
+  let calls = 0;
+  const store = new JsonStore({
+    initial: seedDemoState(),
+    notificationDispatcher: {
+      async deliver(input) {
+        calls += 1;
+        assert.equal(input.eventType, 'risk.signal_created');
+        assert.equal(input.priority, 'urgent');
+        return calls === 1 ? { status: 'failed', provider: 'synthetic-notifier', errorCode: 'PROVIDER_OFFLINE' } : { status: 'sent', provider: 'synthetic-notifier' };
+      },
+    },
+  });
+  const studentAuth = authFor(store.snapshot(), 'student-demo');
+  const riskCase = await createRiskSignal(store, studentAuth, { studentId: 'student-demo', level: 'urgent', reason: '合成演示：通知失败重试' });
+  const first = await drainOutbox(store, 1);
+  assert.deepEqual(first, { processed: 0, failed: 1 });
+  assert.equal(store.snapshot().deliveryAttempts.some((attempt) => attempt.outboxEventId && attempt.status === 'sent'), false);
+  await store.transaction((state) => {
+    const event = state.outboxEvents.find((candidate) => candidate.type === 'risk.signal_created' && candidate.aggregateId === riskCase.id);
+    assert.ok(event);
+    event.availableAt = new Date().toISOString();
+  });
+  const second = await drainOutbox(store, 1);
+  assert.deepEqual(second, { processed: 1, failed: 0 });
+  const state = store.snapshot();
+  assert.equal(calls, 2);
+  assert.equal(state.deliveryAttempts.filter((attempt) => attempt.status === 'failed').length, 1);
+  assert.equal(state.deliveryAttempts.filter((attempt) => attempt.status === 'sent').length, 1);
+  assert.equal(state.riskCases.find((candidate) => candidate.id === riskCase.id).state, 'pending_review');
+});
+
 test('delete rights workflow removes sensitive derivatives and leaves a minimal tombstone', async () => {
   const store = new JsonStore({ initial: seedDemoState() });
   const studentAuth = authFor(store.snapshot(), 'student-demo');

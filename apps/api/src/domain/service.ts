@@ -652,7 +652,7 @@ function upsertScoreRuleSignal(state: DatabaseState, input: { tenantId: string; 
 }
 
 async function processOutboxEvent(store: Store, eventId: string): Promise<void> {
-  await store.transaction((state) => {
+  await store.transaction(async (state) => {
     const event = state.outboxEvents.find((candidate) => candidate.id === eventId && candidate.status === 'pending');
     if (!event) return;
     if (event.type === 'assessment.submitted') {
@@ -696,8 +696,24 @@ async function processOutboxEvent(store: Store, eventId: string): Promise<void> 
     }
     if (event.type === 'risk.signal_created' || event.type === 'risk.escalation') {
       if (event.type === 'risk.escalation' && !state.riskCases.some((riskCase) => riskCase.tenantId === event.tenantId && riskCase.id === event.aggregateId)) throw new Error('ESCALATION_REFERENCE_MISSING');
-      const existingDelivery = state.deliveryAttempts.find((attempt) => attempt.tenantId === event.tenantId && attempt.outboxEventId === event.id && attempt.channel === 'in_app');
+      // A failed delivery is evidence to retry, not a successful idempotency
+      // marker. Only a committed `sent` record suppresses another provider
+      // call for this event ID.
+      const existingDelivery = state.deliveryAttempts.find((attempt) => attempt.tenantId === event.tenantId && attempt.outboxEventId === event.id && attempt.channel === 'in_app' && attempt.status === 'sent');
       if (!existingDelivery) {
+        const priority = event.payload.level === 'urgent' || state.riskCases.find((riskCase) => riskCase.tenantId === event.tenantId && riskCase.id === event.aggregateId)?.priority === 'urgent' ? 'urgent' : 'attention';
+        const dispatcher = store.notificationDispatcher;
+        let delivery: { status: 'sent' | 'failed'; provider: string; errorCode?: string };
+        try {
+          delivery = dispatcher ? await dispatcher.deliver({ eventId: event.id, tenantId: event.tenantId, eventType: event.type, aggregateId: event.aggregateId, priority }) : { status: 'sent', provider: 'local-reference' };
+        } catch {
+          throw new Error('NOTIFICATION_PROVIDER_UNAVAILABLE');
+        }
+        if (!delivery || !['sent', 'failed'].includes(delivery.status) || typeof delivery.provider !== 'string' || !delivery.provider.trim()) throw new Error('NOTIFICATION_PROVIDER_INVALID');
+        if (delivery.status === 'failed') {
+          const providerCode = typeof delivery.errorCode === 'string' && /^[A-Z][A-Z0-9_:-]{0,63}$/.test(delivery.errorCode) ? delivery.errorCode : 'NOTIFICATION_DELIVERY_FAILED';
+          throw new Error(providerCode);
+        }
         state.deliveryAttempts.push({ id: id(), tenantId: event.tenantId, outboxEventId: event.id, channel: 'in_app', status: 'sent', attemptedAt: now() });
       }
     }

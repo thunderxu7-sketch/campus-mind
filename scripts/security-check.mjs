@@ -39,6 +39,7 @@ const requiredSnippets = [
   [crypto, 'CAMPMIND_DEMO_MFA', 'production MFA guard'],
   [store, 'assertProductionStoreInjection', 'production adapter guard'],
   [store, 'objectStore', 'private object-store boundary'],
+  [store, 'notificationDispatcher', 'provider-backed notification boundary'],
   [objectStore, 'aes-256-gcm', 'encrypted private object store'],
   [objectStore, 'OBJECT_KEY_INVALID', 'object-key traversal guard'],
   [scoring, 'SYNTHETIC_SCALE_BLOCKED', 'synthetic scale production guard'],

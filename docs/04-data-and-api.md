@@ -110,4 +110,4 @@ erDiagram
 
 事件 envelope：`eventId`、`tenantId`、`type`、`aggregateId`、`aggregateVersion`、`occurredAt`、`schemaVersion`、`traceId`。正文只传必要引用，不传完整答案或咨询记录。
 
-关键事件：`assessment.submitted`、`risk.triage`、`score.completed`、`score.failed`、`risk.signal_created`、`risk.acknowledgement_overdue`、`report.released`、`consent.withdrawn`、`access.revoked`、`export.expired`。Worker 消费时再次验证状态与权限，重复消息不得产生重复个案/重复下载能力；规则线索通过 submission 引用与计分结果关联。
+关键事件：`assessment.submitted`、`risk.triage`、`score.completed`、`score.failed`、`risk.signal_created`、`risk.acknowledgement_overdue`、`report.released`、`consent.withdrawn`、`access.revoked`、`export.expired`。Worker 消费时再次验证状态与权限，重复消息不得产生重复个案/重复下载能力；风险提醒经 `NotificationDispatcher` 投递并以 `eventId` 幂等，供应商失败保持可重试/死信；规则线索通过 submission 引用与计分结果关联。

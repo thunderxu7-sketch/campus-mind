@@ -85,7 +85,7 @@ infra/                # 环境模板与运行手册（后续）
 - 答卷提交、提交版本、业务事件 outbox 同事务写入；幂等键按租户/学生/操作隔离，并校验相同键的内容指纹。
 - 风险明确关注项在提交路径建立独立高优先级事件；普通计分/报告生成不阻塞求助、接单与升级。数据库不可写时不能显示“已提交”，并指向人工支持。
 - Worker 至少一次消费，使用业务唯一键防重复计分、重复报告、重复个案；成功后确认。指数退避与死信队列必须可见、可人工补偿。
-- outbox 未投递和通知未接单两类监控分别建设；Redis 数据丢失可由数据库重新投递，不假定消息不会丢失。
+- outbox 未投递和通知未接单两类监控分别建设；Redis 数据丢失可由数据库重新投递，不假定消息不会丢失。`NotificationDispatcher` 使用 outbox event ID 作为供应商幂等键；供应商失败不会写入“已发送”，而是按退避重试并在达到上限后进入死信。
 - 新计分引擎上线不能重写历史结果；重算生成新版本和差异记录，由专业人员审核对个案的影响。
 - 导出按“申请 → 审批 → 执行 → 下载时再鉴权 → 到期销毁”处理；权限撤销后任务取消且产物失效。
 - `export` 私有桶不对公网匿名开放；短时链接也可能被转发。高敏报告优先经鉴权下载代理即时校验，其他链接严格短 TTL 且可撤销。
@@ -110,4 +110,4 @@ TLS、HttpOnly/Secure 会话 Cookie、CSRF 防护、短会话与撤销、管理�
 
 仓库当前实现了一个 Node 20+ 合成数据参考服务：`JsonStore` 以加密 JSON 演示事务与恢复行为，领域服务依赖抽象 `Store` 合约，API 使用 bearer session，静态页面验证学生/工作人员路径，Worker 处理 outbox。它用于开发和验收业务不变量，不是可直接上线的数据库/身份/通知基础设施。
 
-生产替换至少包括：PostgreSQL 迁移 + 真实事务与 RLS 验证、校方 SSO/MFA、KMS 管理密钥、私有对象存储、provider-backed 媒体恶意文件扫描、获批准的国内通知通道、备份/删除重放和外部合规/专业评审。参考服务提供 `PrivateObjectStore` 合约及 `EncryptedFileObjectStore` 合成适配器：对象按租户派生密钥加密、哈希寻址、限额、启动时清理遗留临时文件和 0600 临时文件；它不能替代生产私有桶/KMS。`Store.mediaScanner` 合约要求上传在入库前得到带 provider 标识的 clean/rejected 裁决；没有适配器或扫描失败时不标记为 clean。字段加密支持短期 `CAMPMIND_PREVIOUS_MASTER_KEYS` 解密旧包、使用当前 `CAMPMIND_MASTER_KEY` 写新包；对象适配器的 `reencrypt()` 也会把旧包迁移到当前密钥；轮换完成后必须移除旧密钥并由受控任务验证覆盖率，不能把旧密钥写入备份或日志。 频次例外和权利请求说明在迁移层使用 `reason_ciphertext`，早期草稿中的明文 `reason` 只能由受控密钥轮换任务迁移后删除，应用新写入不再使用该列。生产入口在 `NODE_ENV=production` 下要求专用 `CAMPMIND_MASTER_KEY`、`CAMPMIND_DATA_BACKEND=postgres`，注入的 Store 还必须携带私有对象存储和媒体扫描适配器，并拒绝 `CAMPMIND_DEMO_MFA=true`；默认入口还会拒绝未注入的 `JsonStore`，防止把本地文件误作生产数据库。演示密码与 `synthetic_only` 量表只允许本地/CI，部署流水线必须继续拒绝这些配置。
+生产替换至少包括：PostgreSQL 迁移 + 真实事务与 RLS 验证、校方 SSO/MFA、KMS 管理密钥、私有对象存储、provider-backed 媒体恶意文件扫描、获批准的国内通知通道、备份/删除重放和外部合规/专业评审。参考服务提供 `PrivateObjectStore` 合约及 `EncryptedFileObjectStore` 合成适配器：对象按租户派生密钥加密、哈希寻址、限额、启动时清理遗留临时文件和 0600 临时文件；它不能替代生产私有桶/KMS。`Store.mediaScanner` 合约要求上传在入库前得到带 provider 标识的 clean/rejected 裁决；没有适配器或扫描失败时不标记为 clean。`Store.notificationDispatcher` 合约要求风险提醒通过批准的通知供应商发送，使用 outbox event ID 幂等；供应商故障时保持待投递并可进入死信。本地默认实现只用于合成演示，不能作为生产通知能力。字段加密支持短期 `CAMPMIND_PREVIOUS_MASTER_KEYS` 解密旧包、使用当前 `CAMPMIND_MASTER_KEY` 写新包；对象适配器的 `reencrypt()` 也会把旧包迁移到当前密钥；轮换完成后必须移除旧密钥并由受控任务验证覆盖率，不能把旧密钥写入备份或日志。 频次例外和权利请求说明在迁移层使用 `reason_ciphertext`，早期草稿中的明文 `reason` 只能由受控密钥轮换任务迁移后删除，应用新写入不再使用该列。生产入口在 `NODE_ENV=production` 下要求专用 `CAMPMIND_MASTER_KEY`、`CAMPMIND_DATA_BACKEND=postgres`，注入的 Store 还必须携带私有对象存储、媒体扫描和通知适配器，并拒绝 `CAMPMIND_DEMO_MFA=true`；默认入口还会拒绝未注入的 `JsonStore`，防止把本地文件误作生产数据库。演示密码与 `synthetic_only` 量表只允许本地/CI，部署流水线必须继续拒绝这些配置。

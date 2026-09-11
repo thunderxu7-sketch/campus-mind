@@ -15,12 +15,12 @@
 
 | 证据 ID | 覆盖范围 | 可复现入口 | 当前状态 |
 |---|---|---|---|
-| E-REF-TEST | API、权限、同意、适龄/任务可用性、频次及答题窗口复核、危机闭环、内容草稿权限与密文隔离、媒体、provider-backed 媒体扫描裁决、会话撤销/过期、审计、字段/对象密钥轮换、登录限流、导出用途/水印、撤回报告后的导出失效、专业结案申请人与审批人分离、权利请求拒绝理由和结果隔离、授权到期阻断、量表目录元数据与适用性筛选、预约排班范围/占用保护/幂等重试、学生反馈与主体权利申请列表和撤回/到期量表不可用性 | `npm test`（51 项 Node 测试） | `verified` |
+| E-REF-TEST | API、权限、同意、适龄/任务可用性、频次及答题窗口复核、危机闭环、内容草稿权限与密文隔离、媒体、provider-backed 媒体扫描裁决、provider-backed 通知失败重试、会话撤销/过期、审计、字段/对象密钥轮换、登录限流、导出用途/水印、撤回报告后的导出失效、专业结案申请人与审批人分离、权利请求拒绝理由和结果隔离、授权到期阻断、量表目录元数据与适用性筛选、预约排班范围/占用保护/幂等重试、学生反馈与主体权利申请列表和撤回/到期量表不可用性 | `npm test`（52 项 Node 测试） | `verified` |
 | E-REF-SEC | 凭据模式、生产后端/演示 MFA、CSP、请求体和私有对象边界 | `npm run security:check` | `verified` |
 | E-REF-PLAN | 48 项任务、依赖 DAG、生成任务清单同步 | `python3 scripts/check_plan.py` | `verified` |
 | E-PG-MIGRATION | 36 张表、36 个 `FORCE RLS`、36 个策略、关键跨租户外键、应用角色无 `SUPERUSER/BYPASSRLS`，合成双租户串引用被拒绝，审计 UPDATE/DELETE 触发追加写保护 | CI PostgreSQL 16 步骤；本地 `infra/migrations/001_initial.sql` | `verified`（参考迁移） |
 | E-REF-RECOVERY | 加密 JSON/私有对象复制、恢复和临时文件清理 | `npm run drill:recovery` | `verified`（本地合成） |
-| E-REF-CRISIS | 加急线索投递、未接单升级、人工复核/结案、死信隔离与修复 | `npm run drill:crisis` | `verified`（本地合成） |
+| E-REF-CRISIS | 加急线索投递、未接单升级、provider-backed 通知失败/重试、人工复核/结案、死信隔离与修复 | `npm run drill:crisis`、`npm test` | `verified`（本地合成） |
 | E-REF-KEY-ROTATION | 字段/对象旧密钥读取、当前密钥重加密、旧密钥移除后的拒绝 | `npm run drill:key-rotation` | `verified`（本地合成） |
 | E-REF-CAPACITY | 受限并发请求 p50/p95、错误率 | `npm run drill:capacity` | `verified`（本机基线） |
 | E-RELEASE-GATE | 生产环境配置和外部证据缺失时阻断发布 | `CAMPMIND_RELEASE_MODE=production npm run release:check` | `verified`（应阻断） |
@@ -34,7 +34,7 @@
 | CM-001 / CM-005 | 首校范围、数据责任、容量/RPO/RTO、需求差异和威胁模型签字 | 产品、校方、技术、安全 | _待填写_ | `unverified` |
 | CM-002 / CM-014 / CM-016 / CM-046 | 权利许可、数字化范围、适龄/常模、计分金标准、专业审批和撤销处置 | 专业负责人、权利负责人 | _待填写_ | `unverified` |
 | CM-003 / CM-013 / CM-036 | 处理依据、告知/同意、监护核验、保留/删除和权利流程 | 隐私/法律、校方 | _待填写_ | `unverified` |
-| CM-004 / CM-026 / CM-028 / CM-030 / CM-032 | 值班/备用/升级、转介回执、夜间/失联演练、独立结案者 | 专业负责人、校方 | _待填写_ | `unverified` |
+| CM-004 / CM-026 / CM-028 / CM-030 / CM-032 | 值班/备用/升级、转介回执、通知供应商补偿（生产还需 `CAMPMIND_NOTIFICATION_ADAPTER_READY=true`）、夜间/失联演练、独立结案者 | 专业负责人、校方 | _待填写_ | `unverified` |
 | CM-007 / CM-008 / CM-010 / CM-011 | 真实 PostgreSQL Store、SSO/MFA、KMS、私有桶、审计和连接池演练 | 后端、运维、安全 | _待填写_ | `unverified` |
 | CM-038 / CM-039 | 目标环境容量、备份恢复、删除重放、安全评审和影响评估 | 运维、安全、隐私/法律 | _待填写_ | `unverified` |
 | CM-040 | 校方试点人数/窗口/停止条件、人工接管和共同签署 | 校方、产品、专业、隐私 | _待填写_ | `unverified` |
