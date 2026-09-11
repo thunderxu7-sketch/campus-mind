@@ -49,6 +49,7 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm run drill:capacity
+      - run: npm run drill:recovery
       - run: npm audit --omit=dev --audit-level=high
       - run: node scripts/security-check.mjs
       - run: npm run release:check
