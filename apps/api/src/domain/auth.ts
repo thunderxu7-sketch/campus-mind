@@ -109,6 +109,24 @@ export async function loginWithStudentAccessCode(store: Store, code: string): Pr
   });
 }
 
+/** Revoke every active session for a scoped user during offboarding or a
+ * shared-terminal incident. The target is checked in the same tenant/school
+ * boundary as the issuer. */
+export async function revokeUserSessions(store: Store, auth: AuthenticatedUser, targetUserId: string): Promise<{ revoked: number }> {
+  if (!can(auth.user, 'org:manage')) throw forbidden();
+  if (typeof targetUserId !== 'string' || !targetUserId.trim()) throw new DomainError('SESSION_REVOKE_INVALID', '会话撤销对象无效');
+  return store.transaction((state) => {
+    const target = state.users.find((candidate) => candidate.id === targetUserId && candidate.tenantId === auth.user.tenantId && candidate.active);
+    if (!target || (auth.user.schoolId && target.schoolId !== auth.user.schoolId)) throw new DomainError('SESSION_REVOKE_INVALID', '会话撤销对象无效', 404);
+    const revokedAt = new Date().toISOString();
+    let revoked = 0;
+    for (const session of state.sessions.filter((candidate) => candidate.tenantId === auth.user.tenantId && candidate.userId === target.id && !candidate.revokedAt)) { session.revokedAt = revokedAt; revoked += 1; }
+    for (const credential of state.studentAccessCredentials.filter((candidate) => candidate.tenantId === auth.user.tenantId && candidate.studentId === target.id && !candidate.usedAt)) credential.usedAt = revokedAt;
+    state.auditEvents.push({ id: randomUUID(), tenantId: auth.user.tenantId, actorId: auth.user.id, action: 'session.revoked', objectType: 'user', objectId: target.id, purpose: 'security', metadata: { revoked }, createdAt: revokedAt });
+    return { revoked };
+  });
+}
+
 export async function authenticate(store: Store, authorization: string | undefined): Promise<AuthenticatedUser> {
   if (!authorization?.startsWith('Bearer ')) throw unauthorized();
   const token = authorization.slice('Bearer '.length).trim();

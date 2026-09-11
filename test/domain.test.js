@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { approveFrequencyException, approveScale, beginAttempt, createCampaign, createScale, createSelfScreening, publishCampaign, revokeScale, saveAnswers, updateCampaignState, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
 import { JsonStore } from '../dist/apps/api/src/domain/store.js';
-import { seedDemoState } from '../dist/apps/api/src/domain/seed.js';
+import { DEMO_IDS, seedDemoState } from '../dist/apps/api/src/domain/seed.js';
 
 function authFor(state, userId) {
   const user = state.users.find((candidate) => candidate.id === userId);
@@ -77,6 +77,15 @@ test('closing an unfinished campaign expires drafts and releases unused frequenc
   await updateCampaignState(store, admin, campaign.id, 'closed');
   assert.equal(store.snapshot().assignments[0].status, 'expired');
   assert.equal(store.snapshot().frequencyReservations[0].status, 'released');
+});
+
+test('declined or completed assignments cannot be reopened after their session is closed', async () => {
+  const store = new JsonStore({ initial: seedDemoState() });
+  const student = await store.read((state) => state.users.find((user) => user.id === DEMO_IDS.student));
+  assert.ok(student);
+  const auth = { user: student, session: { tokenHash: 'synthetic', userId: student.id, tenantId: student.tenantId, expiresAt: new Date(Date.now() + 60_000).toISOString(), createdAt: new Date().toISOString() } };
+  await store.transaction((state) => { state.assignments.find((assignment) => assignment.id === DEMO_IDS.assignment).status = 'declined'; });
+  await assert.rejects(() => beginAttempt(store, auth, DEMO_IDS.assignment), (error) => error.code === 'ASSIGNMENT_NOT_AVAILABLE');
 });
 
 test('revoking a scale blocks new use without changing historical identifiers', async () => {

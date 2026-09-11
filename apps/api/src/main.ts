@@ -4,8 +4,8 @@ import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseXlsxBase64 } from './domain/spreadsheet.js';
-import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveFrequencyException, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, campaignProgress, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createGuardianLink, createMediaAsset, createProfileSchema, createRiskSignal, createScale, createSelfScreening, currentUser, downloadRightsResult, escalateUnacknowledged, getAttempt, getStudentArchive, listAvailableScales, operationalStatus, processRetention, regionalAnalytics, requeueDeadLetters, submitProfileResponse, drainOutbox, downloadExport, getAnalytics, listCases, listCampaigns, listMyTasks, listPublicContent, listReports, listScaleCatalog, listStudents, listRightsRequests, parseCsv, previewImport, publishCampaign, readPublicMedia, requestAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, updateCampaignState, revokeReport, revokeScale, verifyGuardianLink, withdrawConsent, completeRightsRequest, createRightsRequest } from './domain/service.js';
-import { authenticate, issueStudentAccessCode, login as loginUser, loginWithStudentAccessCode, logout, requirePermission } from './domain/auth.js';
+import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveFrequencyException, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, campaignProgress, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createGuardianLink, createMediaAsset, createProfileSchema, createRiskSignal, createScale, createSelfScreening, currentUser, downloadRightsResult, escalateUnacknowledged, getAttempt, getStudentArchive, listAuditEvents, listAvailableScales, operationalStatus, processRetention, regionalAnalytics, requeueDeadLetters, submitProfileResponse, drainOutbox, downloadExport, getAnalytics, listCases, listCampaigns, listMyTasks, listPublicContent, listReports, listScaleCatalog, listStudents, listRightsRequests, parseCsv, previewImport, publishCampaign, readPublicMedia, requestAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, updateCampaignState, revokeReport, revokeScale, verifyGuardianLink, withdrawConsent, completeRightsRequest, createRightsRequest, retireContent } from './domain/service.js';
+import { authenticate, issueStudentAccessCode, login as loginUser, loginWithStudentAccessCode, logout, requirePermission, revokeUserSessions } from './domain/auth.js';
 import { assertProductionConfig } from './domain/crypto.js';
 import { DomainError } from './domain/errors.js';
 import { assertProductionStoreInjection, JsonStore } from './domain/store.js';
@@ -19,6 +19,30 @@ const DATA_FILE = process.env.CAMPMIND_DATA_FILE ?? resolve(process.cwd(), 'priv
 const OBJECTS_DIR = process.env.CAMPMIND_OBJECTS_DIR ?? resolve(process.cwd(), 'private-data/objects');
 const MAX_BODY_BYTES = 3_000_000;
 const loginRate = new Map<string, { count: number; resetAt: number }>();
+const LOGIN_RATE_LIMIT = 20;
+const LOGIN_RATE_WINDOW_MS = 60_000;
+
+function enforceLoginRateLimit(req: IncomingMessage, res: ServerResponse): void {
+  const key = req.socket.remoteAddress ?? 'unknown';
+  const timestamp = Date.now();
+  let current = loginRate.get(key);
+  if (!current || current.resetAt <= timestamp) {
+    // Bound the in-process reference map so spoofed/short-lived client
+    // addresses cannot grow it without limit. A production edge should also
+    // enforce the same policy before the application receives the request.
+    if (loginRate.size > 10_000) for (const [address, entry] of loginRate) if (entry.resetAt <= timestamp) loginRate.delete(address);
+    current = { count: 0, resetAt: timestamp + LOGIN_RATE_WINDOW_MS };
+    loginRate.set(key, current);
+  }
+  current.count += 1;
+  res.setHeader('X-RateLimit-Limit', LOGIN_RATE_LIMIT);
+  res.setHeader('X-RateLimit-Remaining', Math.max(0, LOGIN_RATE_LIMIT - current.count));
+  res.setHeader('X-RateLimit-Reset', Math.ceil(current.resetAt / 1000));
+  if (current.count > LOGIN_RATE_LIMIT) {
+    res.setHeader('Retry-After', Math.max(1, Math.ceil((current.resetAt - timestamp) / 1000)));
+    throw new DomainError('RATE_LIMITED', '登录请求过于频繁，请稍后重试', 429);
+  }
+}
 
 function loadStore(): JsonStore {
   assertProductionStoreInjection();
@@ -115,9 +139,7 @@ export function createApp(options: AppOptions = {}) {
       const path = url.pathname.replace(/\/$/, '') || '/';
       enforceSameOrigin(req, method, url);
       if (method === 'POST' && path === '/v1/auth/login') {
-        const key = req.socket.remoteAddress ?? 'unknown'; const current = loginRate.get(key); const timestamp = Date.now();
-        if (!current || current.resetAt <= timestamp) loginRate.set(key, { count: 1, resetAt: timestamp + 60_000 });
-        else { current.count += 1; if (current.count > 20) throw new DomainError('RATE_LIMITED', '登录请求过于频繁，请稍后重试', 429); }
+        enforceLoginRateLimit(req, res);
       }
       if (method === 'GET' && path === '/health') { json(res, 200, { status: 'ok', service: 'campus-mind-api', version: '0.1.0', demo: process.env.NODE_ENV !== 'production' }); return; }
       if (method === 'GET' && (path === '/' || path === '/admin' || path === '/student')) { servePage(res, path); return; }
@@ -159,6 +181,10 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   if (method === 'POST' && path === '/v1/admin/student-credentials') {
     const result = await issueStudentAccessCode(store, auth, stringField(input, 'studentId'), input.ttlMinutes === undefined ? undefined : Number(input.ttlMinutes));
     json(res, 201, { data: { ...result, note: '凭证仅显示一次；请通过学校批准的线下渠道交给对应学生。' } }); return;
+  }
+  if (method === 'POST' && segments[1] === 'admin' && segments[2] === 'users' && segments[4] === 'sessions' && segments[5] === 'revoke') {
+    const result = await revokeUserSessions(store, auth, segments[3]!);
+    json(res, 200, { data: result }); return;
   }
   if (method === 'GET' && path === '/v1/admin/students') { json(res, 200, { data: await listStudents(store, auth) }); return; }
   if (method === 'GET' && path === '/v1/admin/campaigns') { json(res, 200, { data: await listCampaigns(store, auth) }); return; }
@@ -247,6 +273,7 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   if (method === 'POST' && path === '/v1/content') { const result = await createContent(store, auth, { title: stringField(input, 'title'), kind: (input.kind as 'article' | 'announcement' | 'media') ?? 'article', body: stringField(input, 'body'), ageMin: Number(input.ageMin), ageMax: Number(input.ageMax), copyrightSource: stringField(input, 'copyrightSource'), mediaAssetId: typeof input.mediaAssetId === 'string' ? input.mediaAssetId : undefined, altText: typeof input.altText === 'string' ? input.altText : undefined, captionText: typeof input.captionText === 'string' ? input.captionText : undefined }); json(res, 201, { data: { ...result, bodyCiphertext: undefined } }); return; }
   if (method === 'POST' && path === '/v1/media-assets') { const result = await createMediaAsset(store, auth, { filename: stringField(input, 'filename'), mediaType: stringField(input, 'mediaType'), base64: stringField(input, 'base64') }); json(res, 201, { data: { id: result.id, filename: result.filename, mediaType: result.mediaType, kind: result.kind, byteSize: result.byteSize, sha256: result.sha256, scanStatus: result.scanStatus, createdAt: result.createdAt } }); return; }
   if (method === 'POST' && segments[1] === 'content' && segments[3] === 'publish') { const result = await approveContent(store, auth, segments[2]!); json(res, 200, { data: { id: result.id, state: result.state, publishedAt: result.publishedAt } }); return; }
+  if (method === 'POST' && segments[1] === 'content' && segments[3] === 'retire') { const result = await retireContent(store, auth, segments[2]!); json(res, 200, { data: { id: result.id, state: result.state } }); return; }
   if (method === 'GET' && path === '/v1/admin/regional-analytics') { json(res, 200, { data: await regionalAnalytics(store, auth) }); return; }
   if (method === 'GET' && path === '/v1/admin/overview') { json(res, 200, { data: await adminOverview(store, auth) }); return; }
   if (method === 'GET' && path === '/v1/admin/operations/status') { json(res, 200, { data: await operationalStatus(store, auth) }); return; }
@@ -254,7 +281,7 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   if (method === 'POST' && path === '/v1/admin/operations/escalate') { const result = await escalateUnacknowledged(store, auth, { asOf: typeof input.asOf === 'string' ? input.asOf : undefined, thresholdMinutes: Number(input.thresholdMinutes) }); json(res, 200, { data: result }); return; }
   if (method === 'POST' && path === '/v1/admin/retention/run') { const result = await processRetention(store, auth, typeof input.asOf === 'string' ? input.asOf : undefined); json(res, 200, { data: result }); return; }
   if (method === 'POST' && path === '/v1/admin/worker/drain') { requirePermission(auth.user, 'system:metrics'); json(res, 200, { data: await drainOutbox(store) }); return; }
-  if (method === 'GET' && path === '/v1/admin/audit') { requirePermission(auth.user, 'audit:read'); const events = await store.read((state) => state.auditEvents.filter((event) => event.tenantId === auth.user.tenantId).map(({ metadata, ...event }) => ({ ...event, metadata }))); json(res, 200, { data: events.slice(-200) }); return; }
+  if (method === 'GET' && path === '/v1/admin/audit') { json(res, 200, { data: await listAuditEvents(store, auth, url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined) }); return; }
   throw new DomainError('NOT_FOUND', '资源不存在', 404);
 }
 

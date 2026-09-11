@@ -33,6 +33,8 @@ const scoring = readFileSync(join(root, 'apps/api/src/domain/scoring.ts'), 'utf8
 const requiredSnippets = [
   [crypto, "NODE_ENV !== 'production'", 'production key guard'],
   [crypto, 'CAMPMIND_MASTER_KEY', 'production key source'],
+  [crypto, 'masterKeyCandidates', 'bounded encryption key rotation'],
+  [crypto, 'CAMPMIND_PREVIOUS_MASTER_KEYS', 'legacy key rotation source'],
   [crypto, 'CAMPMIND_DATA_BACKEND !== \'postgres\'', 'production backend guard'],
   [crypto, 'CAMPMIND_DEMO_MFA', 'production MFA guard'],
   [store, 'assertProductionStoreInjection', 'production adapter guard'],

@@ -23,9 +23,14 @@ paths:
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/Login'}}}
-      responses: {'200': {description: Session}, '401': {description: Invalid credentials, spent credential or MFA required}}
+      responses: {'200': {description: Session}, '401': {description: Invalid credentials, spent credential or MFA required}, '429': {description: Login rate limit exceeded}}
   /v1/admin/student-credentials:
     post: {summary: Issue a one-time short-lived student terminal credential, responses: {'201': {description: Credential shown once}, '403': {description: Organization permission required}}}
+  /v1/admin/users/{userId}/sessions/revoke:
+    post:
+      summary: Revoke all active sessions and unspent terminal credentials for a scoped user
+      parameters: [{$ref: '#/components/parameters/userId'}]
+      responses: {'200': {description: Revocation count}, '403': {description: Organization permission required}, '404': {description: User outside the administrator scope}}
   /v1/auth/logout:
     post: {summary: Revoke current session, responses: {'204': {description: Revoked}}}
   /v1/guardian-links:
@@ -42,6 +47,8 @@ paths:
     post: {summary: Queue redacted reminders for unacknowledged cases, responses: {'200': {description: Escalation result}, '400': {description: Invalid approved interval}}}
   /v1/admin/retention/run:
     post: {summary: Expire derived exports and replay deletion tombstones, responses: {'200': {description: Retention result}, '403': {description: Operations permission required}}}
+  /v1/admin/audit:
+    get: {summary: Read a bounded metadata-only append-only audit view, responses: {'200': {description: Audit events without sensitive bodies}, '403': {description: Audit permission required}}}
   /v1/me:
     get: {summary: Current named user, responses: {'200': {description: User}}}
   /v1/me/tasks:
@@ -93,6 +100,11 @@ paths:
       security: []
       summary: Published age-filtered education content
       responses: {'200': {description: Public content}}
+  /v1/content/{contentId}/retire:
+    post:
+      summary: Retire a published education item and hide its public media
+      parameters: [{$ref: '#/components/parameters/contentId'}]
+      responses: {'200': {description: Retired content}, '403': {description: Professional approval permission required}}
   /v1/media-assets:
     post: {summary: Upload a bounded, type-checked education media asset to private storage, responses: {'201': {description: Clean asset metadata}, '413': {description: Asset too large}, '503': {description: Private object storage unavailable}}}
   /v1/content/public/{assetId}/media:
@@ -116,6 +128,8 @@ components:
     studentId: {name: studentId, in: path, required: true, schema: {type: string}}
     jobId: {name: jobId, in: path, required: true, schema: {type: string}}
     requestId: {name: requestId, in: path, required: true, schema: {type: string}}
+    userId: {name: userId, in: path, required: true, schema: {type: string}}
+    contentId: {name: contentId, in: path, required: true, schema: {type: string}}
   schemas:
     Login:
       type: object

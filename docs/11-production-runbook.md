@@ -7,7 +7,7 @@
 - [ ] 确认代码、数据库迁移、量表/计分/报告/风险规则版本与专业审批记录一一对应。
 - [ ] 在中国大陆数据平面建立独立数据库、对象存储、KMS、通知和日志账号；应用角色不拥有表，不具备 `BYPASSRLS`。
 - [ ] 设置专用 `CAMPMIND_MASTER_KEY`、`CAMPMIND_DATA_BACKEND=postgres`、`CAMPMIND_POSTGRES_ADAPTER_READY=true`、`CAMPMIND_OBJECT_STORE_ADAPTER_READY=true`、正式身份提供商、MFA、会话撤销和通知凭据；禁用 `CAMPMIND_DEMO_MFA`，拒绝 `synthetic_only` 量表。参考入口不会把 `JsonStore` 或本地文件对象存储静默当成生产基础设施。
-- [ ] 为字段加密和对象存储分别登记 KMS 密钥版本、轮换窗口、旧版本解密/重加密流程、失败回滚和访问审计；轮换演练通过后才能把适配器标记为 ready。
+- [ ] 为字段加密和对象存储分别登记 KMS 密钥版本、轮换窗口、旧版本解密/重加密流程、失败回滚和访问审计；参考代码可在轮换窗口用 `CAMPMIND_PREVIOUS_MASTER_KEYS` 解密旧字段并用当前密钥写新字段，验证 `reencrypt` 任务覆盖率后移除旧密钥；轮换演练通过后才能把适配器标记为 ready。
 - [ ] 由迁移身份执行 SQL；每次连接在事务中设置/清理 `app.tenant_id`，无上下文拒绝。使用两个租户合成样本验证 RLS、复合外键、Worker、导出和文件访问。
 - [ ] 执行依赖、密钥、容器、权限、文件上传、日志和网络边界检查；不把普通 `npm audit` 当成完整安全评估。
 - [ ] 完成个人信息保护影响评估、数据流/委托协议、保留与删除策略、权利处理、适用备案/等保/审计核查；法律结论由责任人签署。

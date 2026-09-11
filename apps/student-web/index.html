@@ -144,7 +144,13 @@
         setStatus('已登录');
         $('#tasks').hidden = false;
         const tasks = await api('/v1/me/tasks');
-        $('#taskList').innerHTML = tasks.length ? tasks.map((task) => `<div class="task"><b>${esc(task.name)}</b> · ${esc(task.status)}<br><span class="muted">${esc(task.scaleTitle || '')}</span><br><button type="button" data-id="${esc(task.id)}" aria-label="开始 ${esc(task.name)}">${task.attempt?.state === 'in_progress' ? '继续' : '开始'}</button></div>`).join('') : '<p class="muted">当前没有可完成的任务。</p>';
+        $('#taskList').innerHTML = tasks.length ? tasks.map((task) => {
+          const terminal = ['completed', 'declined', 'expired'].includes(task.status) || ['submitted', 'scoring_pending', 'scored', 'scoring_failed', 'invalid', 'withdrawn', 'expired'].includes(task.attempt?.state);
+          const available = !terminal && ['assigned', 'started'].includes(task.status) && ['open', 'scheduled'].includes(task.state);
+          const label = available ? (task.attempt?.state === 'in_progress' ? '继续' : '开始') : '暂不可用';
+          const statusText = terminal ? '该任务已结束，不能重复提交。' : available ? '' : '任务尚未开放或需要学校处理。';
+          return `<div class="task"><b>${esc(task.name)}</b> · ${esc(task.status)}<br><span class="muted">${esc(task.scaleTitle || '')}</span>${statusText ? `<br><span class="muted">${esc(statusText)}</span>` : ''}<br><button type="button" data-id="${esc(task.id)}" aria-label="${esc(label)} ${esc(task.name)}" ${available ? '' : 'disabled'}>${esc(label)}</button></div>`;
+        }).join('') : '<p class="muted">当前没有可完成的任务。</p>';
         document.querySelectorAll('[data-id]').forEach((button) => { button.onclick = () => start(button.dataset.id); });
       } catch (error) { setStatus(error.message); }
     };

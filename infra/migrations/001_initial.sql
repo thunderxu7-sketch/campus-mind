@@ -510,3 +510,120 @@ $$;
 drop trigger if exists assessment_plans_immutable on assessment_plans;
 create trigger assessment_plans_immutable before update on assessment_plans
 for each row execute function enforce_assessment_plan_immutability();
+
+-- Cross-entity references must carry the tenant key as well as the object ID.
+-- These constraints are declared after all tables exist so the migration can
+-- be re-run against an earlier draft that created the tables without the full
+-- relationship set.  A duplicate constraint is harmless on re-application;
+-- any existing cross-tenant rows still fail the migration and require an
+-- explicit data repair rather than silently weakening isolation.
+do $$
+begin
+  alter table audit_events add constraint audit_events_actor_fk foreign key (tenant_id, actor_id) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table assessment_plans add constraint assessment_plans_approved_by_fk foreign key (tenant_id, approved_by) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table campaigns add constraint campaigns_created_by_fk foreign key (tenant_id, created_by) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table frequency_reservations add constraint frequency_reservations_approved_by_fk foreign key (tenant_id, approved_by) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table guardian_links add constraint guardian_links_verified_by_fk foreign key (tenant_id, verified_by) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table answer_revisions add constraint answer_revisions_actor_fk foreign key (tenant_id, actor_id) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table reports add constraint reports_approved_by_fk foreign key (tenant_id, approved_by) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table risk_cases add constraint risk_cases_assigned_to_fk foreign key (tenant_id, assigned_to) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table risk_reviews add constraint risk_reviews_reviewer_fk foreign key (tenant_id, reviewer_id) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table case_acknowledgements add constraint case_acknowledgements_user_fk foreign key (tenant_id, user_id) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table follow_ups add constraint follow_ups_author_fk foreign key (tenant_id, author_id) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table rights_requests add constraint rights_requests_requester_fk foreign key (tenant_id, requester_id) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table export_jobs add constraint export_jobs_requested_by_fk foreign key (tenant_id, requested_by) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table export_jobs add constraint export_jobs_approved_by_fk foreign key (tenant_id, approved_by) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table availability_slots add constraint availability_slots_counselor_fk foreign key (tenant_id, counselor_id) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table appointments add constraint appointments_counselor_fk foreign key (tenant_id, counselor_id) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table media_assets add constraint media_assets_created_by_fk foreign key (tenant_id, created_by) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table content_items add constraint content_items_created_by_fk foreign key (tenant_id, created_by) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table content_items add constraint content_items_reviewed_by_fk foreign key (tenant_id, reviewed_by) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table profile_schemas add constraint profile_schemas_approved_by_fk foreign key (tenant_id, approved_by) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table attempts add constraint attempts_submission_fk foreign key (tenant_id, submission_id) references submissions(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table submissions add constraint submissions_answer_revision_fk foreign key (tenant_id, answer_revision_id) references answer_revisions(tenant_id, id);
+exception when duplicate_object then null;
+end $$;

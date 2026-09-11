@@ -25,7 +25,15 @@ type PublicRightsRequest = Omit<RightsRequest, 'resultCiphertext'> & { resultRea
 type PublicExportJob = Omit<ExportJob, 'payloadCiphertext'> & { ready: boolean };
 
 function audit(state: DatabaseState, actor: User | undefined, action: string, objectType: string, objectId: string, metadata: Record<string, string | number | boolean | null> = {}, purpose?: string, tenantIdOverride?: string): void {
-  state.auditEvents.push({ id: id(), tenantId: actor?.tenantId ?? tenantIdOverride ?? 'system', actorId: actor?.id, action, objectType, objectId, purpose, metadata, createdAt: now() });
+  const safeMetadata = Object.fromEntries(Object.entries(metadata).map(([key, value]) => {
+    // Free-text reasons/notes and credential-like fields do not belong in an
+    // audit envelope. Keep a bounded marker so the event remains useful
+    // without copying sensitive content into logs or APM indexes.
+    if (/password|token|secret|credential|code|note|reason|email|phone|name|body|answer/i.test(key)) return [key, typeof value === 'string' ? '[redacted]' : value];
+    if (typeof value === 'string') return [key, value.slice(0, 200)];
+    return [key, value];
+  })) as Record<string, string | number | boolean | null>;
+  state.auditEvents.push({ id: id(), tenantId: actor?.tenantId ?? tenantIdOverride ?? 'system', actorId: actor?.id, action, objectType, objectId, purpose, metadata: safeMetadata, createdAt: now() });
 }
 
 function studentFor(state: DatabaseState, user: User, studentId: string): Student {
@@ -396,6 +404,7 @@ export async function beginAttempt(store: Store, auth: AuthenticatedUser, assign
     assertUsableScale(scale);
     if (!activeConsent(state, student.id, 'assessment', auth.user.tenantId)) throw new DomainError('CONSENT_REQUIRED', '需要有效的测评参与记录');
     if (!ageAllowed(student, scale)) throw new DomainError('AGE_REVIEW_REQUIRED', '年龄不在该方案适用范围');
+    if (!['assigned', 'started'].includes(assignment.status)) throw new DomainError('ASSIGNMENT_NOT_AVAILABLE', '该任务已结束或不再接受答题', 409);
     const current = state.attempts.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.assignmentId === assignment.id);
     if (current) return { attempt: current, scale };
     const attempt: Attempt = { id: id(), tenantId: auth.user.tenantId, assignmentId: assignment.id, studentId: student.id, scaleVersionId: scale.id, state: 'in_progress', currentRevision: 0, startedAt: now() };
@@ -587,6 +596,8 @@ export async function getStudentArchive(store: Store, auth: AuthenticatedUser, s
   if (!isProfessional(auth.user)) throw forbidden();
   const normalizedPurpose = typeof purpose === 'string' ? purpose.trim().slice(0, 100) : '';
   if (!normalizedPurpose) throw new DomainError('PURPOSE_REQUIRED', '查看心理档案需要记录用途');
+  const allowedPurposes = new Set(['case_review', 'report_review', 'support_follow_up']);
+  if (!allowedPurposes.has(normalizedPurpose)) throw new DomainError('PURPOSE_INVALID', '查看心理档案的用途不在批准范围内');
   return store.transaction((state) => {
     if (!professionalCanReadStudent(state, auth, studentId)) throw notFound();
     const student = state.students.find((candidate) => candidate.id === studentId && candidate.tenantId === auth.user.tenantId && candidate.active)!;
@@ -1176,6 +1187,21 @@ export async function approveContent(store: Store, auth: AuthenticatedUser, cont
   return store.transaction((state) => { const item = state.contentItems.find((candidate) => candidate.id === contentId && candidate.tenantId === auth.user.tenantId); if (!item) throw notFound(); if (item.state !== 'draft' && item.state !== 'professional_review') throw new DomainError('CONTENT_STATE_INVALID', '内容当前不可审核'); if (item.kind === 'media') { const media = item.mediaAssetId ? state.mediaAssets.find((asset) => asset.id === item.mediaAssetId && asset.tenantId === item.tenantId && asset.scanStatus === 'clean') : undefined; if (!media) throw new DomainError('MEDIA_NOT_READY', '媒体资源尚未通过安全检查'); if ((media.kind === 'audio' || media.kind === 'video') && !item.captionText?.trim()) throw new DomainError('CAPTION_REQUIRED', '音视频发布需要字幕或文字稿'); if (media.kind === 'image' && !item.altText?.trim()) throw new DomainError('ALT_TEXT_REQUIRED', '图片发布需要文字替代'); } item.state = 'published'; item.reviewedBy = auth.user.id; item.publishedAt = now(); audit(state, auth.user, 'content.published', 'content', item.id, {}); return item; });
 }
 
+/** Retire a previously published education item without deleting its audit
+ * history. Retired items immediately disappear from the public listing and
+ * any linked media URL becomes unavailable. */
+export async function retireContent(store: Store, auth: AuthenticatedUser, contentId: string): Promise<ContentItem> {
+  requirePermission(auth.user, 'content:approve');
+  return store.transaction((state) => {
+    const item = state.contentItems.find((candidate) => candidate.id === contentId && candidate.tenantId === auth.user.tenantId);
+    if (!item) throw notFound();
+    if (item.state !== 'published') throw new DomainError('CONTENT_STATE_INVALID', '只有已发布内容可以下架');
+    item.state = 'retired';
+    audit(state, auth.user, 'content.retired', 'content', item.id, {});
+    return item;
+  });
+}
+
 export async function listPublicContent(store: Store, age?: number): Promise<Array<Record<string, unknown>>> {
   return store.read((state) => state.contentItems.filter((item) => item.state === 'published' && (age === undefined || (age >= item.ageMin && age <= item.ageMax))).map((item) => ({ id: item.id, title: item.title, kind: item.kind, ageMin: item.ageMin, ageMax: item.ageMax, body: decrypt<{ body: string }>(item.bodyCiphertext).body, altText: item.altText, captionText: item.captionText, media: item.mediaAssetId ? (() => { const media = state.mediaAssets.find((asset) => asset.id === item.mediaAssetId && asset.scanStatus === 'clean'); return media ? { id: media.id, filename: media.filename, mediaType: media.mediaType, kind: media.kind, byteSize: media.byteSize, sha256: media.sha256, url: `/v1/content/public/${media.id}/media` } : undefined; })() : undefined, publishedAt: item.publishedAt })));
 }
@@ -1250,6 +1276,23 @@ export async function listStudents(store: Store, auth: AuthenticatedUser): Promi
     const students = state.students.filter((student) => student.tenantId === auth.user.tenantId && student.active && (!auth.user.schoolId || student.schoolId === auth.user.schoolId)).map((student) => ({ id: student.id, schoolId: student.schoolId, classId: student.classId, age: student.age, guardianVerified: student.guardianVerified }));
     audit(state, auth.user, 'student.directory_listed', 'student', 'tenant', { count: students.length }, 'org:read');
     return students;
+  });
+}
+
+/** Return a bounded, metadata-only audit view for the privacy/audit role.
+ * Answer, report and care bodies are never stored in the audit envelope; the
+ * endpoint therefore exposes only the append-only event metadata needed for
+ * review. Listing itself is recorded as a new audit event. */
+export async function listAuditEvents(store: Store, auth: AuthenticatedUser, limit = 200): Promise<Array<Record<string, unknown>>> {
+  requirePermission(auth.user, 'audit:read');
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new DomainError('AUDIT_LIMIT_INVALID', '审计事件查询数量必须在 1–200 之间');
+  return store.transaction((state) => {
+    const events = state.auditEvents
+      .filter((event) => event.tenantId === auth.user.tenantId)
+      .slice(-limit)
+      .map((event) => ({ id: event.id, actorId: event.actorId, action: event.action, objectType: event.objectType, objectId: event.objectId, purpose: event.purpose, metadata: event.metadata, createdAt: event.createdAt }));
+    audit(state, auth.user, 'audit.listed', 'audit', 'tenant', { count: events.length, limit }, 'audit:read');
+    return events;
   });
 }
 

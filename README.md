@@ -36,6 +36,7 @@
 | [测试与试点验收](docs/08-verification.md) | 计分金标准、隔离测试、故障演练和停止条件 |
 | [来源及需求变更记录](docs/09-sources-and-decisions.md) | 官方依据、已调整的危险需求和方案假设 |
 | [GitHub 工作项索引](docs/10-github-tracking.md) | 在线开发任务与 Milestone 入口 |
+| [证据登记册](docs/12-evidence-register.md) | 工程验证、外部准入证据与未决门槛 |
 
 ## 关键设计决定
 
@@ -59,7 +60,7 @@ npm install
 CAMPMIND_DEMO_MFA=true CAMPMIND_MASTER_KEY=local-only-key npm start
 # 管理端 http://localhost:8787/admin；学生端 http://localhost:8787/student
 
-npm run check       # TypeScript、40 项行为测试、安全扫描与规划校验
+npm run check       # TypeScript、43 项行为测试、安全扫描与规划校验
 npm run drill:capacity  # 合成并发基线（输出 p50/p95/错误率）
 npm run drill:recovery  # 合成快照与加密私有对象恢复演练
 npm run release:check    # 参考模式边界检查；生产模式需外部证据环境变量

@@ -27,6 +27,22 @@ export function masterKey(): Buffer {
   return createHash('sha256').update(configured ?? DEV_MASTER).digest();
 }
 
+/**
+ * Return the active encryption key followed by explicitly configured legacy
+ * keys. During rotation, new values always use the first key while decrypting
+ * remains backwards-compatible until the re-encryption job has completed.
+ * Previous keys are supplied through a secret manager-backed environment
+ * value; they are never persisted in the repository or returned to callers.
+ */
+export function masterKeyCandidates(): Buffer[] {
+  const current = masterKey();
+  const raw = process.env.CAMPMIND_PREVIOUS_MASTER_KEYS;
+  if (!raw?.trim()) return [current];
+  const values = raw.split(',').map((value) => value.trim()).filter(Boolean);
+  if (values.length > 3 || values.some((value) => value.length < 32 || value === DEV_MASTER || value === 'local-only-key')) throw new Error('CAMPMIND_PREVIOUS_MASTER_KEYS must contain at most three dedicated secrets');
+  return [current, ...values.map((value) => createHash('sha256').update(value).digest())];
+}
+
 export function hashPassword(password: string): string {
   if (password.length < 12) throw new Error('密码至少需要 12 个字符');
   const salt = randomBytes(16);
@@ -110,8 +126,21 @@ export function encrypt(value: unknown, key = masterKey()): string {
 export function decrypt<T>(envelope: string, key = masterKey()): T {
   const [ivText, tagText, bodyText] = envelope.split('.');
   if (!ivText || !tagText || !bodyText) throw new Error('无效的加密数据');
-  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivText, 'base64url'));
-  decipher.setAuthTag(Buffer.from(tagText, 'base64url'));
-  const body = Buffer.concat([decipher.update(Buffer.from(bodyText, 'base64url')), decipher.final()]);
-  return JSON.parse(body.toString('utf8')) as T;
+  const keys = arguments.length > 1 ? [key] : masterKeyCandidates();
+  let lastError: unknown;
+  for (const candidate of keys) {
+    try {
+      const decipher = createDecipheriv('aes-256-gcm', candidate, Buffer.from(ivText, 'base64url'));
+      decipher.setAuthTag(Buffer.from(tagText, 'base64url'));
+      const body = Buffer.concat([decipher.update(Buffer.from(bodyText, 'base64url')), decipher.final()]);
+      return JSON.parse(body.toString('utf8')) as T;
+    } catch (error) { lastError = error; }
+  }
+  throw lastError instanceof Error ? lastError : new Error('无效的加密数据');
+}
+
+/** Decrypt with the active/legacy key ring and immediately emit an envelope
+ * under the active key. Callers can use this in a bounded rotation worker. */
+export function reencrypt<T>(envelope: string): string {
+  return encrypt(decrypt<T>(envelope));
 }

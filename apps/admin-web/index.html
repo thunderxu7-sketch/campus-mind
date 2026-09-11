@@ -46,6 +46,12 @@
       <button type="submit" class="secondary">签发一次性凭证</button>
     </form>
     <p id="credentialStatus" class="status" role="status" aria-live="polite">凭证只显示一次，请通过学校批准的线下渠道交付。</p>
+    <h2>会话安全</h2>
+    <form id="revokeForm">
+      <label for="revoke-user">用户编号</label><input id="revoke-user" name="userId" value="student-demo" required>
+      <button type="submit" class="secondary">撤销该用户会话</button>
+    </form>
+    <p id="revokeStatus" class="status" role="status" aria-live="polite">共享终端遗失或人员离岗时，可撤销活跃会话及未兑换凭证。</p>
   </section>
 
   <script>
@@ -107,9 +113,20 @@
       } catch (error) { $('#credentialStatus').textContent = error.message; }
     };
 
+    $('#revokeForm').onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        const form = Object.fromEntries(new FormData(event.target));
+        const response = await fetch('/v1/admin/users/' + encodeURIComponent(form.userId) + '/sessions/revoke', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: '{}' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '撤销失败');
+        $('#revokeStatus').textContent = `已撤销 ${esc(result.data.revoked)} 个活跃会话；该用户未兑换凭证也已失效。`;
+      } catch (error) { $('#revokeStatus').textContent = error.message; }
+    };
+
     $('#logout').onclick = async () => {
       try { if (token) await fetch('/v1/auth/logout', { method: 'POST', headers: { authorization: 'Bearer ' + token } }); }
-      finally { token = ''; $('#dashboard').hidden = true; $('#login').reset(); setStatus('已退出'); }
+      finally { token = ''; $('#dashboard').hidden = true; $('#login').reset(); $('#credentialStatus').textContent = '凭证只显示一次，请通过学校批准的线下渠道交付。'; $('#revokeStatus').textContent = '共享终端遗失或人员离岗时，可撤销活跃会话及未兑换凭证。'; setStatus('已退出'); }
     };
   </script>
 </body>

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { score, assertUsableScale } from '../dist/apps/api/src/domain/scoring.js';
-import { assertProductionConfig, totpCode, verifyTotpCode } from '../dist/apps/api/src/domain/crypto.js';
+import { assertProductionConfig, decrypt, encrypt, reencrypt, totpCode, verifyTotpCode } from '../dist/apps/api/src/domain/crypto.js';
 
 const scale = {
   id: 'gold-scale', tenantId: 'tenant', code: 'SYNTH-GOLD', title: '合成计分金标准', version: '1.0.0', provenance: 'synthetic_only', status: 'approved', minAge: 12, maxAge: 18, scoringVersion: 'gold-v1', noticeVersion: 'notice',
@@ -50,4 +50,27 @@ test('TOTP helper follows the RFC 6238 SHA-1 vector and bounded clock skew', () 
   assert.equal(verifyTotpCode(secret, '287082', 59_000), true);
   assert.equal(verifyTotpCode(secret, '287082', 59_000 + 90_000), false);
   assert.equal(verifyTotpCode(secret, 'abcdef', 59_000), false);
+});
+
+test('field encryption supports bounded key rotation without persisting key material', () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousCurrent = process.env.CAMPMIND_MASTER_KEY;
+  const previousKeys = process.env.CAMPMIND_PREVIOUS_MASTER_KEYS;
+  process.env.NODE_ENV = 'test';
+  const oldKey = 'old-dedicated-test-key-for-rotation-2026';
+  process.env.CAMPMIND_MASTER_KEY = oldKey;
+  delete process.env.CAMPMIND_PREVIOUS_MASTER_KEYS;
+  const legacyEnvelope = encrypt({ marker: 'legacy-value' });
+
+  process.env.CAMPMIND_MASTER_KEY = 'new-dedicated-test-key-for-rotation-2026';
+  process.env.CAMPMIND_PREVIOUS_MASTER_KEYS = oldKey;
+  assert.deepEqual(decrypt(legacyEnvelope), { marker: 'legacy-value' });
+  const rotatedEnvelope = reencrypt(legacyEnvelope);
+  assert.deepEqual(decrypt(rotatedEnvelope), { marker: 'legacy-value' });
+  delete process.env.CAMPMIND_PREVIOUS_MASTER_KEYS;
+  assert.throws(() => decrypt(legacyEnvelope));
+
+  process.env.NODE_ENV = previousNodeEnv;
+  process.env.CAMPMIND_MASTER_KEY = previousCurrent;
+  process.env.CAMPMIND_PREVIOUS_MASTER_KEYS = previousKeys;
 });

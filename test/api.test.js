@@ -132,6 +132,24 @@ test('school issues a one-time short-lived credential for a phone-less student',
   assert.equal(forbiddenIssue.response.status, 403);
 });
 
+test('school can revoke a student session and all unspent terminal credentials', async () => {
+  const admin = await login('admin@campus-mind.demo');
+  const issued = await request('/v1/admin/student-credentials', { method: 'POST', headers: auth(admin), body: JSON.stringify({ studentId: 'student-demo', ttlMinutes: 15 }) });
+  assert.equal(issued.response.status, 201, JSON.stringify(issued.body));
+  const redeemed = await request('/v1/auth/login', { method: 'POST', body: JSON.stringify({ accessCode: issued.body.data.code }) });
+  assert.equal(redeemed.response.status, 200, JSON.stringify(redeemed.body));
+
+  const revoked = await request('/v1/admin/users/student-demo/sessions/revoke', { method: 'POST', headers: auth(admin), body: '{}' });
+  assert.equal(revoked.response.status, 200, JSON.stringify(revoked.body));
+  assert.ok(revoked.body.data.revoked >= 1);
+
+  const after = await request('/v1/me', { headers: auth(redeemed.body.data.token) });
+  assert.equal(after.response.status, 401);
+  assert.equal(after.body.error.code, 'UNAUTHORIZED');
+  const audit = store.snapshot().auditEvents.find((event) => event.action === 'session.revoked' && event.objectId === 'student-demo');
+  assert.ok(audit);
+});
+
 test('student assessment lifecycle is durable, revision-safe and idempotent', async () => {
   const token = await login('student@campus-mind.demo');
   const tasks = await request('/v1/me/tasks', { headers: auth(token) });
@@ -207,6 +225,9 @@ test('report release controls student visibility and service errors do not leak 
   assert.equal(reports.body.data.length, 1);
   const missingPurpose = await request('/v1/students/student-demo/archive', { headers: auth(professional) });
   assert.equal(missingPurpose.response.status, 400);
+  const invalidPurpose = await request('/v1/students/student-demo/archive?purpose=curiosity', { headers: auth(professional) });
+  assert.equal(invalidPurpose.response.status, 400);
+  assert.equal(invalidPurpose.body.error.code, 'PURPOSE_INVALID');
   const archive = await request('/v1/students/student-demo/archive?purpose=report_review', { headers: auth(professional) });
   assert.equal(archive.response.status, 200);
   assert.equal(archive.body.data.studentId, 'student-demo');
@@ -270,6 +291,10 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   const publicContent = await request('/v1/content/public?age=15');
   assert.equal(publicContent.response.status, 200);
   assert.ok(publicContent.body.data.some((item) => item.id === content.body.data.id));
+  const retired = await request(`/v1/content/${content.body.data.id}/retire`, { method: 'POST', headers: auth(professional), body: '{}' });
+  assert.equal(retired.response.status, 200);
+  const afterRetire = await request('/v1/content/public?age=15');
+  assert.equal(afterRetire.body.data.some((item) => item.id === content.body.data.id), false);
   const media = await request('/v1/media-assets', { method: 'POST', headers: auth(professional), body: JSON.stringify({ filename: 'synthetic.png', mediaType: 'image/png', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }) });
   assert.equal(media.response.status, 201, JSON.stringify(media.body));
   const duplicateMedia = await request('/v1/media-assets', { method: 'POST', headers: auth(professional), body: JSON.stringify({ filename: 'synthetic-copy.png', mediaType: 'image/png', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }) });
@@ -316,6 +341,10 @@ test('rights requests are auditable and privacy staff can complete non-destructi
   const result = await request(`/v1/rights-requests/${created.body.data.id}/result`, { headers: auth(student) });
   assert.equal(result.response.status, 200);
   assert.match(result.body.data.note, /不包含原始答卷/);
+  const audit = await request('/v1/admin/audit?limit=20', { headers: auth(privacy) });
+  assert.equal(audit.response.status, 200, JSON.stringify(audit.body));
+  assert.ok(audit.body.data.some((event) => event.action === 'rights.completed'));
+  assert.ok(store.snapshot().auditEvents.some((event) => event.action === 'audit.listed'));
 });
 
 test('guardian consent requires a verified guardian link and rejects role spoofing', async () => {

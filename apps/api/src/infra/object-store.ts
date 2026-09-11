@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { masterKey } from '../domain/crypto.js';
+import { masterKey, masterKeyCandidates } from '../domain/crypto.js';
 
 const ENVELOPE_VERSION = 1;
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
@@ -32,8 +32,8 @@ function assertObjectKey(objectKey: string): void {
 
 function assertTenant(tenantId: string): void { assertPart(tenantId, 'TENANT_ID'); }
 
-function tenantKey(tenantId: string): Buffer {
-  return createHmac('sha256', masterKey()).update(`campus-mind/object-store/${tenantId}`).digest();
+function tenantKey(tenantId: string, key = masterKey()): Buffer {
+  return createHmac('sha256', key).update(`campus-mind/object-store/${tenantId}`).digest();
 }
 
 function fileFor(rootDir: string, tenantId: string, objectKey: string): string {
@@ -128,14 +128,17 @@ export class EncryptedFileObjectStore implements PrivateObjectStore {
     let envelope: Envelope;
     try { envelope = JSON.parse(readFileSync(filename, 'utf8')) as Envelope; } catch { throw new Error('OBJECT_CORRUPT'); }
     if (envelope.version !== ENVELOPE_VERSION || envelope.tenantId !== input.tenantId || envelope.objectKey !== input.objectKey || typeof envelope.contentType !== 'string' || !Number.isInteger(envelope.byteSize) || envelope.byteSize < 1 || envelope.byteSize > this.maxBytes) throw new Error('OBJECT_CORRUPT');
-    try {
-      const decipher = createDecipheriv('aes-256-gcm', tenantKey(input.tenantId), Buffer.from(envelope.iv, 'base64url'));
-      decipher.setAAD(associatedData(input.tenantId, input.objectKey, envelope.contentType, envelope.byteSize, envelope.sha256));
-      decipher.setAuthTag(Buffer.from(envelope.tag, 'base64url'));
-      const bytes = Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, 'base64url')), decipher.final()]);
-      if (bytes.length !== envelope.byteSize || createHash('sha256').update(bytes).digest('hex') !== envelope.sha256) throw new Error('hash mismatch');
-      return { objectKey: input.objectKey, tenantId: input.tenantId, contentType: envelope.contentType, byteSize: bytes.length, sha256: envelope.sha256, bytes };
-    } catch { throw new Error('OBJECT_CORRUPT'); }
+    for (const key of masterKeyCandidates()) {
+      try {
+        const decipher = createDecipheriv('aes-256-gcm', tenantKey(input.tenantId, key), Buffer.from(envelope.iv, 'base64url'));
+        decipher.setAAD(associatedData(input.tenantId, input.objectKey, envelope.contentType, envelope.byteSize, envelope.sha256));
+        decipher.setAuthTag(Buffer.from(envelope.tag, 'base64url'));
+        const bytes = Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, 'base64url')), decipher.final()]);
+        if (bytes.length !== envelope.byteSize || createHash('sha256').update(bytes).digest('hex') !== envelope.sha256) throw new Error('hash mismatch');
+        return { objectKey: input.objectKey, tenantId: input.tenantId, contentType: envelope.contentType, byteSize: bytes.length, sha256: envelope.sha256, bytes };
+      } catch { /* try the next explicitly configured rotation key */ }
+    }
+    throw new Error('OBJECT_CORRUPT');
   }
 
   async delete(input: { tenantId: string; objectKey: string }): Promise<void> {
