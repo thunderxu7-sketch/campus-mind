@@ -350,6 +350,9 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   const publicContent = await request('/v1/content/public?age=15');
   assert.equal(publicContent.response.status, 200);
   assert.ok(publicContent.body.data.some((item) => item.id === content.body.data.id));
+  const invalidContentAge = await request('/v1/content/public?age=not-an-age');
+  assert.equal(invalidContentAge.response.status, 400);
+  assert.equal(invalidContentAge.body.error.code, 'CONTENT_AGE_INVALID');
   const retired = await request(`/v1/content/${content.body.data.id}/retire`, { method: 'POST', headers: auth(professional), body: '{}' });
   assert.equal(retired.response.status, 200);
   const afterRetire = await request('/v1/content/public?age=15');

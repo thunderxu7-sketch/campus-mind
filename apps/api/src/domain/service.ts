@@ -1358,6 +1358,7 @@ export async function retireContent(store: Store, auth: AuthenticatedUser, conte
 }
 
 export async function listPublicContent(store: Store, age?: number): Promise<Array<Record<string, unknown>>> {
+  if (age !== undefined && (!Number.isInteger(age) || age < 6 || age > 19)) throw new DomainError('CONTENT_AGE_INVALID', '内容筛选年龄必须是 6–19 周岁的整数');
   return store.read((state) => state.contentItems.filter((item) => item.state === 'published' && (age === undefined || (age >= item.ageMin && age <= item.ageMax))).map((item) => ({ id: item.id, title: item.title, kind: item.kind, ageMin: item.ageMin, ageMax: item.ageMax, body: decrypt<{ body: string }>(item.bodyCiphertext).body, altText: item.altText, captionText: item.captionText, media: item.mediaAssetId ? (() => { const media = state.mediaAssets.find((asset) => asset.id === item.mediaAssetId && asset.scanStatus === 'clean'); return media ? { id: media.id, filename: media.filename, mediaType: media.mediaType, kind: media.kind, byteSize: media.byteSize, sha256: media.sha256, url: `/v1/content/public/${media.id}/media` } : undefined; })() : undefined, publishedAt: item.publishedAt })));
 }
 

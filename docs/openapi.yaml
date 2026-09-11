@@ -99,7 +99,8 @@ paths:
     get:
       security: []
       summary: Published age-filtered education content
-      responses: {'200': {description: Public content}}
+      parameters: [{name: age, in: query, required: false, schema: {type: integer, minimum: 6, maximum: 19}, description: Filter content for an integer age; invalid values return 400}]
+      responses: {'200': {description: Public content}, '400': {description: Invalid age filter}}
   /v1/content/{contentId}/retire:
     post:
       summary: Retire a published education item and hide its public media

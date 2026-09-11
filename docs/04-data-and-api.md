@@ -96,6 +96,7 @@ erDiagram
 | `POST /v1/cases/{id}/follow-ups` | 支持与随访 | 个案范围、记录版本、到期提醒 |
 | `POST /v1/cases/{id}/closure-requests`、`POST /v1/cases/{id}/closure-approvals` | 申请/审批结案 | 独立专业复核、证据、拒绝自动结案 |
 | `GET /v1/analytics/summary` | 聚合指标 | 固定维度、小样本/互补抑制、查询预算、不支持任意 SQL |
+| `GET /v1/content/public?age=` | 公开教育内容 | 可选年龄筛选仅接受 6–19 周岁整数；无效筛选返回 `CONTENT_AGE_INVALID`，内容仍须专业审核发布 |
 | `POST /v1/exports`、`GET /v1/exports/{id}/download` | 导出 | 记录有限用途、范围与独立审批；受控产物带 job/purpose/时间水印，到期与授权实时校验 |
 | `POST /v1/appointments` | 咨询预约 | M5；资源排他、幂等、资质与可预约窗口 |
 | `POST /v1/content/{id}/publish` | 教育内容发布 | M5；专业审核、适龄、版权证明 |
