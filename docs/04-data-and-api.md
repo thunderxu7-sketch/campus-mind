@@ -62,16 +62,20 @@ erDiagram
 
 ## 4. REST 边界
 
-统一返回 `requestId`、稳定错误码；列表使用游标，敏感响应 `Cache-Control: no-store`。未授权对象返回统一的不泄露存在性的错误。下列接口均在服务端检查身份、租户、角色和数据范围。
+统一返回 `requestId`、稳定错误码；列表使用游标，敏感响应 `Cache-Control: no-store`。浏览器对所有状态变更校验 `Origin`（可通过 `CAMPMIND_ALLOWED_ORIGINS` 配置反向代理域名）；不受信来源返回 `CSRF_ORIGIN_INVALID`。未授权对象返回统一的不泄露存在性的错误。下列接口均在服务端检查身份、租户、角色和数据范围。
 
 | 接口草案 | 用途 | 关键保护 |
 |---|---|---|
+| `POST /v1/auth/login`、`POST /v1/auth/logout` | 具名会话 | 令牌只存 hash；启用 MFA 的职员需 RFC 6238 验证码并拒绝即时重放（生产由 IdP/密钥注册接管）；退登撤销会话 |
 | `POST /v1/imports/preview` | 导入预检 | 文件隔离、限额、不执行公式/宏、字段合法性 |
-| `POST /v1/imports/{id}/commit` | 确认导入 | 审批、幂等、校验预览版本；组织映射人工确认 |
+| `POST /v1/imports/{id}/commit` | 确认导入 | 审批、幂等、校验预览内容 hash；组织映射人工确认 |
 | `POST /v1/guardian-links/verify` | 监护关系核验 | 经确认渠道、限流，不以学号为验证凭据 |
 | `POST /v1/guardian-links` | 建立待核验监护关系 | 校务账号只能关联本租户的监护账号与学生；未核验前不能记录监护同意 |
 | `POST /v1/me/consents`、`POST /v1/me/consents/{id}/withdraw` | 同意与撤回 | 目的/版本/主体/年龄验证，撤回触发权限与任务更新 |
 | `POST /v1/rights-requests`、`GET /v1/rights-requests/{id}/result` | 查阅/更正/删除申请与结果 | 便捷提交、身份核验、时限跟踪、拒绝依据；查阅结果只含基本资料与已发布报告，不含原始答卷 |
+| `POST /v1/admin/retention/run` | 过期导出/导入预检失效与删除台账重放 | 仅运维指标权限；预检元数据 24 小时后清理，恢复备份后先重放，再开放服务；重复执行幂等 |
+| `GET /v1/admin/operations/status`、`POST /v1/admin/operations/requeue-dead-letters` | 队列/通知运行状态与死信补投 | 仅运维指标权限；返回计数和时间，不返回学生或风险正文 |
+| `POST /v1/admin/operations/escalate` | 按已批准时限生成未接单升级提醒 | 只产生受保护待办，不自动结案、不声称已联系到人 |
 | `POST /v1/scales/{id}/versions` | 创建量表草稿版本 | 仅专业授权人员，正文不进入普通日志 |
 | `POST /v1/scale-versions/{id}/approve` | 专业审定 | 作者/审批人分离；版权、适龄和金标准记录必填 |
 | `POST /v1/campaigns`、`POST /v1/campaigns/{id}/publish` | 创建/发布任务 | 名单快照、频次、值班、所需审批、不可变版本 |
@@ -79,6 +83,7 @@ erDiagram
 | `POST /v1/scales/{id}/revoke` | 撤销量表版本 | 只阻断新使用，不改写历史答卷和计分；必须记录原因 |
 | `GET /v1/me/tasks` | 当前学生任务 | 仅自己，返回参与状态与可用操作 |
 | `POST /v1/me/tasks/{id}/attempts` | 开始作答 | 同意/适龄/频次/任务时窗原子验证 |
+| `GET /v1/attempts/{id}` | 恢复草稿 | 仅本人读取服务端已确认的答案与 revision；已提交/关闭答题不可恢复 |
 | `PUT /v1/attempts/{id}/answers` | 保存答案 | `expectedRevision`、题目白名单、服务端持久化确认 |
 | `POST /v1/attempts/{id}/submit` | 提交 | 幂等键、内容 hash、事务快照与 outbox，不再修改 |
 | `GET /v1/reports/{id}`、`POST /v1/reports/{id}/release` | 查看/发布报告 | 字段权限、专业审核及读者范围；下载单独鉴权 |

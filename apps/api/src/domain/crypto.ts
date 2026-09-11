@@ -2,6 +2,7 @@ import {
   createCipheriv,
   createDecipheriv,
   createHash,
+  createHmac,
   randomBytes,
   scryptSync,
   timingSafeEqual,
@@ -11,11 +12,18 @@ const PASSWORD_PREFIX = 'scrypt';
 const KEY_LENGTH = 32;
 const DEV_MASTER = 'campus-mind-development-only-master-key-change-me';
 
+/** Fail closed until the reference adapters are replaced by production ones. */
+export function assertProductionConfig(): void {
+  if (process.env.NODE_ENV !== 'production') return;
+  const configured = process.env.CAMPMIND_MASTER_KEY;
+  if (!configured || configured.length < 32 || configured === DEV_MASTER || configured === 'local-only-key') throw new Error('CAMPMIND_MASTER_KEY must be a dedicated production secret');
+  if (process.env.CAMPMIND_DEMO_MFA === 'true') throw new Error('CAMPMIND_DEMO_MFA is forbidden in production');
+  if (process.env.CAMPMIND_DATA_BACKEND !== 'postgres') throw new Error('CAMPMIND_DATA_BACKEND=postgres is required in production');
+}
+
 export function masterKey(): Buffer {
   const configured = process.env.CAMPMIND_MASTER_KEY;
-  if (!configured && process.env.NODE_ENV === 'production') {
-    throw new Error('CAMPMIND_MASTER_KEY must be configured in production');
-  }
+  assertProductionConfig();
   return createHash('sha256').update(configured ?? DEV_MASTER).digest();
 }
 
@@ -44,6 +52,46 @@ export function hashToken(token: string): string {
 
 export function randomToken(): string {
   return randomBytes(32).toString('base64url');
+}
+
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+function decodeBase32(secret: string): Buffer {
+  const normalized = secret.toUpperCase().replace(/[=\s-]/g, '');
+  if (!normalized || /[^A-Z2-7]/.test(normalized)) throw new Error('invalid TOTP secret');
+  let buffer = 0;
+  let bits = 0;
+  const bytes: number[] = [];
+  for (const char of normalized) {
+    buffer = (buffer << 5) | BASE32_ALPHABET.indexOf(char);
+    bits += 5;
+    if (bits >= 8) { bits -= 8; bytes.push((buffer >>> bits) & 0xff); }
+  }
+  return Buffer.from(bytes);
+}
+
+/** RFC 6238-compatible six-digit TOTP for an enrolled MFA secret. */
+export function totpCode(secret: string, atMs = Date.now()): string {
+  const counter = Math.floor(atMs / 30_000);
+  const counterBuffer = Buffer.alloc(8);
+  counterBuffer.writeBigUInt64BE(BigInt(counter));
+  const digest = createHmac('sha1', decodeBase32(secret)).update(counterBuffer).digest();
+  const offset = digest[digest.length - 1]! & 0x0f;
+  const binary = ((digest[offset]! & 0x7f) << 24) | ((digest[offset + 1]! & 0xff) << 16) | ((digest[offset + 2]! & 0xff) << 8) | (digest[offset + 3]! & 0xff);
+  return String(binary % 1_000_000).padStart(6, '0');
+}
+
+export function verifyTotpCode(secret: string, code: string, atMs = Date.now()): boolean {
+  if (!/^\d{6}$/.test(code)) return false;
+  try {
+    // Accept one adjacent 30-second step for normal clock skew, without
+    // accepting arbitrary replay windows.
+    return [-1, 0, 1].some((offset) => {
+      const expected = Buffer.from(totpCode(secret, atMs + offset * 30_000));
+      const actual = Buffer.from(code);
+      return expected.length === actual.length && timingSafeEqual(expected, actual);
+    });
+  } catch { return false; }
 }
 
 export function contentHash(value: unknown): string {

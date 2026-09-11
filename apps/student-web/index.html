@@ -1,4 +1,181 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>校园心晴｜学生端</title><style>body{font:16px system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem;color:#172033}section{background:#f5f7fb;padding:1rem;margin:1rem 0;border-radius:12px}button{padding:.65rem 1rem;border:0;border-radius:8px;background:#2854d7;color:#fff;cursor:pointer}button.secondary{background:#57657d}label{display:block;padding:.7rem;background:#fff;border-radius:8px;margin:.5rem 0}input{margin-right:.5rem}.notice{border-left:4px solid #2854d7;padding-left:.8rem}</style></head>
-<body><h1>校园心晴 · 学生端</h1><p class="notice">这是合成演示。测评反馈不是诊断；如果你现在需要帮助，请联系学校心理老师或页面提供的人工支持渠道。</p><section><h2>登录</h2><form id="login"><input name="email" type="email" value="student@campus-mind.demo" required><input name="password" type="password" value="CampusMind-Demo-2026!" required><button>进入任务</button></form><p id="status"></p></section><section id="tasks" hidden><h2>我的任务</h2><div id="taskList"></div><button id="help" class="secondary">我想找人聊聊</button><button id="logout" class="secondary">退出并清除</button><div id="questions"></div></section><script>let token='',attempt=null,revision=0;const $=s=>document.querySelector(s);const esc=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));async function api(path,opts={}){opts.headers={...(opts.headers||{}),authorization:'Bearer '+token,'content-type':'application/json'};const r=await fetch(path,opts);const j=await r.json();if(!r.ok)throw new Error(j.error?.message||'请求失败');return j.data}function clearClient(){token='';attempt=null;revision=0;$('#tasks').hidden=true;$('#taskList').replaceChildren();$('#questions').replaceChildren();$('#login').reset()}$('#login').onsubmit=async e=>{e.preventDefault();try{const body=Object.fromEntries(new FormData(e.target));const r=await fetch('/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw new Error(j.error?.message);token=j.data.token;$('#status').textContent='已登录';$('#tasks').hidden=false;const tasks=await api('/v1/me/tasks');$('#taskList').innerHTML=tasks.map(t=>`<p><b>${esc(t.name)}</b> · ${esc(t.status)}<br><button data-id="${esc(t.id)}">开始</button></p>`).join('');document.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>start(b.dataset.id))}catch(err){$('#status').textContent=err.message}};async function start(id){try{const r=await api('/v1/me/tasks/'+id+'/attempts',{method:'POST',body:'{}'});attempt=r.attempt;revision=attempt.currentRevision;$('#questions').innerHTML='<h3>'+esc(r.scale.title)+'</h3>'+r.scale.items.map(q=>`<label>${esc(q.prompt)}<br><input type="radio" name="${esc(q.id)}" value="0"> 暂时不是<br><input type="radio" name="${esc(q.id)}" value="1"> 有时或经常</label>`).join('')+'<button id="save">保存并提交</button>';$('#save').onclick=submit}catch(err){$('#status').textContent=err.message}}async function submit(){const answers={};document.querySelectorAll('#questions input:checked').forEach(i=>answers[i.name]=Number(i.value));try{const saved=await api('/v1/attempts/'+attempt.id+'/answers',{method:'PUT',body:JSON.stringify({expectedRevision:revision,answers})});revision=saved.revision;const out=await api('/v1/attempts/'+attempt.id+'/submit',{method:'POST',body:JSON.stringify({idempotencyKey:crypto.randomUUID()+'-submit'})});$('#status').textContent='已提交。系统会将需要关注的线索交给心理专业人员人工复核；请等待学校反馈。'+JSON.stringify(out)}catch(err){$('#status').textContent=err.message}};$('#help').onclick=async()=>{try{const me=await api('/v1/me');await api('/v1/risk-signals',{method:'POST',body:JSON.stringify({studentId:me.id,level:'attention',reason:'学生主动申请人工支持'})});$('#status').textContent='求助请求已提交给学校支持流程。'}catch(err){$('#status').textContent=err.message}};$('#logout').onclick=async()=>{try{if(token)await fetch('/v1/auth/logout',{method:'POST',headers:{authorization:'Bearer '+token}})}finally{clearClient();$('#status').textContent='已退出并清除本页内容'}};</script></body></html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>校园心晴｜学生端</title>
+  <style>
+    :root{color-scheme:light}body{font:16px system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem;color:#172033;line-height:1.55}section{background:#f5f7fb;padding:1rem;margin:1rem 0;border-radius:12px}button{padding:.65rem 1rem;border:0;border-radius:8px;background:#2854d7;color:#fff;cursor:pointer;font:inherit}button.secondary{background:#57657d}button:disabled{opacity:.55;cursor:not-allowed}button:focus-visible,input:focus-visible{outline:3px solid #f59e0b;outline-offset:2px}label{display:block;padding:.7rem;background:#fff;border-radius:8px;margin:.5rem 0}fieldset{border:0;padding:0;margin:0}legend{font-weight:700;margin-bottom:.5rem}input{margin-right:.5rem}.notice{border-left:4px solid #2854d7;padding-left:.8rem}.muted{color:#5f6b82}.status,.save-status{min-height:1.6em}.save-status{margin:.5rem 0;color:#2854d7}.task{padding:.75rem;background:#fff;border-radius:8px;margin:.5rem 0}.task button{margin-top:.35rem}.actions{display:flex;gap:.5rem;flex-wrap:wrap}@media (max-width:480px){body{margin:1rem auto}button{width:100%}.actions button{flex:1 1 100%}}
+  </style>
+</head>
+<body>
+  <h1>校园心晴 · 学生端</h1>
+  <p class="notice">这是合成演示。测评反馈不是诊断；如果你现在需要帮助，请联系学校心理老师或页面提供的人工支持渠道。</p>
+
+  <section aria-labelledby="login-title">
+    <h2 id="login-title">登录</h2>
+    <form id="login">
+      <label for="email">邮箱</label>
+      <input id="email" name="email" type="email" autocomplete="username" value="student@campus-mind.demo" required>
+      <label for="password">密码</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" value="CampusMind-Demo-2026!" required>
+      <button type="submit">进入任务</button>
+    </form>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </section>
+
+  <section id="tasks" hidden aria-labelledby="tasks-title">
+    <h2 id="tasks-title">我的任务</h2>
+    <div id="taskList" aria-live="polite"></div>
+    <div class="actions">
+      <button id="help" type="button" class="secondary">我想找人聊聊</button>
+      <button id="logout" type="button" class="secondary">退出并清除</button>
+    </div>
+    <div id="questions" aria-live="polite"></div>
+  </section>
+
+  <script>
+    let token = '';
+    let attempt = null;
+    let revision = 0;
+    let saveTimer = null;
+    let saveInFlight = false;
+    let dirty = false;
+    const $ = (selector) => document.querySelector(selector);
+    const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const setStatus = (message) => { $('#status').textContent = message; };
+
+    async function api(path, opts = {}) {
+      opts.headers = { ...(opts.headers || {}), authorization: 'Bearer ' + token, 'content-type': 'application/json' };
+      const response = await fetch(path, opts);
+      const payload = await response.json();
+      if (!response.ok) {
+        const error = new Error(payload.error?.message || '请求失败');
+        error.code = payload.error?.code;
+        error.details = payload.error?.details;
+        throw error;
+      }
+      return payload.data;
+    }
+
+    function clearClient() {
+      token = '';
+      attempt = null;
+      revision = 0;
+      dirty = false;
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = null;
+      $('#tasks').hidden = true;
+      $('#taskList').replaceChildren();
+      $('#questions').replaceChildren();
+      $('#login').reset();
+    }
+
+    function selectedAnswers() {
+      return Object.fromEntries([...document.querySelectorAll('#questions input:checked')].map((input) => [input.name, Number(input.value)]));
+    }
+
+    function renderQuestions(scale, answers = {}) {
+      const groups = scale.items.map((question) => {
+        const selected = answers[question.id];
+        return `<fieldset><legend>${esc(question.prompt)}</legend><label><input type="radio" name="${esc(question.id)}" value="0" ${selected === 0 ? 'checked' : ''}> 暂时不是</label><label><input type="radio" name="${esc(question.id)}" value="1" ${selected === 1 ? 'checked' : ''}> 有时或经常</label></fieldset>`;
+      }).join('');
+      $('#questions').innerHTML = `<h3>${esc(scale.title)}</h3><p class="muted">答案只在服务端保存；关闭页面前请等待“已保存”提示。</p>${groups}<p id="saveStatus" class="save-status" role="status" aria-live="polite"></p><div class="actions"><button id="save" type="button">保存并提交</button><button id="saveDraft" type="button" class="secondary">仅保存草稿</button></div>`;
+      document.querySelectorAll('#questions input').forEach((input) => input.addEventListener('change', () => {
+        dirty = true;
+        scheduleSave();
+      }));
+      $('#save').onclick = submit;
+      $('#saveDraft').onclick = () => saveDraft(false);
+    }
+
+    function setSaveStatus(message) { const node = $('#saveStatus'); if (node) node.textContent = message; }
+
+    function scheduleSave() {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => saveDraft(false), 700);
+    }
+
+    async function saveDraft(submitting) {
+      if (!attempt || saveInFlight) return;
+      saveInFlight = true;
+      try {
+        const saved = await api('/v1/attempts/' + attempt.id + '/answers', { method: 'PUT', body: JSON.stringify({ expectedRevision: revision, answers: selectedAnswers() }) });
+        revision = saved.revision;
+        dirty = false;
+        setSaveStatus('已保存 ' + new Date(saved.savedAt).toLocaleTimeString());
+        if (submitting) await finishSubmit();
+      } catch (error) {
+        if (error.code === 'REVISION_CONFLICT') {
+          dirty = true;
+          setSaveStatus('其他窗口已更新答案，请刷新任务后再决定是否覆盖。');
+        } else setSaveStatus(error.message);
+        if (submitting) throw error;
+      } finally { saveInFlight = false; }
+    }
+
+    async function loadAttempt(attemptId, scale) {
+      const draft = await api('/v1/attempts/' + attemptId);
+      attempt = draft.attempt;
+      revision = draft.attempt.currentRevision;
+      renderQuestions(scale, draft.answers || {});
+      setSaveStatus(revision > 0 ? '已恢复最近一次服务端保存的草稿。' : '尚未保存');
+    }
+
+    $('#login').onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        const body = Object.fromEntries(new FormData(event.target));
+        const response = await fetch('/v1/auth/login', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body) });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error?.message || '登录失败');
+        token = payload.data.token;
+        setStatus('已登录');
+        $('#tasks').hidden = false;
+        const tasks = await api('/v1/me/tasks');
+        $('#taskList').innerHTML = tasks.length ? tasks.map((task) => `<div class="task"><b>${esc(task.name)}</b> · ${esc(task.status)}<br><span class="muted">${esc(task.scaleTitle || '')}</span><br><button type="button" data-id="${esc(task.id)}" aria-label="开始 ${esc(task.name)}">${task.attempt?.state === 'in_progress' ? '继续' : '开始'}</button></div>`).join('') : '<p class="muted">当前没有可完成的任务。</p>';
+        document.querySelectorAll('[data-id]').forEach((button) => { button.onclick = () => start(button.dataset.id); });
+      } catch (error) { setStatus(error.message); }
+    };
+
+    async function start(assignmentId) {
+      try {
+        const started = await api('/v1/me/tasks/' + assignmentId + '/attempts', { method: 'POST', body: '{}' });
+        await loadAttempt(started.attempt.id, started.scale);
+        setStatus('任务已打开');
+      } catch (error) { setStatus(error.message); }
+    }
+
+    async function finishSubmit() {
+      const output = await api('/v1/attempts/' + attempt.id + '/submit', { method: 'POST', body: JSON.stringify({ idempotencyKey: crypto.randomUUID() + '-submit' }) });
+      dirty = false;
+      setStatus('已提交。系统会将需要关注的线索交给心理专业人员人工复核；请等待学校反馈。');
+      setSaveStatus('提交已接收：' + output.state);
+    }
+
+    async function submit() {
+      try {
+        if (saveInFlight) return;
+        await saveDraft(true);
+      } catch (error) { setStatus(error.message); }
+    }
+
+    $('#help').onclick = async () => {
+      try {
+        const me = await api('/v1/me');
+        await api('/v1/risk-signals', { method: 'POST', body: JSON.stringify({ studentId: me.id, level: 'attention', reason: '学生主动申请人工支持' }) });
+        setStatus('求助请求已提交给学校支持流程。');
+      } catch (error) { setStatus(error.message); }
+    };
+
+    $('#logout').onclick = async () => {
+      try { if (token) await fetch('/v1/auth/logout', { method: 'POST', headers: { authorization: 'Bearer ' + token } }); }
+      finally { clearClient(); setStatus('已退出并清除本页内容'); }
+    };
+
+    window.addEventListener('beforeunload', (event) => {
+      if (dirty) { event.preventDefault(); event.returnValue = ''; }
+    });
+  </script>
+</body>
+</html>

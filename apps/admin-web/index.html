@@ -1,7 +1,98 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>校园心晴｜工作人员端</title><style>body{font:16px system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#172033}header{display:flex;justify-content:space-between;align-items:center}section{background:#f5f7fb;padding:1rem;margin:1rem 0;border-radius:12px}button{padding:.6rem 1rem;border:0;border-radius:8px;background:#2854d7;color:#fff;cursor:pointer}input{padding:.6rem;margin:.25rem;border:1px solid #ccd3e0;border-radius:6px}.muted{color:#5f6b82}.metric{display:inline-block;min-width:130px;padding:.75rem;background:white;border-radius:8px;margin:.3rem}</style></head>
-<body><header><h1>校园心晴 · 工作人员端</h1><span class="muted">演示环境｜不含真实学生资料</span></header>
-<section><h2>登录</h2><form id="login"><input name="email" type="email" value="admin@campus-mind.demo" required><input name="password" type="password" value="CampusMind-Demo-2026!" required><button>登录</button></form><p id="status" class="muted"></p></section>
-<section id="dashboard" hidden><h2>校级概览</h2><div id="metrics"></div><p class="muted">聚合数据可能因小样本被抑制；此页面不展示学生心理分数。</p><button id="refresh">刷新</button><button id="logout">退出</button><h2>测评任务</h2><div id="campaigns"></div><form id="campaignForm"><input name="name" placeholder="任务名称" value="合成演示任务" required><input name="academicYear" value="2026-2027" required><input name="opensAt" type="datetime-local" required><input name="closesAt" type="datetime-local" required><select name="scaleVersionId" id="scale" required></select><button>创建草稿</button></form><p class="muted">发布前仍需满足适龄、参与、频次、量表和专业门槛；校务账号不能查看分数。</p></section>
-<script>let token='';const $=s=>document.querySelector(s);const esc=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));$('#login').addEventListener('submit',async e=>{e.preventDefault();const body=Object.fromEntries(new FormData(e.target));const r=await fetch('/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const j=await r.json();if(!r.ok){$('#status').textContent=j.error?.message||'登录失败';return}token=j.data.token;$('#dashboard').hidden=false;$('#status').textContent='已登录：'+j.data.user.displayName;load()});async function load(){const r=await fetch('/v1/admin/overview',{headers:{authorization:'Bearer '+token}});const j=await r.json();if(!r.ok){$('#status').textContent=j.error?.message||'无权访问';return}$('#metrics').innerHTML=Object.entries(j.data).filter(([k])=>!['note'].includes(k)).map(([k,v])=>`<span class="metric"><b>${esc(k)}</b><br>${esc(v===null?'已抑制':v)}</span>`).join('');const [campaigns,scales]=await Promise.all([fetch('/v1/admin/campaigns',{headers:{authorization:'Bearer '+token}}).then(r=>r.json()),fetch('/v1/admin/scales',{headers:{authorization:'Bearer '+token}}).then(r=>r.json())]);$('#campaigns').innerHTML=(campaigns.data||[]).map(c=>`<p><b>${esc(c.name)}</b> · ${esc(c.state)} · ${esc(c.participantCount)} 人</p>`).join('')||'<p class=muted>暂无任务</p>';$('#scale').innerHTML=(scales.data||[]).filter(x=>x.status==='approved').map(x=>`<option value="${esc(x.id)}">${esc(x.title)} ${esc(x.version)}</option>`).join('')}$('#refresh').onclick=load;$('#campaignForm').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));f.schoolId='school-demo';f.purpose='screening';f.participantStudentIds=['student-demo'];f.opensAt=new Date(f.opensAt).toISOString();f.closesAt=new Date(f.closesAt).toISOString();const r=await fetch('/v1/campaigns',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify(f)});const j=await r.json();$('#status').textContent=r.ok?'已创建草稿':j.error?.message||'创建失败';if(r.ok)load()};$('#logout').onclick=async()=>{await fetch('/v1/auth/logout',{method:'POST',headers:{authorization:'Bearer '+token}});token='';$('#dashboard').hidden=true;$('#login').reset();$('#status').textContent='已退出'};</script></body></html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>校园心晴｜工作人员端</title>
+  <style>body{font:16px system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#172033;line-height:1.55}header{display:flex;justify-content:space-between;align-items:center;gap:1rem}section{background:#f5f7fb;padding:1rem;margin:1rem 0;border-radius:12px}button{padding:.6rem 1rem;border:0;border-radius:8px;background:#2854d7;color:#fff;cursor:pointer;font:inherit}button.secondary{background:#57657d}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #f59e0b;outline-offset:2px}input,select{padding:.6rem;margin:.25rem;border:1px solid #ccd3e0;border-radius:6px;font:inherit}.muted{color:#5f6b82}.metric{display:inline-block;min-width:130px;padding:.75rem;background:white;border-radius:8px;margin:.3rem}.status{min-height:1.6em}@media (max-width:600px){header{display:block}input,select,button{width:100%;box-sizing:border-box;margin:.25rem 0}}
+  </style>
+</head>
+<body>
+  <header><h1>校园心晴 · 工作人员端</h1><span class="muted">演示环境｜不含真实学生资料</span></header>
+  <section aria-labelledby="login-title">
+    <h2 id="login-title">登录</h2>
+    <form id="login">
+      <label for="email">邮箱</label>
+      <input id="email" name="email" type="email" autocomplete="username" value="admin@campus-mind.demo" required>
+      <label for="password">密码</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" value="CampusMind-Demo-2026!" required>
+      <label for="mfa-code">二次验证码（演示可留空）</label>
+      <input id="mfa-code" name="mfaCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6">
+      <button type="submit">登录</button>
+    </form>
+    <p id="status" class="muted status" role="status" aria-live="polite"></p>
+  </section>
+
+  <section id="dashboard" hidden aria-labelledby="dashboard-title">
+    <h2 id="dashboard-title">校级概览</h2>
+    <div id="metrics" aria-live="polite"></div>
+    <p class="muted">聚合数据可能因小样本被抑制；此页面不展示学生心理分数。</p>
+    <div><button id="refresh" type="button">刷新</button> <button id="logout" type="button" class="secondary">退出</button></div>
+    <h2>测评任务</h2>
+    <div id="campaigns" aria-live="polite"></div>
+    <form id="campaignForm">
+      <label for="campaign-name">任务名称</label><input id="campaign-name" name="name" placeholder="任务名称" value="合成演示任务" required>
+      <label for="academic-year">学年</label><input id="academic-year" name="academicYear" value="2026-2027" required>
+      <label for="opens-at">开始时间</label><input id="opens-at" name="opensAt" type="datetime-local" required>
+      <label for="closes-at">结束时间</label><input id="closes-at" name="closesAt" type="datetime-local" required>
+      <label for="scale">量表版本</label><select name="scaleVersionId" id="scale" required></select>
+      <button type="submit">创建草稿</button>
+    </form>
+    <p class="muted">发布前仍需满足适龄、参与、频次、量表和专业门槛；校务账号不能查看分数。</p>
+  </section>
+
+  <script>
+    let token = '';
+    const $ = (selector) => document.querySelector(selector);
+    const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const setStatus = (message) => { $('#status').textContent = message; };
+
+    $('#login').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        const body = Object.fromEntries(new FormData(event.target));
+        const response = await fetch('/v1/auth/login', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body) });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error?.message || '登录失败');
+        token = payload.data.token;
+        $('#dashboard').hidden = false;
+        setStatus('已登录：' + payload.data.user.displayName);
+        await load();
+      } catch (error) { setStatus(error.message); }
+    });
+
+    async function load() {
+      try {
+        const headers = { authorization: 'Bearer ' + token };
+        const overview = await fetch('/v1/admin/overview', { headers }).then((response) => response.json());
+        if (!overview.data) throw new Error(overview.error?.message || '无权访问');
+        $('#metrics').innerHTML = Object.entries(overview.data).filter(([key]) => key !== 'note').map(([key, value]) => `<span class="metric"><b>${esc(key)}</b><br>${esc(value === null ? '已抑制' : value)}</span>`).join('');
+        const [campaigns, scales] = await Promise.all([
+          fetch('/v1/admin/campaigns', { headers }).then((response) => response.json()),
+          fetch('/v1/admin/scales', { headers }).then((response) => response.json()),
+        ]);
+        $('#campaigns').innerHTML = (campaigns.data || []).map((campaign) => `<p><b>${esc(campaign.name)}</b> · ${esc(campaign.state)} · ${esc(campaign.participantCount)} 人</p>`).join('') || '<p class="muted">暂无任务</p>';
+        $('#scale').innerHTML = (scales.data || []).filter((scale) => scale.status === 'approved').map((scale) => `<option value="${esc(scale.id)}">${esc(scale.title)} ${esc(scale.version)}</option>`).join('');
+      } catch (error) { setStatus(error.message); }
+    }
+
+    $('#refresh').onclick = load;
+    $('#campaignForm').onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        const form = Object.fromEntries(new FormData(event.target));
+        const payload = { ...form, schoolId: 'school-demo', purpose: 'screening', participantStudentIds: ['student-demo'], opensAt: new Date(form.opensAt).toISOString(), closesAt: new Date(form.closesAt).toISOString() };
+        const response = await fetch('/v1/campaigns', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+        const result = await response.json();
+        setStatus(response.ok ? '已创建草稿' : result.error?.message || '创建失败');
+        if (response.ok) await load();
+      } catch (error) { setStatus(error.message); }
+    };
+
+    $('#logout').onclick = async () => {
+      try { if (token) await fetch('/v1/auth/logout', { method: 'POST', headers: { authorization: 'Bearer ' + token } }); }
+      finally { token = ''; $('#dashboard').hidden = true; $('#login').reset(); setStatus('已退出'); }
+    };
+  </script>
+</body>
+</html>

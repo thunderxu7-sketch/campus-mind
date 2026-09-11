@@ -19,7 +19,7 @@ export function seedDemoState(): DatabaseState {
   const createdAt = new Date().toISOString();
   state.tenants.push({ id: DEMO_IDS.tenant, name: '演示学校租户（合成数据）', region: 'demo-region', createdAt });
   state.schools.push({ id: DEMO_IDS.school, tenantId: DEMO_IDS.tenant, name: '演示中学', createdAt });
-  const user = (id: string, email: string, displayName: string, role: User['role'], schoolId?: string, mfaEnabled = false): User => ({ id, tenantId: DEMO_IDS.tenant, schoolId, email, displayName, passwordHash: hashPassword(DEMO_PASSWORD), role, active: true, mfaEnabled, createdAt });
+  const user = (id: string, email: string, displayName: string, role: User['role'], schoolId?: string, mfaEnabled = false): User => ({ id, tenantId: DEMO_IDS.tenant, schoolId, email, displayName, passwordHash: hashPassword(DEMO_PASSWORD), role, active: true, mfaEnabled, ...(mfaEnabled ? { mfaSecretCiphertext: encrypt({ secret: 'JBSWY3DPEHPK3PXP' }) } : {}), createdAt });
   state.users.push(
     user('user-ops-demo', 'ops@campus-mind.demo', '演示平台运维', 'platform_ops', undefined, true),
     user('user-privacy-demo', 'privacy@campus-mind.demo', '演示隐私审计员', 'privacy_auditor', DEMO_IDS.school),

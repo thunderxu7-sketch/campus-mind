@@ -27,9 +27,14 @@ for (const file of files) {
 }
 const main = readFileSync(join(root, 'apps/api/src/main.ts'), 'utf8');
 const crypto = readFileSync(join(root, 'apps/api/src/domain/crypto.ts'), 'utf8');
+const store = readFileSync(join(root, 'apps/api/src/domain/store.ts'), 'utf8');
 const scoring = readFileSync(join(root, 'apps/api/src/domain/scoring.ts'), 'utf8');
 const requiredSnippets = [
-  [crypto, "NODE_ENV === 'production'", 'production key guard'],
+  [crypto, "NODE_ENV !== 'production'", 'production key guard'],
+  [crypto, 'CAMPMIND_MASTER_KEY', 'production key source'],
+  [crypto, 'CAMPMIND_DATA_BACKEND !== \'postgres\'', 'production backend guard'],
+  [crypto, 'CAMPMIND_DEMO_MFA', 'production MFA guard'],
+  [store, 'assertProductionStoreInjection', 'production adapter guard'],
   [scoring, 'SYNTHETIC_SCALE_BLOCKED', 'synthetic scale production guard'],
   [main, 'Content-Security-Policy', 'CSP header'],
   [main, 'MAX_BODY_BYTES', 'request body bound'],

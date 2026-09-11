@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { DomainError, forbidden, unauthorized } from './errors.js';
-import { hashPassword, hashToken, randomToken, verifyPassword } from './crypto.js';
+import { assertProductionConfig, decrypt, hashPassword, hashToken, randomToken, verifyPassword, verifyTotpCode } from './crypto.js';
 import type { AuthenticatedUser, DatabaseState, Role, Session, User } from './types.js';
-import { JsonStore } from './store.js';
+import type { Store } from './store.js';
 
 const SESSION_DAYS = 8;
 
@@ -26,11 +26,12 @@ export function requirePermission(user: User, permission: string): void {
 }
 
 export function safeUser(user: User): Omit<User, 'passwordHash'> {
-  const { passwordHash: _passwordHash, ...publicUser } = user;
+  const { passwordHash: _passwordHash, mfaSecretCiphertext: _mfaSecretCiphertext, mfaLastUsedAt: _mfaLastUsedAt, ...publicUser } = user;
   return publicUser;
 }
 
-export async function login(store: JsonStore, email: string, password: string): Promise<{ token: string; user: Omit<User, 'passwordHash'>; expiresAt: string }> {
+export async function login(store: Store, email: string, password: string, mfaCode?: string): Promise<{ token: string; user: Omit<User, 'passwordHash'>; expiresAt: string }> {
+  assertProductionConfig();
   const normalized = email.trim().toLowerCase();
   const token = randomToken();
   const now = new Date();
@@ -39,7 +40,13 @@ export async function login(store: JsonStore, email: string, password: string): 
     const user = state.users.find((candidate) => candidate.email === normalized && candidate.active);
     if (!user || !verifyPassword(password, user.passwordHash)) throw new DomainError('INVALID_CREDENTIALS', '邮箱或密码错误', 401);
     if (user.mfaEnabled && process.env.CAMPMIND_DEMO_MFA !== 'true') {
-      throw new DomainError('MFA_REQUIRED', '需要完成管理账号二次验证', 401);
+      if (typeof mfaCode !== 'string' || !mfaCode.trim()) throw new DomainError('MFA_REQUIRED', '需要完成管理账号二次验证', 401);
+      if (!user.mfaSecretCiphertext) throw new DomainError('MFA_NOT_CONFIGURED', '管理账号尚未配置二次验证，请联系平台管理员', 503);
+      let secret = '';
+      try { secret = decrypt<{ secret: string }>(user.mfaSecretCiphertext).secret; } catch { throw new DomainError('MFA_NOT_CONFIGURED', '管理账号二次验证配置无效', 503); }
+      if (!verifyTotpCode(secret, mfaCode.trim())) throw new DomainError('MFA_INVALID', '二次验证码无效或已过期', 401);
+      if (user.mfaLastUsedAt && Number.isFinite(Date.parse(user.mfaLastUsedAt)) && now.getTime() - Date.parse(user.mfaLastUsedAt) < 30_000) throw new DomainError('MFA_REPLAYED', '二次验证码已使用，请等待下一验证码', 401);
+      user.mfaLastUsedAt = now.toISOString();
     }
     state.sessions = state.sessions.filter((session) => session.expiresAt > now.toISOString() && !session.revokedAt);
     state.sessions.push({ tokenHash: hashToken(token), userId: user.id, tenantId: user.tenantId, expiresAt, createdAt: now.toISOString() });
@@ -49,7 +56,7 @@ export async function login(store: JsonStore, email: string, password: string): 
   return { token, user: safeUser(user), expiresAt };
 }
 
-export async function authenticate(store: JsonStore, authorization: string | undefined): Promise<AuthenticatedUser> {
+export async function authenticate(store: Store, authorization: string | undefined): Promise<AuthenticatedUser> {
   if (!authorization?.startsWith('Bearer ')) throw unauthorized();
   const token = authorization.slice('Bearer '.length).trim();
   if (!token) throw unauthorized();
@@ -63,7 +70,7 @@ export async function authenticate(store: JsonStore, authorization: string | und
   });
 }
 
-export async function logout(store: JsonStore, session: Session): Promise<void> {
+export async function logout(store: Store, session: Session): Promise<void> {
   await store.transaction((state) => {
     const record = state.sessions.find((candidate) => candidate.tokenHash === session.tokenHash);
     if (record) record.revokedAt = new Date().toISOString();

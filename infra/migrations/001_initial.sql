@@ -5,8 +5,10 @@ create extension if not exists pgcrypto;
 create table if not exists tenants (
   id uuid primary key default gen_random_uuid(),
   name text not null,
+  region text,
   created_at timestamptz not null default now()
 );
+alter table tenants add column if not exists region text;
 create table if not exists schools (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references tenants(id),
@@ -24,11 +26,15 @@ create table if not exists users (
   role text not null check (role in ('platform_ops','school_admin','professional_lead','counselor','teacher','student','guardian','privacy_auditor')),
   active boolean not null default true,
   mfa_enabled boolean not null default false,
+  mfa_secret_ciphertext text,
+  mfa_last_used_at timestamptz,
   created_at timestamptz not null default now(),
   unique (tenant_id, email),
   unique (tenant_id, id),
   foreign key (tenant_id, school_id) references schools(tenant_id, id)
 );
+alter table users add column if not exists mfa_secret_ciphertext text;
+alter table users add column if not exists mfa_last_used_at timestamptz;
 create table if not exists students (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references tenants(id),
@@ -149,6 +155,38 @@ create table if not exists outbox_events (
   unique (tenant_id, id)
 );
 
+-- Spreadsheet intake is a two-step, tenant-scoped workflow.  The preview hash
+-- prevents a caller from validating one file and committing another payload.
+create table if not exists import_batches (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id),
+  school_id uuid not null,
+  created_by uuid not null,
+  filename text not null,
+  status text not null check (status in ('previewed','committed','rejected')),
+  mapping_version integer not null check (mapping_version > 0),
+  row_count integer not null check (row_count between 1 and 10000),
+  valid_row_count integer not null check (valid_row_count between 0 and row_count),
+  error_count integer not null check (error_count between 0 and row_count),
+  preview_hash text not null,
+  created_at timestamptz not null default now(),
+  foreign key (tenant_id, school_id) references schools(tenant_id, id),
+  foreign key (tenant_id, created_by) references users(tenant_id, id),
+  unique (tenant_id, id)
+);
+create table if not exists import_rows (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id),
+  batch_id uuid not null,
+  row_number integer not null check (row_number between 1 and 10000),
+  status text not null check (status in ('valid','error')),
+  message text,
+  synthetic_student_id text,
+  foreign key (tenant_id, batch_id) references import_batches(tenant_id, id),
+  unique (tenant_id, id),
+  unique (tenant_id, batch_id, row_number)
+);
+
 -- Every tenant-owned table must have a policy in the production migration set.
 -- The application sets app.tenant_id only inside a transaction; an absent setting denies rows.
 alter table tenants enable row level security;
@@ -162,6 +200,8 @@ alter table campaigns enable row level security;
 alter table frequency_reservations enable row level security;
 alter table audit_events enable row level security;
 alter table outbox_events enable row level security;
+alter table import_batches enable row level security;
+alter table import_rows enable row level security;
 
 do $$
 begin
@@ -176,6 +216,8 @@ begin
   execute 'create policy frequency_isolation on frequency_reservations using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
   execute 'create policy audit_isolation on audit_events using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
   execute 'create policy outbox_isolation on outbox_events using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
+  execute 'create policy import_batches_isolation on import_batches using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
+  execute 'create policy import_rows_isolation on import_rows using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
 exception when duplicate_object then null;
 end $$;
 
@@ -320,7 +362,98 @@ end $$;
 do $$
 declare t text;
 begin
-  foreach t in array array['tenants','schools','users','students','guardian_links','consents','assessment_plans','campaigns','frequency_reservations','audit_events','outbox_events','assignments','attempts','answer_revisions','submissions','score_runs','reports','risk_signals','risk_cases','risk_reviews','case_acknowledgements','follow_ups','rights_requests','deletion_tombstones','export_jobs','delivery_attempts','availability_slots','appointments','media_assets','content_items','profile_schemas','profile_responses'] loop
+  foreach t in array array['tenants','schools','users','students','guardian_links','consents','assessment_plans','campaigns','frequency_reservations','audit_events','outbox_events','import_batches','import_rows','assignments','attempts','answer_revisions','submissions','score_runs','reports','risk_signals','risk_cases','risk_reviews','case_acknowledgements','follow_ups','rights_requests','deletion_tombstones','export_jobs','delivery_attempts','availability_slots','appointments','media_assets','content_items','profile_schemas','profile_responses'] loop
     execute format('alter table %I force row level security', t);
   end loop;
 end $$;
+
+-- Domain checks backstop the service validation at the database boundary.
+do $$
+begin
+  alter table assessment_plans add constraint assessment_plans_age_check check (min_age between 6 and 19 and max_age between min_age and 19);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table campaigns add constraint campaigns_window_check check (opens_at < closes_at);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table assignments add constraint assignments_status_check check (status in ('assigned','started','completed','declined','expired'));
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table attempts add constraint attempts_state_check check (state in ('not_started','in_progress','submitted','scoring_pending','scored','scoring_failed','invalid','withdrawn','expired'));
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table answer_revisions add constraint answer_revisions_revision_check check (revision > 0);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table risk_signals add constraint risk_signals_shape_check check (source in ('score_rule','self_request','staff_observation','external_referral') and level in ('attention','urgent') and status in ('open','reviewed','dismissed'));
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table rights_requests add constraint rights_requests_shape_check check (kind in ('access','correct','delete','withdraw') and status in ('open','processing','completed','rejected'));
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table export_jobs add constraint export_jobs_shape_check check (kind in ('aggregate','report') and status in ('requested','approved','ready','expired','revoked'));
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table availability_slots add constraint availability_slots_status_check check (status in ('available','held','blocked'));
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table appointments add constraint appointments_state_check check (state in ('requested','confirmed','completed','cancelled','no_show'));
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table profile_schemas add constraint profile_schemas_state_check check (state in ('draft','approved','retired'));
+exception when duplicate_object then null;
+end $$;
+
+-- Audit evidence is append-only.  The trigger protects the invariant even if
+-- a maintenance session accidentally receives broader table privileges.
+create or replace function deny_audit_mutation() returns trigger language plpgsql as $$
+begin
+  raise exception 'audit_events are append-only';
+end;
+$$;
+drop trigger if exists audit_events_immutable on audit_events;
+create trigger audit_events_immutable before update or delete on audit_events
+for each row execute function deny_audit_mutation();
+
+-- Approved assessment plans are immutable versions.  A later revocation is a
+-- state change, not an in-place edit to scoring, wording, or provenance.
+create or replace function enforce_assessment_plan_immutability() returns trigger language plpgsql as $$
+begin
+  if old.status = 'revoked' then
+    raise exception 'revoked assessment plans cannot change';
+  end if;
+  if old.status = 'approved' and (
+    new.code is distinct from old.code or new.title is distinct from old.title or
+    new.version is distinct from old.version or new.provenance is distinct from old.provenance or
+    new.min_age is distinct from old.min_age or new.max_age is distinct from old.max_age or
+    new.scoring_version is distinct from old.scoring_version or new.notice_version is distinct from old.notice_version or
+    new.config_json is distinct from old.config_json
+  ) then
+    raise exception 'approved assessment plans are immutable';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists assessment_plans_immutable on assessment_plans;
+create trigger assessment_plans_immutable before update on assessment_plans
+for each row execute function enforce_assessment_plan_immutability();

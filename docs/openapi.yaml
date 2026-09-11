@@ -32,6 +32,14 @@ paths:
     post: {summary: Verify a guardian relationship, parameters: [{$ref: '#/components/parameters/linkId'}], responses: {'200': {description: Verified relationship}}}
   /v1/rights-requests/{requestId}/result:
     get: {summary: Download an approved access or correction result after authorization, parameters: [{$ref: '#/components/parameters/requestId'}], responses: {'200': {description: Rights result}, '403': {description: Not the requester or privacy role}}}
+  /v1/admin/operations/status:
+    get: {summary: Read redacted outbox and delivery counters, responses: {'200': {description: Operational status}, '403': {description: Operations permission required}}}
+  /v1/admin/operations/requeue-dead-letters:
+    post: {summary: Requeue bounded dead-letter events, responses: {'200': {description: Requeue result}, '400': {description: Invalid limit}}}
+  /v1/admin/operations/escalate:
+    post: {summary: Queue redacted reminders for unacknowledged cases, responses: {'200': {description: Escalation result}, '400': {description: Invalid approved interval}}}
+  /v1/admin/retention/run:
+    post: {summary: Expire derived exports and replay deletion tombstones, responses: {'200': {description: Retention result}, '403': {description: Operations permission required}}}
   /v1/me:
     get: {summary: Current named user, responses: {'200': {description: User}}}
   /v1/me/tasks:
@@ -40,6 +48,8 @@ paths:
     post: {summary: Start an age/consent/frequency-checked attempt, parameters: [{$ref: '#/components/parameters/assignmentId'}], responses: {'201': {description: Attempt}, '400': {description: Consent, age, frequency or time-window failure}}}
   /v1/attempts/{attemptId}/answers:
     put: {summary: Save a revision-safe draft, parameters: [{$ref: '#/components/parameters/attemptId'}], responses: {'200': {description: Saved}, '409': {description: Revision conflict}}}
+  /v1/attempts/{attemptId}:
+    get: {summary: Read the authenticated student's server-confirmed draft, parameters: [{$ref: '#/components/parameters/attemptId'}], responses: {'200': {description: Draft}, '401': {description: Unauthorized}, '404': {description: Not found}, '409': {description: Attempt is no longer resumable}}}
   /v1/attempts/{attemptId}/submit:
     post: {summary: Idempotently freeze a submission and enqueue scoring, parameters: [{$ref: '#/components/parameters/attemptId'}], responses: {'202': {description: Scoring pending}, '409': {description: Idempotency conflict}}}
   /v1/reports:
@@ -111,3 +121,4 @@ components:
       properties:
         email: {type: string, format: email}
         password: {type: string, minLength: 12, writeOnly: true}
+        mfaCode: {type: string, pattern: '^[0-9]{6}$', description: Optional RFC 6238 code for enrolled staff accounts}

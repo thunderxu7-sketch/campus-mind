@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { approveFrequencyException, beginAttempt, createCampaign, createSelfScreening, publishCampaign, revokeScale, saveAnswers, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
+import { approveFrequencyException, beginAttempt, createCampaign, createSelfScreening, publishCampaign, revokeScale, saveAnswers, updateCampaignState, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
 import { JsonStore } from '../dist/apps/api/src/domain/store.js';
 import { seedDemoState } from '../dist/apps/api/src/domain/seed.js';
 
@@ -63,6 +63,20 @@ test('professional frequency exceptions are explicit and scoped to one draft cam
   assert.equal(reservation.status, 'exception');
   await publishCampaign(store, admin, campaign.id);
   assert.equal(store.snapshot().assignments.filter((assignment) => assignment.campaignId === campaign.id).length, 1);
+});
+
+test('closing an unfinished campaign expires drafts and releases unused frequency reservations', async () => {
+  const state = seedDemoState();
+  state.campaigns = [];
+  state.assignments = [];
+  state.frequencyReservations = [];
+  const store = new JsonStore({ initial: state });
+  const admin = authFor(store.snapshot(), 'user-admin-demo');
+  const campaign = await createCampaign(store, admin, { schoolId: 'school-demo', name: '合成未完成任务', purpose: 'screening', academicYear: '2026-2027', opensAt: new Date(Date.now() - 1_000).toISOString(), closesAt: new Date(Date.now() + 3_600_000).toISOString(), scaleVersionId: 'scale-synthetic-demo-v1', participantStudentIds: ['student-demo'] });
+  await publishCampaign(store, admin, campaign.id);
+  await updateCampaignState(store, admin, campaign.id, 'closed');
+  assert.equal(store.snapshot().assignments[0].status, 'expired');
+  assert.equal(store.snapshot().frequencyReservations[0].status, 'released');
 });
 
 test('revoking a scale blocks new use without changing historical identifiers', async () => {

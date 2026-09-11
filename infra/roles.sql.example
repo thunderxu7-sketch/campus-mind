@@ -1,0 +1,22 @@
+-- Example role boundary for a PostgreSQL deployment.
+-- Replace passwords with a secret manager reference; never commit real values.
+-- Run after 001_initial.sql as a migration/bootstrap identity.
+
+do $$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'campus_mind_app') then
+    create role campus_mind_app login password 'CHANGE_ME_IN_SECRET_MANAGER';
+  end if;
+end $$;
+
+alter role campus_mind_app nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
+revoke all on schema public from campus_mind_app;
+grant usage on schema public to campus_mind_app;
+grant select, insert, update, delete on all tables in schema public to campus_mind_app;
+grant usage, select on all sequences in schema public to campus_mind_app;
+revoke update, delete on audit_events from campus_mind_app;
+
+-- Every request/worker transaction must execute:
+--   set local app.tenant_id = '<verified-tenant-id>';
+-- and the connection pool must discard the session after commit/rollback.
+-- The migration identity remains the table owner and is never used by HTTP.

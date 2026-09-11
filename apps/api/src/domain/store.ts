@@ -16,10 +16,28 @@ export function emptyState(): DatabaseState {
 export interface StoreOptions { filePath?: string; initial?: DatabaseState; }
 
 /**
+ * Persistence contract consumed by the domain layer.  `JsonStore` is only a
+ * local reference implementation; production can inject a PostgreSQL-backed
+ * implementation without coupling business rules to a file adapter.
+ */
+export interface Store {
+  transaction<T>(fn: (state: DatabaseState) => T | Promise<T>): Promise<T>;
+  read<T>(fn: (state: DatabaseState) => T | Promise<T>): Promise<T>;
+}
+
+/** The local adapter is deliberately unavailable to a production entrypoint.
+ * A deployment must inject a PostgreSQL-backed adapter into createApp/worker;
+ * silently writing psychological records to a JSON file is not an acceptable
+ * fallback. */
+export function assertProductionStoreInjection(store?: Store): void {
+  if (process.env.NODE_ENV === 'production' && (!store || store instanceof JsonStore)) throw new Error('Production requires an injected PostgreSQL-backed store; JsonStore is reference-only');
+}
+
+/**
  * A deliberately small local persistence adapter. It makes the reference app runnable without a service dependency.
  * Production must use the PostgreSQL migrations and enforce the same domain invariants in a transaction.
  */
-export class JsonStore {
+export class JsonStore implements Store {
   private state: DatabaseState;
   private lock: Promise<void> = Promise.resolve();
   private readonly filePath?: string;

@@ -42,6 +42,10 @@ export interface User {
   role: Role;
   active: boolean;
   mfaEnabled: boolean;
+  /** Encrypted TOTP secret; never returned by safeUser or API responses. */
+  mfaSecretCiphertext?: string;
+  /** Last accepted MFA time marker used to reject immediate code replay. */
+  mfaLastUsedAt?: string;
   createdAt: string;
 }
 
@@ -318,6 +322,8 @@ export interface ImportBatch {
   rowCount: number;
   validRowCount: number;
   errorCount: number;
+  /** Stable hash of the exact preview payload; commit must match it. */
+  previewHash?: string;
   createdAt: string;
 }
 

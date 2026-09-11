@@ -17,6 +17,8 @@
     "check:plan:write": "python3 scripts/check_plan.py --write",
     "worker": "npm run build && node dist/apps/api/src/worker.js",
     "drill:recovery": "npm run build && node scripts/recovery-drill.mjs",
+    "drill:capacity": "npm run build && node scripts/capacity-drill.mjs",
+    "release:check": "node scripts/release-gate.mjs",
     "security:check": "node scripts/security-check.mjs"
   },
   "devDependencies": {

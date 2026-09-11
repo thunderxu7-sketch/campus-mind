@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { score, assertUsableScale } from '../dist/apps/api/src/domain/scoring.js';
+import { assertProductionConfig, totpCode, verifyTotpCode } from '../dist/apps/api/src/domain/crypto.js';
 
 const scale = {
   id: 'gold-scale', tenantId: 'tenant', code: 'SYNTH-GOLD', title: '合成计分金标准', version: '1.0.0', provenance: 'synthetic_only', status: 'approved', minAge: 12, maxAge: 18, scoringVersion: 'gold-v1', noticeVersion: 'notice',
@@ -25,7 +26,28 @@ test('invalid answer vectors never become a normal result', () => {
 
 test('synthetic scales are barred only in production mode', () => {
   const previous = process.env.NODE_ENV;
+  const previousKey = process.env.CAMPMIND_MASTER_KEY;
+  const previousBackend = process.env.CAMPMIND_DATA_BACKEND;
+  const previousDemoMfa = process.env.CAMPMIND_DEMO_MFA;
   process.env.NODE_ENV = 'production';
   assert.throws(() => assertUsableScale(scale), /演示量表/);
+  process.env.CAMPMIND_MASTER_KEY = 'dedicated-production-test-key-1234567890';
+  process.env.CAMPMIND_DATA_BACKEND = 'json';
+  process.env.CAMPMIND_DEMO_MFA = 'false';
+  assert.throws(() => assertProductionConfig(), /CAMPMIND_DATA_BACKEND/);
+  process.env.CAMPMIND_DATA_BACKEND = 'postgres';
+  process.env.CAMPMIND_DEMO_MFA = 'true';
+  assert.throws(() => assertProductionConfig(), /CAMPMIND_DEMO_MFA/);
   process.env.NODE_ENV = previous;
+  process.env.CAMPMIND_MASTER_KEY = previousKey;
+  process.env.CAMPMIND_DATA_BACKEND = previousBackend;
+  process.env.CAMPMIND_DEMO_MFA = previousDemoMfa;
+});
+
+test('TOTP helper follows the RFC 6238 SHA-1 vector and bounded clock skew', () => {
+  const secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+  assert.equal(totpCode(secret, 59_000), '287082');
+  assert.equal(verifyTotpCode(secret, '287082', 59_000), true);
+  assert.equal(verifyTotpCode(secret, '287082', 59_000 + 90_000), false);
+  assert.equal(verifyTotpCode(secret, 'abcdef', 59_000), false);
 });

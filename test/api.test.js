@@ -3,6 +3,7 @@ import { test, before, after } from 'node:test';
 import { createApp } from '../dist/apps/api/src/main.js';
 import { JsonStore } from '../dist/apps/api/src/domain/store.js';
 import { seedDemoState, DEMO_PASSWORD, DEMO_IDS } from '../dist/apps/api/src/domain/seed.js';
+import { hashPassword, totpCode } from '../dist/apps/api/src/domain/crypto.js';
 import { createCampaign, drainOutbox, publishCampaign } from '../dist/apps/api/src/domain/service.js';
 
 process.env.CAMPMIND_DEMO_MFA = 'true';
@@ -11,6 +12,8 @@ process.env.CAMPMIND_MASTER_KEY = 'test-master-key-never-use-in-production';
 let server;
 let base;
 let store;
+let opsToken;
+const tokenCache = new Map();
 
 before(async () => {
   store = new JsonStore({ initial: seedDemoState() });
@@ -30,8 +33,10 @@ async function request(path, options = {}) {
 }
 
 async function login(email) {
+  if (tokenCache.has(email)) return tokenCache.get(email);
   const { response, body } = await request('/v1/auth/login', { method: 'POST', body: JSON.stringify({ email, password: DEMO_PASSWORD }) });
   assert.equal(response.status, 200, JSON.stringify(body));
+  tokenCache.set(email, body.data.token);
   return body.data.token;
 }
 
@@ -49,12 +54,63 @@ test('health and browser surfaces expose safety headers', async () => {
   assert.match(await page.text(), /不是诊断/);
 });
 
+test('state-changing requests reject an untrusted browser origin', async () => {
+  const { response, body } = await request('/v1/auth/login', { method: 'POST', headers: { origin: 'https://untrusted.example' }, body: JSON.stringify({ email: 'student@campus-mind.demo', password: DEMO_PASSWORD }) });
+  assert.equal(response.status, 403);
+  assert.equal(body.error.code, 'CSRF_ORIGIN_INVALID');
+});
+
+test('production entrypoint cannot silently fall back to the JSON adapter', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousBackend = process.env.CAMPMIND_DATA_BACKEND;
+  const previousKey = process.env.CAMPMIND_MASTER_KEY;
+  const previousMfa = process.env.CAMPMIND_DEMO_MFA;
+  process.env.NODE_ENV = 'production';
+  process.env.CAMPMIND_DATA_BACKEND = 'postgres';
+  process.env.CAMPMIND_MASTER_KEY = 'a-dedicated-test-production-key-that-is-not-local';
+  process.env.CAMPMIND_DEMO_MFA = 'false';
+  assert.throws(() => createApp(), /injected PostgreSQL-backed store/);
+  assert.throws(() => createApp({ store: new JsonStore({ initial: seedDemoState() }) }), /injected PostgreSQL-backed store/);
+  process.env.NODE_ENV = previousNodeEnv;
+  process.env.CAMPMIND_DATA_BACKEND = previousBackend;
+  process.env.CAMPMIND_MASTER_KEY = previousKey;
+  process.env.CAMPMIND_DEMO_MFA = previousMfa;
+});
+
+test('tenant scope rejects cross-school and cross-tenant identifiers', async () => {
+  await store.transaction((state) => {
+    const createdAt = new Date().toISOString();
+    state.tenants.push({ id: 'tenant-other', name: '第二合成租户', region: 'other', createdAt });
+    state.schools.push({ id: 'school-other', tenantId: 'tenant-other', name: '第二合成学校', createdAt });
+    state.users.push({ id: 'student-other', tenantId: 'tenant-other', schoolId: 'school-other', email: 'student@other.demo', displayName: '第二合成学生', passwordHash: hashPassword(DEMO_PASSWORD), role: 'student', active: true, mfaEnabled: false, createdAt });
+    state.students.push({ id: 'student-other', tenantId: 'tenant-other', schoolId: 'school-other', classId: 'class-other', externalRefHash: 'other-ref', displayNameCiphertext: state.students[0].displayNameCiphertext, age: 15, guardianVerified: false, active: true, createdAt });
+  });
+  const professional = await login('professional@campus-mind.demo');
+  const archive = await request('/v1/students/student-other/archive?purpose=case_review', { headers: auth(professional) });
+  assert.equal(archive.response.status, 404);
+  const admin = await login('admin@campus-mind.demo');
+  const campaign = await request('/v1/campaigns', { method: 'POST', headers: auth(admin), body: JSON.stringify({ schoolId: 'school-demo', name: '跨租户名单', purpose: 'screening', academicYear: '2026-2027', opensAt: new Date(Date.now() - 1_000).toISOString(), closesAt: new Date(Date.now() + 3_600_000).toISOString(), scaleVersionId: 'scale-synthetic-demo-v1', participantStudentIds: ['student-other'] }) });
+  assert.equal(campaign.response.status, 403);
+});
+
 test('admin MFA is enforced unless demo override is explicitly enabled', async () => {
   const previous = process.env.CAMPMIND_DEMO_MFA;
   process.env.CAMPMIND_DEMO_MFA = 'false';
   const { response, body } = await request('/v1/auth/login', { method: 'POST', body: JSON.stringify({ email: 'admin@campus-mind.demo', password: DEMO_PASSWORD }) });
   assert.equal(response.status, 401);
   assert.equal(body.error.code, 'MFA_REQUIRED');
+  process.env.CAMPMIND_DEMO_MFA = previous;
+});
+
+test('enrolled TOTP code completes the named admin MFA challenge', async () => {
+  const previous = process.env.CAMPMIND_DEMO_MFA;
+  process.env.CAMPMIND_DEMO_MFA = 'false';
+  const { response, body } = await request('/v1/auth/login', { method: 'POST', body: JSON.stringify({ email: 'admin@campus-mind.demo', password: DEMO_PASSWORD, mfaCode: totpCode('JBSWY3DPEHPK3PXP') }) });
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.equal(Object.hasOwn(body.data.user, 'mfaSecretCiphertext'), false);
+  const replay = await request('/v1/auth/login', { method: 'POST', body: JSON.stringify({ email: 'admin@campus-mind.demo', password: DEMO_PASSWORD, mfaCode: totpCode('JBSWY3DPEHPK3PXP') }) });
+  assert.equal(replay.response.status, 401);
+  assert.equal(replay.body.error.code, 'MFA_REPLAYED');
   process.env.CAMPMIND_DEMO_MFA = previous;
 });
 
@@ -70,6 +126,10 @@ test('student assessment lifecycle is durable, revision-safe and idempotent', as
   const scale = started.body.data.scale;
   const saved = await request(`/v1/attempts/${attemptId}/answers`, { method: 'PUT', headers: auth(token), body: JSON.stringify({ expectedRevision: 0, answers: { q1: 1 } }) });
   assert.equal(saved.response.status, 200);
+  const resumed = await request(`/v1/attempts/${attemptId}`, { headers: auth(token) });
+  assert.equal(resumed.response.status, 200);
+  assert.equal(resumed.body.data.attempt.currentRevision, saved.body.data.revision);
+  assert.equal(resumed.body.data.answers.q1, 1);
   const conflict = await request(`/v1/attempts/${attemptId}/answers`, { method: 'PUT', headers: auth(token), body: JSON.stringify({ expectedRevision: 0, answers: { q1: 0 } }) });
   assert.equal(conflict.response.status, 409);
   assert.equal(conflict.body.error.code, 'REVISION_CONFLICT');
@@ -152,6 +212,9 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   const preview = await request('/v1/imports/preview', { method: 'POST', headers: auth(admin), body: JSON.stringify({ schoolId: 'school-demo', filename: 'synthetic-students.csv', rows: [{ externalId: 'synthetic-new-001', displayName: '合成学生甲', age: 14, classId: 'class-demo-1', guardianVerified: false }, { externalId: '', displayName: '缺失编号', age: 14, classId: 'class-demo-1' }] }) });
   assert.equal(preview.response.status, 201, JSON.stringify(preview.body));
   assert.equal(preview.body.data.batch.validRowCount, 1);
+  const mismatchedCommit = await request(`/v1/imports/${preview.body.data.batch.id}/commit`, { method: 'POST', headers: auth(admin), body: JSON.stringify({ rows: [{ externalId: 'synthetic-different-001', displayName: '不应绕过预检', age: 14, classId: 'class-demo-1', guardianVerified: false }, { externalId: '', displayName: '缺失编号', age: 14, classId: 'class-demo-1' }] }) });
+  assert.equal(mismatchedCommit.response.status, 409);
+  assert.equal(mismatchedCommit.body.error.code, 'IMPORT_VERSION_CONFLICT');
   const committed = await request(`/v1/imports/${preview.body.data.batch.id}/commit`, { method: 'POST', headers: auth(admin), body: JSON.stringify({ rows: [{ externalId: 'synthetic-new-001', displayName: '合成学生甲', age: 14, classId: 'class-demo-1', guardianVerified: false }, { externalId: '', displayName: '缺失编号', age: 14, classId: 'class-demo-1' }] }) });
   assert.equal(committed.response.status, 200);
   const schema = await request('/v1/profile-schemas', { method: 'POST', headers: auth(professional), body: JSON.stringify({ version: 'demo-v1', fields: [{ id: 'sleep', label: '睡眠情况', purpose: '合成演示字段', required: false, sensitive: true }] }) });
@@ -263,10 +326,10 @@ test('consent withdrawal blocks future assessment and leaves audit evidence', as
   const audit = await request('/v1/admin/audit', { headers: auth(admin) });
   assert.equal(audit.response.status, 403, 'school admin cannot read sensitive audit by default');
   assert.ok(store.snapshot().auditEvents.some((e) => e.action === 'consent.withdrawn'));
-  const ops = await login('ops@campus-mind.demo');
-  const drained = await request('/v1/admin/worker/drain', { method: 'POST', headers: auth(ops), body: '{}' });
+  opsToken = await login('ops@campus-mind.demo');
+  const drained = await request('/v1/admin/worker/drain', { method: 'POST', headers: auth(opsToken), body: '{}' });
   assert.equal(drained.response.status, 200);
-  const regional = await request('/v1/admin/regional-analytics', { headers: auth(ops) });
+  const regional = await request('/v1/admin/regional-analytics', { headers: auth(opsToken) });
   assert.equal(regional.response.status, 200);
   assert.equal(regional.body.data.rows[0].suppressed, true);
   assert.ok(store.snapshot().auditEvents.some((event) => event.action === 'analytics.viewed'));
@@ -297,4 +360,15 @@ test('workflow inputs reject invalid enums, dates and governed field shapes', as
   const invalidAppointment = await request('/v1/appointments/does-not-matter/state', { method: 'POST', headers: auth(professional), body: JSON.stringify({ state: 'bogus' }) });
   assert.equal(invalidAppointment.response.status, 400);
   assert.equal(invalidAppointment.body.error.code, 'APPOINTMENT_STATE_INVALID');
+  const invalidReview = await request('/v1/cases/does-not-matter/reviews', { method: 'POST', headers: auth(professional), body: JSON.stringify({ decision: 'bogus', note: '说明' }) });
+  assert.equal(invalidReview.response.status, 400);
+  assert.equal(invalidReview.body.error.code, 'CASE_REVIEW_INVALID');
+  const invalidExport = await request('/v1/exports', { method: 'POST', headers: auth(admin), body: JSON.stringify({ kind: 'raw_answers' }) });
+  assert.equal(invalidExport.response.status, 400);
+  assert.equal(invalidExport.body.error.code, 'EXPORT_KIND_INVALID');
+  const operations = await request('/v1/admin/operations/status', { headers: auth(opsToken) });
+  assert.equal(operations.response.status, 200);
+  assert.equal(Object.hasOwn(operations.body.data, 'riskSignals'), false);
+  const retention = await request('/v1/admin/retention/run', { method: 'POST', headers: auth(opsToken), body: JSON.stringify({ asOf: '2026-09-11T00:00:00.000Z' }) });
+  assert.equal(retention.response.status, 200);
 });
