@@ -42,6 +42,10 @@ function fileFor(rootDir: string, tenantId: string, objectKey: string): string {
   return join(rootDir, tenantHash.slice(0, 2), `${tenantHash}-${keyHash}.blob`);
 }
 
+function associatedData(tenantId: string, objectKey: string, contentType: string, byteSize: number, sha256: string): Buffer {
+  return Buffer.from(`${tenantId}\0${objectKey}\0${contentType}\0${byteSize}\0${sha256}`, 'utf8');
+}
+
 interface Envelope {
   version: number;
   tenantId: string;
@@ -82,6 +86,7 @@ export class EncryptedFileObjectStore implements PrivateObjectStore {
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     const iv = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', tenantKey(input.tenantId), iv);
+    cipher.setAAD(associatedData(input.tenantId, input.objectKey, input.contentType, bytes.length, sha256));
     const ciphertext = Buffer.concat([cipher.update(bytes), cipher.final()]);
     const envelope: Envelope = {
       version: ENVELOPE_VERSION,
@@ -113,6 +118,7 @@ export class EncryptedFileObjectStore implements PrivateObjectStore {
     if (envelope.version !== ENVELOPE_VERSION || envelope.tenantId !== input.tenantId || envelope.objectKey !== input.objectKey || typeof envelope.contentType !== 'string' || !Number.isInteger(envelope.byteSize) || envelope.byteSize < 1 || envelope.byteSize > this.maxBytes) throw new Error('OBJECT_CORRUPT');
     try {
       const decipher = createDecipheriv('aes-256-gcm', tenantKey(input.tenantId), Buffer.from(envelope.iv, 'base64url'));
+      decipher.setAAD(associatedData(input.tenantId, input.objectKey, envelope.contentType, envelope.byteSize, envelope.sha256));
       decipher.setAuthTag(Buffer.from(envelope.tag, 'base64url'));
       const bytes = Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, 'base64url')), decipher.final()]);
       if (bytes.length !== envelope.byteSize || createHash('sha256').update(bytes).digest('hex') !== envelope.sha256) throw new Error('hash mismatch');

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -41,6 +41,10 @@ test('encrypted object store isolates tenants and keeps plaintext out of files',
     assert.equal(files.length, 1);
     assert.equal(statSync(files[0]).mode & 0o777, 0o600);
     assert.doesNotMatch(readFileSync(files[0], 'utf8'), /synthetic private media bytes/);
+    const tampered = JSON.parse(readFileSync(files[0], 'utf8'));
+    tampered.contentType = 'text/plain';
+    writeFileSync(files[0], JSON.stringify(tampered), { mode: 0o600 });
+    await assert.rejects(() => objectStore.get({ tenantId: 'tenant-a', objectKey: saved.objectKey }), /OBJECT_CORRUPT/);
     await objectStore.delete({ tenantId: 'tenant-a', objectKey: saved.objectKey });
     await objectStore.delete({ tenantId: 'tenant-a', objectKey: saved.objectKey });
     await assert.rejects(() => objectStore.get({ tenantId: 'tenant-a', objectKey: saved.objectKey }), /OBJECT_NOT_FOUND/);
