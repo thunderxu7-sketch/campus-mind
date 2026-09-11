@@ -561,6 +561,18 @@ test('consent withdrawal blocks future assessment and leaves audit evidence', as
   assert.equal(regional.body.data.rows[0].suppressed, true);
   assert.ok(store.snapshot().auditEvents.some((event) => event.action === 'analytics.viewed'));
   assert.ok(store.snapshot().auditEvents.some((event) => event.action === 'analytics.regional_viewed'));
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousRegionalApproval = process.env.CAMPMIND_REGIONAL_ANALYTICS_APPROVED;
+  process.env.NODE_ENV = 'production';
+  delete process.env.CAMPMIND_REGIONAL_ANALYTICS_APPROVED;
+  try {
+    const blockedRegional = await request('/v1/admin/regional-analytics', { headers: auth(opsToken) });
+    assert.equal(blockedRegional.response.status, 403);
+    assert.equal(blockedRegional.body.error.code, 'REGIONAL_ANALYTICS_NOT_APPROVED');
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
+    if (previousRegionalApproval === undefined) delete process.env.CAMPMIND_REGIONAL_ANALYTICS_APPROVED; else process.env.CAMPMIND_REGIONAL_ANALYTICS_APPROVED = previousRegionalApproval;
+  }
 });
 
 test('workflow inputs reject invalid enums, dates and governed field shapes', async () => {

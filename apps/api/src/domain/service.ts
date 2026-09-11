@@ -1564,6 +1564,11 @@ export async function createSelfScreening(store: Store, auth: AuthenticatedUser,
 
 export async function regionalAnalytics(store: Store, auth: AuthenticatedUser): Promise<Record<string, unknown>> {
   requirePermission(auth.user, 'analytics:regional');
+  // Cross-school aggregates are a separate processing purpose.  Even a
+  // platform-operations role must not turn the endpoint on in production
+  // until the receiving scope, suppression policy and school approvals have
+  // been recorded outside the application.
+  if (process.env.NODE_ENV === 'production' && process.env.CAMPMIND_REGIONAL_ANALYTICS_APPROVED !== 'true') throw new DomainError('REGIONAL_ANALYTICS_NOT_APPROVED', '区域聚合尚未完成用途和接收范围审批', 403);
   return store.transaction((state) => {
     const regions = new Map<string, { tenants: number; students: number; openCases: number }>();
     for (const tenant of state.tenants) {
