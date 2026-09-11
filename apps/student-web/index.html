@@ -105,10 +105,12 @@
     let saveInFlight = false;
     let dirty = false;
     let helpSubmitted = false;
+    let sessionEpoch = 0;
     const appointmentKeys = new Map();
     const $ = (selector) => document.querySelector(selector);
     const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     const setStatus = (message) => { $('#status').textContent = message; };
+    const isActiveSession = (epoch) => epoch === sessionEpoch && Boolean(token);
     $('#access-code').addEventListener('input', (event) => {
       const usingCode = Boolean(event.target.value.trim());
       $('#email').type = usingCode ? 'text' : 'email';
@@ -152,8 +154,11 @@
     const appointmentStateLabel = { requested: '待学校确认', confirmed: '已确认', completed: '已完成', cancelled: '已取消', no_show: '未到访' };
     const formatWhen = (value) => { const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString() : '时间不可用'; };
     async function loadAppointments() {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const [slots, appointments] = await Promise.all([api('/v1/availability-slots'), api('/v1/appointments')]);
+        if (!isActiveSession(epoch)) return;
         $('#appointmentSlots').innerHTML = slots.length ? slots.map((slot) => `<article class="task"><b>${esc(slot.counselorName)}</b><br>${esc(formatWhen(slot.startsAt))}–${esc(formatWhen(slot.endsAt))}${slot.room ? `<br>地点：${esc(slot.room)}` : ''}<br><button type="button" data-book-slot="${esc(slot.id)}">预约此时段</button></article>`).join('') : '<p class="muted">暂无可预约时段，请稍后查看。</p>';
         document.querySelectorAll('[data-book-slot]').forEach((button) => { button.onclick = () => bookAppointment(button.dataset.bookSlot, button); });
         $('#myAppointments').innerHTML = appointments.length ? appointments.map((appointment) => {
@@ -162,20 +167,26 @@
         }).join('') : '<p class="muted">暂无预约。</p>';
         document.querySelectorAll('[data-cancel-appointment]').forEach((button) => { button.onclick = () => cancelAppointment(button.dataset.cancelAppointment); });
         $('#appointmentStatus').textContent = '';
-      } catch (error) { $('#appointmentStatus').textContent = error.message || '预约信息暂时不可用'; }
+      } catch (error) { if (isActiveSession(epoch)) $('#appointmentStatus').textContent = error.message || '预约信息暂时不可用'; }
     }
 
     const reportStateLabel = { draft: '草稿', pending_review: '待专业审核', approved: '已审核', released: '已发布', revoked: '已撤回' };
     async function loadReports() {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const reports = await api('/v1/reports');
+        if (!isActiveSession(epoch)) return;
         $('#reportList').innerHTML = reports.length ? reports.map((report) => `<article class="task"><h3>${esc(report.title)}</h3><p class="muted">${esc(reportStateLabel[report.state] || report.state)} · ${esc(formatWhen(report.releasedAt || report.createdAt))}</p><p>${esc(report.summary?.text || report.summary?.note || '')}</p></article>`).join('') : '<p class="muted">暂无已发布反馈。完成测评后，需等待专业人员审核。</p>';
-      } catch (error) { $('#reportList').innerHTML = `<p class="muted">${esc(error.message || '反馈暂时不可用')}</p>`; }
+      } catch (error) { if (isActiveSession(epoch)) $('#reportList').innerHTML = `<p class="muted">${esc(error.message || '反馈暂时不可用')}</p>`; }
     }
 
     async function loadConsent() {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const consents = await api('/v1/me/consents?purpose=assessment');
+        if (!isActiveSession(epoch)) return;
         const active = consents.find((consent) => consent.status === 'active');
         const matching = active && (!currentNoticeVersion || active.noticeVersion === currentNoticeVersion) ? active : null;
         if (matching) {
@@ -186,50 +197,64 @@
           $('#consentAgree').checked = false;
           $('#consentStatus').textContent = active ? `当前任务需要告知版本 ${currentNoticeVersion}，已有记录为 ${active.noticeVersion}；请重新阅读并记录当前参与。` : '尚未记录当前测评参与。未完成参与记录时，任务不能开始。';
         }
-      } catch (error) { $('#consentStatus').textContent = error.message || '参与记录暂时不可用'; }
+      } catch (error) { if (isActiveSession(epoch)) $('#consentStatus').textContent = error.message || '参与记录暂时不可用'; }
     }
 
     const rightsStateLabel = { open: '待处理', processing: '处理中', completed: '已完成', rejected: '已拒绝' };
     const rightsKindLabel = { access: '查阅', correct: '更正', withdraw: '撤回参与', delete: '删除' };
     async function loadRights() {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const requests = await api('/v1/me/rights-requests');
+        if (!isActiveSession(epoch)) return;
         $('#rightsList').innerHTML = requests.length ? requests.map((request) => `<article class="task"><b>${esc(rightsKindLabel[request.kind] || request.kind)}</b> · ${esc(rightsStateLabel[request.status] || request.status)}<br><span class="muted">提交于 ${esc(formatWhen(request.createdAt))}${request.completedAt ? ` · 完成于 ${esc(formatWhen(request.completedAt))}` : ''}</span>${request.resultReady ? `<br><button type="button" data-rights-result="${esc(request.id)}">查看处理结果</button>` : ''}</article>`).join('') : '<p class="muted">暂无申请记录。</p>';
         document.querySelectorAll('[data-rights-result]').forEach((button) => { button.onclick = () => downloadRightsResult(button.dataset.rightsResult); });
-      } catch (error) { $('#rightsList').innerHTML = `<p class="muted">${esc(error.message || '申请记录暂时不可用')}</p>`; }
+      } catch (error) { if (isActiveSession(epoch)) $('#rightsList').innerHTML = `<p class="muted">${esc(error.message || '申请记录暂时不可用')}</p>`; }
     }
     async function downloadRightsResult(requestId) {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const result = await api('/v1/rights-requests/' + encodeURIComponent(requestId) + '/result');
+        if (!isActiveSession(epoch)) return;
         const message = result.note || '申请已完成。';
         $('#rightsStatus').textContent = message;
-      } catch (error) { $('#rightsStatus').textContent = error.message || '结果暂时不可用'; }
+      } catch (error) { if (isActiveSession(epoch)) $('#rightsStatus').textContent = error.message || '结果暂时不可用'; }
     }
     async function bookAppointment(slotId, button) {
       if (!slotId) return;
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       button.disabled = true;
       const idempotencyKey = appointmentKeys.get(slotId) || crypto.randomUUID();
       appointmentKeys.set(slotId, idempotencyKey);
       try {
         await api('/v1/appointments', { method: 'POST', body: JSON.stringify({ slotId, note: $('#appointment-note').value.trim() || undefined, idempotencyKey }) });
+        if (!isActiveSession(epoch)) return;
         $('#appointmentStatus').textContent = '预约请求已提交，请等待学校确认。';
         await loadAppointments();
-      } catch (error) { $('#appointmentStatus').textContent = error.message || '预约失败'; button.disabled = false; }
+      } catch (error) { if (isActiveSession(epoch)) { $('#appointmentStatus').textContent = error.message || '预约失败'; button.disabled = false; } }
     }
     async function cancelAppointment(appointmentId) {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         await api('/v1/appointments/' + encodeURIComponent(appointmentId) + '/state', { method: 'POST', body: JSON.stringify({ state: 'cancelled' }) });
+        if (!isActiveSession(epoch)) return;
         $('#appointmentStatus').textContent = '预约已取消。';
         await loadAppointments();
-      } catch (error) { $('#appointmentStatus').textContent = error.message || '取消失败'; }
+      } catch (error) { if (isActiveSession(epoch)) $('#appointmentStatus').textContent = error.message || '取消失败'; }
     }
 
     function clearClient() {
+      sessionEpoch += 1;
       token = '';
       currentUserId = '';
       attempt = null;
       revision = 0;
       dirty = false;
+      saveInFlight = false;
       helpSubmitted = false;
       if (saveTimer) clearTimeout(saveTimer);
       saveTimer = null;
@@ -288,24 +313,32 @@
 
     async function saveDraft(submitting) {
       if (!attempt || saveInFlight) return;
+      const epoch = sessionEpoch;
+      const attemptId = attempt.id;
+      if (!isActiveSession(epoch)) return;
       saveInFlight = true;
       try {
-        const saved = await api('/v1/attempts/' + attempt.id + '/answers', { method: 'PUT', body: JSON.stringify({ expectedRevision: revision, answers: selectedAnswers() }) });
+        const saved = await api('/v1/attempts/' + attemptId + '/answers', { method: 'PUT', body: JSON.stringify({ expectedRevision: revision, answers: selectedAnswers() }) });
+        if (!isActiveSession(epoch) || !attempt || attempt.id !== attemptId) return;
         revision = saved.revision;
         dirty = false;
         setSaveStatus('已保存 ' + new Date(saved.savedAt).toLocaleTimeString());
-        if (submitting) await finishSubmit();
+        if (submitting) await finishSubmit(epoch, attemptId);
       } catch (error) {
+        if (!isActiveSession(epoch) || !attempt || attempt.id !== attemptId) return;
         if (error.code === 'REVISION_CONFLICT') {
           dirty = true;
           setSaveStatus('其他窗口已更新答案，请刷新任务后再决定是否覆盖。');
         } else setSaveStatus(error.message);
         if (submitting) throw error;
-      } finally { saveInFlight = false; }
+      } finally { if (epoch === sessionEpoch) saveInFlight = false; }
     }
 
     async function loadAttempt(attemptId, scale) {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       const draft = await api('/v1/attempts/' + attemptId);
+      if (!isActiveSession(epoch)) return;
       attempt = draft.attempt;
       revision = draft.attempt.currentRevision;
       renderQuestions(scale, draft.answers || {});
@@ -325,14 +358,19 @@
     }
 
     async function loadSelfScales() {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const scales = await api('/v1/me/scales');
+        if (!isActiveSession(epoch)) return;
         $('#selfScaleList').innerHTML = scales.length ? scales.map((scale) => `<article class="task"><b>${esc(scale.title)}</b> · ${esc(scale.version)}<br><span class="muted">适用 ${esc(scale.minAge)}–${esc(scale.maxAge)} 岁 · ${(Array.isArray(scale.dimensions) ? esc(scale.dimensions.join('、')) : '')}</span><br><button type="button" data-self-scale="${esc(scale.id)}" data-self-notice="${esc(scale.noticeVersion || '')}">申请此方案</button></article>`).join('') : '<p class="muted">当前没有符合年龄或治理条件的自选方案；你仍可以使用人工求助和教育资源。</p>';
         document.querySelectorAll('[data-self-scale]').forEach((button) => { button.onclick = () => requestSelfScreening(button.dataset.selfScale, button); });
-      } catch (error) { $('#selfScaleList').innerHTML = `<p class="muted">${esc(error.message || '自选方案暂时不可用')}</p>`; }
+      } catch (error) { if (isActiveSession(epoch)) $('#selfScaleList').innerHTML = `<p class="muted">${esc(error.message || '自选方案暂时不可用')}</p>`; }
     }
     async function requestSelfScreening(scaleId, button) {
       if (!scaleId) return;
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       button.disabled = true;
       try {
         // Self-screening may use a newer notice than an assigned task. Align
@@ -341,28 +379,36 @@
         if (button.dataset.selfNotice) {
           currentNoticeVersion = button.dataset.selfNotice;
           await loadConsent();
+          if (!isActiveSession(epoch)) return;
           if (!$('#consentForm').hidden) { $('#consentStatus').textContent = `请先阅读并记录告知版本 ${currentNoticeVersion}，再申请此方案。`; button.disabled = false; return; }
         }
         // The API derives the current Chinese school year on the server.  Do
         // not let a device clock or a stale tab choose a year and bypass the
         // annual frequency reservation.
         await api('/v1/self-screenings', { method: 'POST', body: JSON.stringify({ scaleId }) });
+        if (!isActiveSession(epoch)) return;
         $('#selfScreeningStatus').textContent = '自选筛查任务已创建，已按学年频次和同意状态登记。';
-        renderTasks(await api('/v1/me/tasks'));
+        const tasks = await api('/v1/me/tasks');
+        if (!isActiveSession(epoch)) return;
+        renderTasks(tasks);
         await loadConsent();
-      } catch (error) { $('#selfScreeningStatus').textContent = error.code === 'FREQUENCY_REVIEW_REQUIRED' ? '本学年已有测评场次，需要学校专业人员复核后才能再次申请。' : error.message || '自选筛查申请失败'; button.disabled = false; }
+      } catch (error) { if (isActiveSession(epoch)) { $('#selfScreeningStatus').textContent = error.code === 'FREQUENCY_REVIEW_REQUIRED' ? '本学年已有测评场次，需要学校专业人员复核后才能再次申请。' : error.message || '自选筛查申请失败'; button.disabled = false; } }
     }
 
     $('#login').onsubmit = async (event) => {
       event.preventDefault();
+      let loginEpoch = sessionEpoch;
       try {
         const body = Object.fromEntries(new FormData(event.target));
         if (!body.accessCode) delete body.accessCode;
         else { delete body.email; delete body.password; delete body.mfaCode; }
         if (!body.accessCode && (!body.email || !body.password)) { setStatus('请输入邮箱和密码，或填写学校一次性凭证。'); return; }
+        clearClient();
+        loginEpoch = sessionEpoch;
         const response = await fetch('/v1/auth/login', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body) });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error?.message || '登录失败');
+        if (loginEpoch !== sessionEpoch) return;
         token = payload.data.token;
         currentUserId = payload.data.user.id;
         setStatus('已登录');
@@ -373,21 +419,28 @@
         $('#reports').hidden = false;
         $('#rights').hidden = false;
         const tasks = await api('/v1/me/tasks');
+        if (!isActiveSession(loginEpoch)) return;
         renderTasks(tasks);
         await Promise.all([loadConsent(), loadSelfScales(), loadAppointments(), loadReports(), loadRights()]);
-      } catch (error) { setStatus(error.message); }
+      } catch (error) { if (loginEpoch === sessionEpoch) setStatus(error.message); }
     };
 
     async function start(assignmentId) {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const started = await api('/v1/me/tasks/' + assignmentId + '/attempts', { method: 'POST', body: '{}' });
+        if (!isActiveSession(epoch)) return;
         await loadAttempt(started.attempt.id, started.scale);
+        if (!isActiveSession(epoch)) return;
         setStatus('任务已打开');
-      } catch (error) { setStatus(error.message); }
+      } catch (error) { if (isActiveSession(epoch)) setStatus(error.message); }
     }
 
-    async function finishSubmit() {
-      const output = await api('/v1/attempts/' + attempt.id + '/submit', { method: 'POST', body: JSON.stringify({ idempotencyKey: crypto.randomUUID() + '-submit' }) });
+    async function finishSubmit(epoch = sessionEpoch, attemptId = attempt?.id) {
+      if (!isActiveSession(epoch) || !attemptId || !attempt || attempt.id !== attemptId) return;
+      const output = await api('/v1/attempts/' + attemptId + '/submit', { method: 'POST', body: JSON.stringify({ idempotencyKey: crypto.randomUUID() + '-submit' }) });
+      if (!isActiveSession(epoch) || !attempt || attempt.id !== attemptId) return;
       dirty = false;
       setStatus('已提交。系统会将需要关注的线索交给心理专业人员人工复核；请等待学校反馈。');
       setSaveStatus('提交已接收：' + output.state);
@@ -402,50 +455,64 @@
 
     $('#help').onclick = async () => {
       if (helpSubmitted) return;
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       $('#help').disabled = true;
       $('#help').setAttribute('aria-busy', 'true');
       try {
         const me = await api('/v1/me');
+        if (!isActiveSession(epoch)) return;
         await api('/v1/risk-signals', { method: 'POST', body: JSON.stringify({ studentId: me.id, level: 'attention', reason: '学生主动申请人工支持' }) });
+        if (!isActiveSession(epoch)) return;
         helpSubmitted = true;
         $('#help').textContent = '求助已提交';
         setStatus('求助请求已提交给学校支持流程。');
       } catch (error) {
+        if (!isActiveSession(epoch)) return;
         helpSubmitted = false;
         $('#help').disabled = false;
         setStatus(error.message);
       } finally {
-        $('#help').removeAttribute('aria-busy');
+        if (isActiveSession(epoch)) $('#help').removeAttribute('aria-busy');
       }
     };
 
     $('#rightsForm').onsubmit = async (event) => {
       event.preventDefault();
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       const form = Object.fromEntries(new FormData(event.target));
       if (['delete', 'withdraw'].includes(form.kind) && !window.confirm('确认提交该申请？学校核验后可能停止测评处理或删除相关资料。')) return;
       try {
         const result = await api('/v1/rights-requests', { method: 'POST', body: JSON.stringify({ studentId: currentUserId, kind: form.kind, reason: form.reason || undefined }) });
+        if (!isActiveSession(epoch)) return;
         $('#rightsStatus').textContent = `申请已提交（编号 ${result.id}），请等待学校处理。`;
         event.target.reset();
         await loadRights();
-      } catch (error) { $('#rightsStatus').textContent = error.message || '申请提交失败'; }
+      } catch (error) { if (isActiveSession(epoch)) $('#rightsStatus').textContent = error.message || '申请提交失败'; }
     };
 
     $('#consentForm').onsubmit = async (event) => {
       event.preventDefault();
       if (!$('#consentAgree').checked) return;
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const result = await api('/v1/me/consents', { method: 'POST', body: JSON.stringify({ studentId: currentUserId, actorType: 'student', noticeVersion: currentNoticeVersion, purpose: 'assessment' }) });
+        if (!isActiveSession(epoch)) return;
         $('#consentForm').hidden = true;
         $('#consentStatus').textContent = `参与记录已保存（告知版本 ${result.noticeVersion}）。现在可以开始符合条件的任务。`;
         const tasks = await api('/v1/me/tasks');
+        if (!isActiveSession(epoch)) return;
         renderTasks(tasks);
-      } catch (error) { $('#consentStatus').textContent = error.message || '参与记录失败'; }
+      } catch (error) { if (isActiveSession(epoch)) $('#consentStatus').textContent = error.message || '参与记录失败'; }
     };
 
     $('#logout').onclick = async () => {
-      try { if (token) await fetch('/v1/auth/logout', { method: 'POST', headers: { authorization: 'Bearer ' + token } }); }
-      finally { clearClient(); setStatus('已退出并清除本页内容'); }
+      const logoutEpoch = sessionEpoch;
+      const logoutToken = token;
+      try { if (logoutToken) await fetch('/v1/auth/logout', { method: 'POST', headers: { authorization: 'Bearer ' + logoutToken } }); }
+      finally { if (logoutEpoch === sessionEpoch) { clearClient(); setStatus('已退出并清除本页内容'); } }
     };
 
     window.addEventListener('beforeunload', (event) => {

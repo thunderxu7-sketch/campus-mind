@@ -170,14 +170,17 @@
     let token = '';
     let currentRole = '';
     let pendingImport = null;
+    let sessionEpoch = 0;
     const $ = (selector) => document.querySelector(selector);
     const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     const setStatus = (message) => { $('#status').textContent = message; };
+    const isActiveSession = (epoch) => epoch === sessionEpoch && Boolean(token);
 
     // Shared workstations must not briefly expose the previous operator's
     // records while the next account is loading. Clear both rendered results
     // and in-progress form/import state before hiding the dashboard.
     function clearDashboard() {
+      sessionEpoch += 1;
       pendingImport = null;
       const empty = ['metrics', 'campaigns', 'scale', 'scaleCatalog', 'importPreview', 'campaignProgress', 'analyticsView', 'slotList', 'appointmentList', 'contentList', 'caseList', 'professionalReports', 'rightsAdminList', 'operationsView'];
       for (const id of empty) document.getElementById(id)?.replaceChildren();
@@ -194,11 +197,13 @@
 
     $('#login').addEventListener('submit', async (event) => {
       event.preventDefault();
+      const loginEpoch = sessionEpoch;
       try {
         const body = Object.fromEntries(new FormData(event.target));
         const response = await fetch('/v1/auth/login', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body) });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error?.message || '登录失败');
+        if (loginEpoch !== sessionEpoch) return;
         clearDashboard();
         token = payload.data.token;
         currentRole = payload.data.user.role || '';
@@ -206,14 +211,17 @@
         $('#dashboard').hidden = false;
         setStatus('已登录：' + payload.data.user.displayName);
         await load();
-      } catch (error) { setStatus(error.message); }
+      } catch (error) { if (loginEpoch === sessionEpoch) setStatus(error.message); }
     });
 
     async function load() {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const headers = { authorization: 'Bearer ' + token };
         const overview = await fetch('/v1/admin/overview', { headers }).then((response) => response.json());
         if (!overview.data) throw new Error(overview.error?.message || '无权访问');
+        if (!isActiveSession(epoch)) return;
         $('#metrics').innerHTML = Object.entries(overview.data).filter(([key]) => key !== 'note').map(([key, value]) => `<span class="metric"><b>${esc(key)}</b><br>${esc(value === null ? '已抑制' : value)}</span>`).join('');
         const [campaigns, scales, slots, appointments, content, cases, rights] = await Promise.all([
           fetch('/v1/admin/campaigns', { headers }).then((response) => response.json()),
@@ -224,6 +232,7 @@
           fetch('/v1/cases', { headers }).then((response) => response.json()),
           fetch('/v1/admin/rights-requests', { headers }).then((response) => response.json()),
         ]);
+        if (!isActiveSession(epoch)) return;
         renderCampaigns(campaigns.data || []);
         setScaleOptions(scales.data || []);
         renderScaleCatalog(scales.data || []);
@@ -232,7 +241,7 @@
         renderContent(content.data || []);
         renderCases(cases.data || []);
         renderRightsAdmin(rights.data || []);
-      } catch (error) { setStatus(error.message); }
+      } catch (error) { if (isActiveSession(epoch)) setStatus(error.message); }
     }
 
     const scaleStateLabel = { draft: '草稿', approved: '已批准', revoked: '已撤销' };
@@ -251,6 +260,8 @@
       document.querySelectorAll('[data-scale-id]').forEach((button) => { button.onclick = () => updateScale(button.dataset.scaleId, button.dataset.scaleAction); });
     }
     async function loadScaleCatalog() {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       const params = new URLSearchParams();
       const fields = { status: 'scale-catalog-status', population: 'scale-catalog-population', minAge: 'scale-catalog-min-age', maxAge: 'scale-catalog-max-age' };
       for (const [name, id] of Object.entries(fields)) { const value = $('#' + id).value; if (value) params.set(name, value); }
@@ -258,11 +269,14 @@
         const response = await fetch('/v1/admin/scales?' + params.toString(), { headers: { authorization: 'Bearer ' + token } });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '量表目录暂时不可用');
+        if (!isActiveSession(epoch)) return;
         renderScaleCatalog(result.data || []);
         $('#scaleCatalogStatus').textContent = `已读取 ${result.data?.length || 0} 个版本的治理元数据。`;
-      } catch (error) { $('#scaleCatalogStatus').textContent = error.message || '量表目录暂时不可用'; renderScaleCatalog([]); }
+      } catch (error) { if (isActiveSession(epoch)) { $('#scaleCatalogStatus').textContent = error.message || '量表目录暂时不可用'; renderScaleCatalog([]); } }
     }
     async function updateScale(scaleId, action) {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       if (action === 'revoke') {
         const reason = $('#scale-revoke-reason').value.trim();
         if (!reason) { $('#scaleCatalogStatus').textContent = '撤销版本前请填写原因。'; return; }
@@ -273,13 +287,16 @@
         const response = await fetch('/v1/scales/' + encodeURIComponent(scaleId) + '/' + (action === 'approve' ? 'approve' : 'revoke'), { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(body) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '量表版本操作失败');
+        if (!isActiveSession(epoch)) return;
         $('#scaleCatalogStatus').textContent = action === 'approve' ? '版本已记录专业批准。' : '版本已撤销，新任务将不能使用。';
         await load();
-      } catch (error) { $('#scaleCatalogStatus').textContent = error.message || '量表版本操作失败'; }
+      } catch (error) { if (isActiveSession(epoch)) $('#scaleCatalogStatus').textContent = error.message || '量表版本操作失败'; }
     }
     $('#scaleCatalogForm').onsubmit = async (event) => { event.preventDefault(); await loadScaleCatalog(); };
     $('#scaleDraftForm').onsubmit = async (event) => {
       event.preventDefault();
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const form = Object.fromEntries(new FormData(event.target));
         let items;
@@ -289,10 +306,11 @@
         const response = await fetch('/v1/scales', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ code: form.code, title: form.title, version: form.version, provenance: form.provenance, minAge: Number(form.minAge), maxAge: Number(form.maxAge), population: form.population, language: form.language, scoringVersion: form.scoringVersion, noticeVersion: form.noticeVersion, dimensions: form.dimensions.split(',').map((value) => value.trim()).filter(Boolean), licenseExpiresAt: form.licenseExpiresAt ? new Date(form.licenseExpiresAt).toISOString() : undefined, reviewEvidenceRef: form.reviewEvidenceRef || undefined, items, warningRule }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '量表版本草稿保存失败');
+        if (!isActiveSession(epoch)) return;
         $('#scaleCatalogStatus').textContent = '量表版本草稿已保存；需由不同专业负责人审核。';
         event.target.reset();
         await load();
-      } catch (error) { $('#scaleCatalogStatus').textContent = error.message || '量表版本草稿保存失败'; }
+      } catch (error) { if (isActiveSession(epoch)) $('#scaleCatalogStatus').textContent = error.message || '量表版本草稿保存失败'; }
     };
 
     const appointmentStateLabel = { requested: '待确认', confirmed: '已确认', completed: '已完成', cancelled: '已取消', no_show: '未到访' };
@@ -339,17 +357,22 @@
     $('#import-file').onchange = async (event) => {
       const file = event.target.files[0];
       if (!file) return;
-      try { if (file.size > 2_000_000) throw new Error('CSV 文件大小超出限制'); $('#import-csv').value = await file.text(); $('#importStatus').textContent = '已读取文件，请先预检。'; }
-      catch (error) { $('#importStatus').textContent = error.message || '读取文件失败'; }
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
+      try { if (file.size > 2_000_000) throw new Error('CSV 文件大小超出限制'); const text = await file.text(); if (!isActiveSession(epoch)) return; $('#import-csv').value = text; $('#importStatus').textContent = '已读取文件，请先预检。'; }
+      catch (error) { if (isActiveSession(epoch)) $('#importStatus').textContent = error.message || '读取文件失败'; }
     };
     $('#importForm').onsubmit = async (event) => {
       event.preventDefault();
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const rows = parseCsvClient($('#import-csv').value);
         const file = $('#import-file').files[0];
         const response = await fetch('/v1/imports/preview', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ schoolId: 'school-demo', filename: file?.name || 'pasted-students.csv', rows }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '导入预检失败');
+        if (!isActiveSession(epoch)) return;
         pendingImport = { batchId: result.data.batch.id, rows };
         $('#importCommit').disabled = false;
         const batch = result.data.batch;
@@ -357,17 +380,20 @@
         const errorList = errors.length ? `<ul>${errors.map((row) => `<li>第 ${esc(row.rowNumber)} 行：${esc(row.message || '字段无效')}</li>`).join('')}</ul>${batch.errorCount > errors.length ? `<p class="muted">仅显示前 ${errors.length} 条错误。</p>` : ''}` : '<p class="muted">没有发现字段错误。</p>';
         $('#importPreview').innerHTML = `<p>批次 ${esc(batch.id)}：共 ${esc(batch.rowCount)} 行，${esc(batch.validRowCount)} 行可导入，${esc(batch.errorCount)} 行有错误。</p>${errorList}`;
         $('#importStatus').textContent = '预检完成；确认前可修改内容并重新预检。';
-      } catch (error) { pendingImport = null; $('#importCommit').disabled = true; $('#importStatus').textContent = error.message || '导入预检失败'; }
+      } catch (error) { if (isActiveSession(epoch)) { pendingImport = null; $('#importCommit').disabled = true; $('#importStatus').textContent = error.message || '导入预检失败'; } }
     };
     $('#importCommit').onclick = async () => {
-      if (!pendingImport) return;
+      const epoch = sessionEpoch;
+      const pending = pendingImport;
+      if (!pending || !isActiveSession(epoch)) return;
       try {
-        const response = await fetch('/v1/imports/' + encodeURIComponent(pendingImport.batchId) + '/commit', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ rows: pendingImport.rows }) });
+        const response = await fetch('/v1/imports/' + encodeURIComponent(pending.batchId) + '/commit', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ rows: pending.rows }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '确认导入失败');
+        if (!isActiveSession(epoch)) return;
         $('#importStatus').textContent = `名单导入完成（${result.data.id}），新学生仍需参与/监护流程后才能进入测评。`;
         pendingImport = null; $('#importCommit').disabled = true; await load();
-      } catch (error) { $('#importStatus').textContent = error.message || '确认导入失败'; }
+      } catch (error) { if (isActiveSession(epoch)) $('#importStatus').textContent = error.message || '确认导入失败'; }
     };
     const campaignStateLabel = { draft: '草稿', approved: '已批准', scheduled: '已排期', open: '开放中', paused: '已暂停', closed: '已关闭', cancelled: '已取消', archived: '已归档' };
     function renderCampaigns(campaigns) {
@@ -380,11 +406,14 @@
       document.querySelectorAll('[data-campaign-id]').forEach((button) => { button.onclick = () => updateCampaign(button.dataset.campaignId, button.dataset.campaignAction); });
     }
     async function updateCampaign(campaignId, action) {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         if (action === 'progress') {
           const response = await fetch('/v1/campaigns/' + encodeURIComponent(campaignId) + '/progress', { headers: { authorization: 'Bearer ' + token } });
           const result = await response.json();
           if (!response.ok) throw new Error(result.error?.message || '任务进度暂时不可用');
+          if (!isActiveSession(epoch)) return;
           $('#campaignProgress').innerHTML = Object.entries(result.data).filter(([key]) => key !== 'note').map(([key, value]) => `<span class="metric"><b>${esc(key)}</b><br>${esc(value)}</span>`).join('') + `<p class="muted">${esc(result.data.note || '')}</p>`;
           $('#campaignStatus').textContent = '已读取任务进度（不含分数或风险等级）。';
           return;
@@ -394,9 +423,10 @@
         const response = await fetch('/v1/campaigns/' + encodeURIComponent(campaignId) + '/' + path, { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(body) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '任务状态更新失败');
+        if (!isActiveSession(epoch)) return;
         $('#campaignStatus').textContent = action === 'publish' ? '任务已发布（服务端已重新校验门槛）。' : '任务已暂停。';
         await load();
-      } catch (error) { $('#campaignStatus').textContent = error.message || '任务操作失败'; }
+      } catch (error) { if (isActiveSession(epoch)) $('#campaignStatus').textContent = error.message || '任务操作失败'; }
     }
     function renderAnalytics(value) {
       if (!value) { $('#analyticsView').innerHTML = '<p class="muted">尚未读取统计。</p>'; return; }
@@ -404,14 +434,17 @@
       $('#analyticsView').innerHTML = rows.length ? rows.map((row) => `<article class="metric">${Object.entries(row).map(([key, item]) => `<b>${esc(key)}</b>：${esc(item === null ? '已抑制' : item)} `).join('')}</article>`).join('') + `<p class="muted">${esc(value.note || '')}</p>` : '<p class="muted">当前范围暂无可展示聚合。</p>';
     }
     async function loadAnalytics() {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       const groupBy = $('#analytics-group').value;
       try {
         const response = await fetch('/v1/analytics/summary?groupBy=' + encodeURIComponent(groupBy), { headers: { authorization: 'Bearer ' + token } });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '统计暂时不可用');
+        if (!isActiveSession(epoch)) return;
         renderAnalytics(result.data);
         $('#analyticsStatus').textContent = '统计已读取。';
-      } catch (error) { $('#analyticsStatus').textContent = error.message || '统计暂时不可用'; renderAnalytics(null); }
+      } catch (error) { if (isActiveSession(epoch)) { $('#analyticsStatus').textContent = error.message || '统计暂时不可用'; renderAnalytics(null); } }
     }
     function renderSlots(slots) {
       $('#slotList').innerHTML = slots.length ? slots.map((slot) => {
@@ -428,22 +461,28 @@
       document.querySelectorAll('[data-appointment-id]').forEach((button) => { button.onclick = () => updateAppointment(button.dataset.appointmentId, button.dataset.appointmentState); });
     }
     async function updateSlot(slotId, status) {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const response = await fetch('/v1/availability-slots/' + encodeURIComponent(slotId) + '/state', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ status }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '排班更新失败');
+        if (!isActiveSession(epoch)) return;
         setStatus(status === 'blocked' ? '排班已停用' : '排班已重新开放');
         await load();
-      } catch (error) { setStatus(error.message); }
+      } catch (error) { if (isActiveSession(epoch)) setStatus(error.message); }
     }
     async function updateAppointment(appointmentId, state) {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const response = await fetch('/v1/appointments/' + encodeURIComponent(appointmentId) + '/state', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ state }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '预约状态更新失败');
+        if (!isActiveSession(epoch)) return;
         setStatus('预约状态已更新');
         await load();
-      } catch (error) { setStatus(error.message); }
+      } catch (error) { if (isActiveSession(epoch)) setStatus(error.message); }
     }
 
     const contentStateLabel = { draft: '草稿', professional_review: '待专业审核', published: '已发布', retired: '已下架' };
@@ -457,13 +496,16 @@
     }
     async function updateContent(contentId, action) {
       if (action === 'retire' && !window.confirm('确认下架这条已发布内容？下架后公众将立即无法访问。')) return;
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const response = await fetch('/v1/content/' + encodeURIComponent(contentId) + '/' + (action === 'publish' ? 'publish' : 'retire'), { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: '{}' });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '教育内容操作失败');
+        if (!isActiveSession(epoch)) return;
         setStatus(action === 'publish' ? '已提交发布审核' : '内容已下架');
         await load();
-      } catch (error) { setStatus(error.message); }
+      } catch (error) { if (isActiveSession(epoch)) setStatus(error.message); }
     }
     function arrayBufferToBase64(buffer) {
       const bytes = new Uint8Array(buffer);
@@ -487,6 +529,8 @@
       document.querySelectorAll('[data-case-id]').forEach((button) => { button.onclick = () => updateCase(button.dataset.caseId, button.dataset.caseAction); });
     }
     async function updateCase(caseId, action) {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       const note = $('#case-note').value.trim();
       const assigneeId = $('#case-assignee').value.trim();
       const paths = { confirm: ['reviews', { decision: 'confirm', note }], dismiss: ['reviews', { decision: 'dismiss', note }], assign: ['assign', { assigneeId }], acknowledge: ['acknowledgements', {}], follow_up: ['follow-ups', { kind: 'follow_up', note }], request_closure: ['closure-requests', { reason: note }], approve_closure: ['closure-approvals', {}] };
@@ -499,9 +543,10 @@
         const response = await fetch('/v1/cases/' + encodeURIComponent(caseId) + '/' + config[0], { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(config[1]) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '线索操作失败');
+        if (!isActiveSession(epoch)) return;
         setStatus('线索工作流已更新');
         await load();
-      } catch (error) { setStatus(error.message); }
+      } catch (error) { if (isActiveSession(epoch)) setStatus(error.message); }
     }
 
     const rightsStateLabel = { open: '待处理', processing: '处理中', completed: '已完成', rejected: '已拒绝' };
@@ -514,6 +559,8 @@
       document.querySelectorAll('[data-rights-id]').forEach((button) => { button.onclick = () => updateRights(button.dataset.rightsId, button.dataset.rightsDecision); });
     }
     async function updateRights(requestId, decision) {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       if (decision === 'complete' && !window.confirm('确认完成该权利请求？请确保已完成身份、范围和保留依据核验。')) return;
       const decisionReason = $('#rights-decision-reason').value.trim();
       if (decision === 'reject' && !decisionReason) { setStatus('拒绝权利请求前请填写处理理由'); return; }
@@ -521,9 +568,10 @@
         const response = await fetch('/v1/admin/rights-requests/' + encodeURIComponent(requestId) + '/complete', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ decision, decisionReason: decisionReason || undefined }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '权利请求操作失败');
+        if (!isActiveSession(epoch)) return;
         setStatus(decision === 'complete' ? '权利请求已完成' : '权利请求已拒绝');
         await load();
-      } catch (error) { setStatus(error.message || '权利请求操作失败'); }
+      } catch (error) { if (isActiveSession(epoch)) setStatus(error.message || '权利请求操作失败'); }
     }
 
     function renderProfessionalReports(reports) {
@@ -534,6 +582,8 @@
       document.querySelectorAll('[data-report-id]').forEach((button) => { button.onclick = () => updateProfessionalReport(button.dataset.reportId, button.dataset.reportAction); });
     }
     async function loadProfessionalData() {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       const studentId = $('#archive-student').value.trim();
       const purpose = $('#archive-purpose').value;
       if (!studentId) { $('#archiveStatus').textContent = '请输入学生编号'; return; }
@@ -548,45 +598,55 @@
         const archive = await archiveResponse.json();
         if (!reportsResponse.ok) throw new Error(reports.error?.message || '报告暂时不可用');
         if (!archiveResponse.ok) throw new Error(archive.error?.message || '档案暂时不可用');
+        if (!isActiveSession(epoch)) return;
         renderProfessionalReports(reports.data || []);
         $('#archiveView').textContent = JSON.stringify(archive.data, null, 2);
         $('#archiveView').hidden = false;
         $('#archiveStatus').textContent = '已按用途记录读取审计。';
-      } catch (error) { $('#archiveStatus').textContent = error.message || '专业资料暂时不可用'; $('#professionalReports').innerHTML = '<p class="muted">未读取报告。</p>'; }
+      } catch (error) { if (isActiveSession(epoch)) { $('#archiveStatus').textContent = error.message || '专业资料暂时不可用'; $('#professionalReports').innerHTML = '<p class="muted">未读取报告。</p>'; } }
     }
     async function updateProfessionalReport(reportId, action) {
       if (action === 'revoke' && !window.confirm('确认撤回该报告？已生成的相关导出也会失效。')) return;
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       const path = action === 'approve' ? 'approve' : action === 'release' ? 'release' : 'revoke';
       const body = action === 'revoke' ? { reason: '合成演示：专业复核后撤回' } : {};
       try {
         const response = await fetch('/v1/reports/' + encodeURIComponent(reportId) + '/' + path, { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(body) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '报告操作失败');
+        if (!isActiveSession(epoch)) return;
         setStatus(action === 'approve' ? '报告已审核' : action === 'release' ? '报告已发布' : '报告已撤回');
         await loadProfessionalData();
-      } catch (error) { setStatus(error.message || '报告操作失败'); }
+      } catch (error) { if (isActiveSession(epoch)) setStatus(error.message || '报告操作失败'); }
     }
 
     function renderOperations(value) {
       $('#operationsView').innerHTML = value ? Object.entries(value).filter(([key]) => key !== 'note').map(([key, item]) => `<span class="metric"><b>${esc(key)}</b><br>${esc(item === null ? '无' : item)}</span>`).join('') + `<p class="muted">${esc(value.note || '')}</p>` : '<p class="muted">尚未读取运行状态，或当前账号没有运维权限。</p>';
     }
     async function loadOperations() {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const response = await fetch('/v1/admin/operations/status', { headers: { authorization: 'Bearer ' + token } });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '运行状态暂时不可用');
+        if (!isActiveSession(epoch)) return;
         renderOperations(result.data);
         $('#operationsStatus').textContent = '运行状态已刷新。';
-      } catch (error) { $('#operationsStatus').textContent = error.message || '运行状态暂时不可用'; renderOperations(null); }
+      } catch (error) { if (isActiveSession(epoch)) { $('#operationsStatus').textContent = error.message || '运行状态暂时不可用'; renderOperations(null); } }
     }
     async function operationsAction(path, body = {}) {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const response = await fetch(path, { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(body) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '运行操作失败');
+        if (!isActiveSession(epoch)) return;
         $('#operationsStatus').textContent = '运行操作已执行。';
         await loadOperations();
-      } catch (error) { $('#operationsStatus').textContent = error.message || '运行操作失败'; }
+      } catch (error) { if (isActiveSession(epoch)) $('#operationsStatus').textContent = error.message || '运行操作失败'; }
     }
 
     $('#refresh').onclick = load;
@@ -598,42 +658,53 @@
     $('#operationsRetention').onclick = () => { if (window.confirm('确认运行保留与删除台账重放？该操作可能使到期导出失效。')) operationsAction('/v1/admin/retention/run'); };
     $('#campaignForm').onsubmit = async (event) => {
       event.preventDefault();
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const form = Object.fromEntries(new FormData(event.target));
         const payload = { ...form, schoolId: 'school-demo', purpose: 'screening', participantStudentIds: ['student-demo'], opensAt: new Date(form.opensAt).toISOString(), closesAt: new Date(form.closesAt).toISOString() };
         const response = await fetch('/v1/campaigns', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
         const result = await response.json();
+        if (!isActiveSession(epoch)) return;
         setStatus(response.ok ? '已创建草稿' : result.error?.message || '创建失败');
         if (response.ok) await load();
-      } catch (error) { setStatus(error.message); }
+      } catch (error) { if (isActiveSession(epoch)) setStatus(error.message); }
     };
 
     $('#frequencyForm').onsubmit = async (event) => {
       event.preventDefault();
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const form = Object.fromEntries(new FormData(event.target));
         const response = await fetch('/v1/campaigns/' + encodeURIComponent(form.campaignId) + '/frequency-exceptions', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ studentId: form.studentId, reason: form.reason }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '复评例外审批失败');
+        if (!isActiveSession(epoch)) return;
         $('#frequencyStatus').textContent = '复评例外已记录，发布任务时仍会再次校验。';
         $('#frequency-reason').value = '';
-      } catch (error) { $('#frequencyStatus').textContent = error.message || '复评例外审批失败'; }
+      } catch (error) { if (isActiveSession(epoch)) $('#frequencyStatus').textContent = error.message || '复评例外审批失败'; }
     };
 
     $('#slotForm').onsubmit = async (event) => {
       event.preventDefault();
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const form = Object.fromEntries(new FormData(event.target));
         const response = await fetch('/v1/availability-slots', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ counselorId: form.counselorId, startsAt: new Date(form.startsAt).toISOString(), endsAt: new Date(form.endsAt).toISOString(), room: form.room || undefined }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '排班创建失败');
+        if (!isActiveSession(epoch)) return;
         setStatus('排班已创建');
         await load();
-      } catch (error) { setStatus(error.message); }
+      } catch (error) { if (isActiveSession(epoch)) setStatus(error.message); }
     };
 
     $('#contentForm').onsubmit = async (event) => {
       event.preventDefault();
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const form = Object.fromEntries(new FormData(event.target));
         const file = $('#content-file').files[0];
@@ -643,42 +714,55 @@
           const mediaResponse = await fetch('/v1/media-assets', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ filename: file.name, mediaType: file.type, base64: arrayBufferToBase64(await file.arrayBuffer()) }) });
           const mediaResult = await mediaResponse.json();
           if (!mediaResponse.ok) throw new Error(mediaResult.error?.message || '媒体上传失败');
+          if (!isActiveSession(epoch)) return;
           mediaAssetId = mediaResult.data.id;
         }
         const response = await fetch('/v1/content', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ title: form.title, kind: form.kind, body: form.body, ageMin: Number(form.ageMin), ageMax: Number(form.ageMax), copyrightSource: form.copyrightSource, mediaAssetId, altText: form.altText || undefined, captionText: form.captionText || undefined }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '教育内容保存失败');
+        if (!isActiveSession(epoch)) return;
         $('#contentStatus').textContent = '教育内容草稿已保存。';
         event.target.reset();
         await load();
-      } catch (error) { $('#contentStatus').textContent = error.message || '教育内容保存失败'; }
+      } catch (error) { if (isActiveSession(epoch)) $('#contentStatus').textContent = error.message || '教育内容保存失败'; }
     };
 
     $('#credentialForm').onsubmit = async (event) => {
       event.preventDefault();
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const form = Object.fromEntries(new FormData(event.target));
         const response = await fetch('/v1/admin/student-credentials', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ studentId: form.studentId, ttlMinutes: Number(form.ttlMinutes) }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '签发失败');
+        if (!isActiveSession(epoch)) return;
         $('#credentialStatus').innerHTML = `一次性凭证（仅显示一次）：<code>${esc(result.data.code)}</code><br>有效期至 ${esc(result.data.expiresAt)}`;
-      } catch (error) { $('#credentialStatus').textContent = error.message; }
+      } catch (error) { if (isActiveSession(epoch)) $('#credentialStatus').textContent = error.message; }
     };
 
     $('#revokeForm').onsubmit = async (event) => {
       event.preventDefault();
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
       try {
         const form = Object.fromEntries(new FormData(event.target));
         const response = await fetch('/v1/admin/users/' + encodeURIComponent(form.userId) + '/sessions/revoke', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: '{}' });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '撤销失败');
+        if (!isActiveSession(epoch)) return;
         $('#revokeStatus').textContent = `已撤销 ${esc(result.data.revoked)} 个活跃会话；该用户未兑换凭证也已失效。`;
-      } catch (error) { $('#revokeStatus').textContent = error.message; }
+      } catch (error) { if (isActiveSession(epoch)) $('#revokeStatus').textContent = error.message; }
     };
 
     $('#logout').onclick = async () => {
-      try { if (token) await fetch('/v1/auth/logout', { method: 'POST', headers: { authorization: 'Bearer ' + token } }); }
-      finally { token = ''; currentRole = ''; clearDashboard(); $('#dashboard').hidden = true; $('#scaleDraftDetails').hidden = true; $('#login').reset(); setStatus('已退出'); }
+      const logoutEpoch = sessionEpoch;
+      const logoutToken = token;
+      try { if (logoutToken) await fetch('/v1/auth/logout', { method: 'POST', headers: { authorization: 'Bearer ' + logoutToken } }); }
+      finally {
+        if (logoutEpoch !== sessionEpoch) return;
+        token = ''; currentRole = ''; clearDashboard(); $('#dashboard').hidden = true; $('#scaleDraftDetails').hidden = true; $('#login').reset(); setStatus('已退出');
+      }
     };
   </script>
 </body>

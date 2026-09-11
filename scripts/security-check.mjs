@@ -51,9 +51,13 @@ const requiredSnippets = [
   [main, 'Content-Security-Policy', 'CSP header'],
   [main, 'MAX_BODY_BYTES', 'request body bound'],
   [adminWeb, 'function clearDashboard()', 'admin shared-terminal cleanup'],
+  [adminWeb, 'let sessionEpoch = 0', 'admin async session epoch'],
+  [adminWeb, 'isActiveSession(epoch)', 'admin stale-response guard'],
   [adminWeb, "document.querySelectorAll('#dashboard form')", 'admin form cleanup'],
   [studentWeb, "$('#reportList').replaceChildren()", 'student report cleanup'],
   [studentWeb, "$('#rightsList').replaceChildren()", 'student rights cleanup'],
+  [studentWeb, 'let sessionEpoch = 0', 'student async session epoch'],
+  [studentWeb, 'isActiveSession(epoch)', 'student stale-response guard'],
   [studentWeb, 'active.noticeVersion === currentNoticeVersion', 'student consent notice refresh'],
   [studentWeb, 'let helpSubmitted = false', 'student help debounce state'],
 ];
