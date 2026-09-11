@@ -4,6 +4,16 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseState } from './types.js';
 import type { PrivateObjectStore } from '../infra/object-store.js';
 
+export interface MediaScanResult {
+  status: 'clean' | 'rejected';
+  /** Provider identifier is intentionally not persisted in student-facing data. */
+  provider: string;
+}
+
+export interface MediaScanner {
+  scan(input: { tenantId: string; filename: string; mediaType: string; bytes: Uint8Array }): Promise<MediaScanResult>;
+}
+
 export function emptyState(): DatabaseState {
   return {
     schemaVersion: 1,
@@ -14,7 +24,7 @@ export function emptyState(): DatabaseState {
   };
 }
 
-export interface StoreOptions { filePath?: string; initial?: DatabaseState; objectStore?: PrivateObjectStore; }
+export interface StoreOptions { filePath?: string; initial?: DatabaseState; objectStore?: PrivateObjectStore; mediaScanner?: MediaScanner; }
 
 /**
  * Persistence contract consumed by the domain layer.  `JsonStore` is only a
@@ -28,6 +38,8 @@ export interface Store {
   readonly adapterKind?: 'json' | 'postgres';
   /** Private media/object storage boundary. Production must inject a managed private adapter. */
   readonly objectStore?: PrivateObjectStore;
+  /** Malware scanning boundary. Production must inject a provider-backed scanner. */
+  readonly mediaScanner?: MediaScanner;
 }
 
 /** The local adapter is deliberately unavailable to a production entrypoint.
@@ -35,7 +47,7 @@ export interface Store {
  * silently writing psychological records to a JSON file is not an acceptable
  * fallback. */
 export function assertProductionStoreInjection(store?: Store): void {
-  if (process.env.NODE_ENV === 'production' && (!store || store instanceof JsonStore || store.adapterKind !== 'postgres' || !store.objectStore)) throw new Error('Production requires an injected PostgreSQL-backed store and private object-store adapter; JsonStore is reference-only');
+  if (process.env.NODE_ENV === 'production' && (!store || store instanceof JsonStore || store.adapterKind !== 'postgres' || !store.objectStore || !store.mediaScanner)) throw new Error('Production requires an injected PostgreSQL-backed store, private object-store and media-scanner adapters; JsonStore is reference-only');
 }
 
 /**
@@ -48,10 +60,12 @@ export class JsonStore implements Store {
   private readonly filePath?: string;
   readonly adapterKind = 'json' as const;
   readonly objectStore?: PrivateObjectStore;
+  readonly mediaScanner?: MediaScanner;
 
   constructor(options: StoreOptions = {}) {
     this.filePath = options.filePath;
     this.objectStore = options.objectStore;
+    this.mediaScanner = options.mediaScanner;
     if (options.initial) {
       this.state = { ...emptyState(), ...structuredClone(options.initial) };
       this.persist();

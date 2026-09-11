@@ -194,7 +194,7 @@ paths:
       parameters: [{$ref: '#/components/parameters/contentId'}]
       responses: {'200': {description: Published content}, '403': {description: Professional approval permission required}}
   /v1/media-assets:
-    post: {summary: Upload a bounded, type-checked education media asset to private storage, responses: {'201': {description: Clean asset metadata}, '413': {description: Asset too large}, '503': {description: Private object storage unavailable}}}
+    post: {summary: Upload a bounded, type-checked education media asset to private storage after provider-backed scanning, responses: {'201': {description: Clean asset metadata}, '413': {description: Asset too large}, '503': {description: Private object storage or media scanner unavailable}}}
   /v1/content/public/{assetId}/media:
     get:
       security: []

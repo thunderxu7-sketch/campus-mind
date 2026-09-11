@@ -111,3 +111,26 @@ test('media workflow stores a private pointer and serves only linked published c
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('provider-backed media scanner verdict is required before marking uploads clean', async () => {
+  const base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  let scanned = 0;
+  const cleanScanner = { scan: async (input) => { scanned += 1; assert.equal(input.tenantId, 'tenant-demo'); assert.equal(input.mediaType, 'image/png'); return { status: 'clean', provider: 'synthetic-scanner' }; } };
+  const cleanStore = new JsonStore({ initial: seedDemoState(), mediaScanner: cleanScanner });
+  const cleanLogin = await loginUser(cleanStore, 'professional@campus-mind.demo', DEMO_PASSWORD);
+  const cleanAuth = await authenticate(cleanStore, `Bearer ${cleanLogin.token}`);
+  const clean = await createMediaAsset(cleanStore, cleanAuth, { filename: 'scanner-clean.png', mediaType: 'image/png', base64 });
+  assert.equal(clean.scanStatus, 'clean');
+  assert.equal(scanned, 1);
+
+  const rejectedStore = new JsonStore({ initial: seedDemoState(), mediaScanner: { scan: async () => ({ status: 'rejected', provider: 'synthetic-scanner' }) } });
+  const rejectedLogin = await loginUser(rejectedStore, 'professional@campus-mind.demo', DEMO_PASSWORD);
+  const rejectedAuth = await authenticate(rejectedStore, `Bearer ${rejectedLogin.token}`);
+  await assert.rejects(() => createMediaAsset(rejectedStore, rejectedAuth, { filename: 'scanner-rejected.png', mediaType: 'image/png', base64 }), (error) => error.code === 'MEDIA_SCAN_REJECTED');
+  assert.equal(rejectedStore.snapshot().mediaAssets.length, 0);
+
+  const unavailableStore = new JsonStore({ initial: seedDemoState(), mediaScanner: { scan: async () => { throw new Error('provider offline'); } } });
+  const unavailableLogin = await loginUser(unavailableStore, 'professional@campus-mind.demo', DEMO_PASSWORD);
+  const unavailableAuth = await authenticate(unavailableStore, `Bearer ${unavailableLogin.token}`);
+  await assert.rejects(() => createMediaAsset(unavailableStore, unavailableAuth, { filename: 'scanner-unavailable.png', mediaType: 'image/png', base64 }), (error) => error.code === 'MEDIA_SCANNER_UNAVAILABLE');
+});

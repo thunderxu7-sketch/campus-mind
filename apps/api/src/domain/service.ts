@@ -1420,7 +1420,7 @@ export async function createMediaAsset(store: Store, auth: AuthenticatedUser, in
   // heuristics below. Production uploads additionally require an approved
   // malware-scanning adapter; never mark a provider-less upload clean merely
   // because the local checks passed.
-  if (process.env.NODE_ENV === 'production' && process.env.CAMPMIND_MEDIA_SCANNER_READY !== 'true') throw new DomainError('MEDIA_SCANNER_NOT_CONFIGURED', '生产媒体上传尚未接入恶意文件扫描', 503);
+  if (process.env.NODE_ENV === 'production' && (process.env.CAMPMIND_MEDIA_SCANNER_READY !== 'true' || !store.mediaScanner)) throw new DomainError('MEDIA_SCANNER_NOT_CONFIGURED', '生产媒体上传尚未接入恶意文件扫描', 503);
   if (typeof input.filename !== 'string' || typeof input.mediaType !== 'string' || typeof input.base64 !== 'string') throw new DomainError('MEDIA_INVALID', '媒体字段格式无效');
   const policy = MEDIA_POLICIES[input.mediaType];
   if (!policy) throw new DomainError('MEDIA_TYPE_NOT_ALLOWED', '媒体类型未获批准');
@@ -1430,6 +1430,13 @@ export async function createMediaAsset(store: Store, auth: AuthenticatedUser, in
   const textPrefix = buffer.subarray(0, Math.min(buffer.length, 1_000_000)).toString('utf8');
   if (buffer.subarray(0, 2).toString('ascii') === 'MZ' || /<\s*(script|iframe|object)\b/i.test(textPrefix)) throw new DomainError('MEDIA_SCAN_REJECTED', '媒体安全检查未通过');
   if (!policy.signature(buffer)) throw new DomainError('MEDIA_SIGNATURE_MISMATCH', '媒体类型与文件内容不匹配');
+  if (store.mediaScanner) {
+    let verdict: Awaited<ReturnType<NonNullable<Store['mediaScanner']>['scan']>>;
+    try { verdict = await store.mediaScanner.scan({ tenantId: auth.user.tenantId, filename, mediaType: input.mediaType, bytes: buffer }); }
+    catch { throw new DomainError('MEDIA_SCANNER_UNAVAILABLE', '媒体安全扫描暂时不可用，请稍后重试', 503); }
+    if (!verdict || !['clean', 'rejected'].includes(verdict.status) || typeof verdict.provider !== 'string' || !verdict.provider.trim()) throw new DomainError('MEDIA_SCANNER_UNAVAILABLE', '媒体安全扫描返回无效结果', 503);
+    if (verdict.status !== 'clean') throw new DomainError('MEDIA_SCAN_REJECTED', '媒体安全检查未通过');
+  }
   const sha256 = createHash('sha256').update(buffer).digest('hex');
   const objectKey = store.objectStore ? `media/${auth.user.tenantId}/${sha256}` : undefined;
   let objectStored = false;
