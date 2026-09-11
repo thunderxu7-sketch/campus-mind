@@ -63,6 +63,7 @@ CAMPMIND_DEMO_MFA=true CAMPMIND_MASTER_KEY=local-only-key npm start
 npm run check       # TypeScript、45 项行为测试、安全扫描与规划校验
 npm run drill:capacity  # 合成并发基线（输出 p50/p95/错误率）
 npm run drill:recovery  # 合成快照与加密私有对象恢复演练
+npm run drill:key-rotation  # 合成字段/对象密钥轮换与旧密钥拒绝演练
 npm run release:check    # 参考模式边界检查；生产模式需外部证据环境变量
 npm audit --omit=dev --audit-level=high
 ```

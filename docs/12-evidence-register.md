@@ -20,6 +20,7 @@
 | E-REF-PLAN | 48 项任务、依赖 DAG、生成任务清单同步 | `python3 scripts/check_plan.py` | `verified` |
 | E-PG-MIGRATION | 36 张表、36 个 `FORCE RLS`、36 个策略、关键跨租户外键、应用角色无 `SUPERUSER/BYPASSRLS` | CI PostgreSQL 16 步骤；本地 `infra/migrations/001_initial.sql` | `verified`（参考迁移） |
 | E-REF-RECOVERY | 加密 JSON/私有对象复制、恢复和临时文件清理 | `npm run drill:recovery` | `verified`（本地合成） |
+| E-REF-KEY-ROTATION | 字段/对象旧密钥读取、当前密钥重加密、旧密钥移除后的拒绝 | `npm run drill:key-rotation` | `verified`（本地合成） |
 | E-REF-CAPACITY | 受限并发请求 p50/p95、错误率 | `npm run drill:capacity` | `verified`（本机基线） |
 | E-RELEASE-GATE | 生产环境配置和外部证据缺失时阻断发布 | `CAMPMIND_RELEASE_MODE=production npm run release:check` | `verified`（应阻断） |
 
