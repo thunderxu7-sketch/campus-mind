@@ -159,6 +159,9 @@ test('school issues a one-time short-lived credential for a phone-less student',
   const stored = store.snapshot().studentAccessCredentials.find((credential) => credential.id === issued.body.data.id);
   assert.ok(stored);
   assert.equal(stored.codeHash.includes(issued.body.data.code), false);
+  const credentialAudit = store.snapshot().auditEvents.find((event) => event.action === 'student.credential_issued' && event.objectId === issued.body.data.id);
+  assert.ok(credentialAudit);
+  assert.equal(Object.hasOwn(credentialAudit.metadata, 'studentId'), false);
   const redeemed = await request('/v1/auth/login', { method: 'POST', body: JSON.stringify({ accessCode: issued.body.data.code }) });
   assert.equal(redeemed.response.status, 200, JSON.stringify(redeemed.body));
   assert.equal(redeemed.body.data.user.id, 'student-demo');

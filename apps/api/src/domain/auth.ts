@@ -84,7 +84,9 @@ export async function issueStudentAccessCode(store: Store, auth: AuthenticatedUs
     for (const previous of state.studentAccessCredentials.filter((credential) => credential.tenantId === auth.user.tenantId && credential.studentId === studentId && !credential.usedAt && credential.expiresAt > createdAt.toISOString())) previous.usedAt = createdAt.toISOString();
     const credential = { id: randomUUID(), tenantId: auth.user.tenantId, studentId, codeHash: hashToken(code), expiresAt, issuedBy: auth.user.id, createdAt: createdAt.toISOString() };
     state.studentAccessCredentials.push(credential);
-    state.auditEvents.push({ id: randomUUID(), tenantId: auth.user.tenantId, actorId: auth.user.id, action: 'student.credential_issued', objectType: 'student_access_credential', objectId: credential.id, purpose: 'student_login', metadata: { studentId, ttlMinutes }, createdAt: createdAt.toISOString() });
+    // The credential object ID and bounded TTL are enough for audit review;
+    // do not duplicate the student's identifier into searchable metadata.
+    state.auditEvents.push({ id: randomUUID(), tenantId: auth.user.tenantId, actorId: auth.user.id, action: 'student.credential_issued', objectType: 'student_access_credential', objectId: credential.id, purpose: 'student_login', metadata: { ttlMinutes }, createdAt: createdAt.toISOString() });
     return { id: credential.id, studentId, code, expiresAt };
   });
 }
