@@ -1,0 +1,24 @@
+{
+  "name": "campus-mind",
+  "version": "0.1.0",
+  "private": true,
+  "description": "校园心晴：中小学心理健康教育与支持平台（开发中）",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/apps/api/src/main.js",
+    "dev": "tsx apps/api/src/main.ts",
+    "test": "npm run build && node --test test/*.test.js",
+    "check": "npm run build && npm test && python3 scripts/check_plan.py",
+    "check:plan": "python3 scripts/check_plan.py",
+    "check:plan:write": "python3 scripts/check_plan.py --write"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.3"
+  }
+}

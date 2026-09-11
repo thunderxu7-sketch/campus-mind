@@ -1,0 +1,29 @@
+name: checks
+
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  plan-and-reference-app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NODE_ENV: test
+      CAMPMIND_MASTER_KEY: ci-only-test-key
+      CAMPMIND_DEMO_MFA: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: python3 scripts/check_plan.py
+      - run: python3 -m unittest discover -s tests -v

@@ -1,0 +1,79 @@
+import { randomUUID } from 'node:crypto';
+import { DomainError, forbidden, unauthorized } from './errors.js';
+import { hashPassword, hashToken, randomToken, verifyPassword } from './crypto.js';
+import type { AuthenticatedUser, DatabaseState, Role, Session, User } from './types.js';
+import { JsonStore } from './store.js';
+
+const SESSION_DAYS = 8;
+
+export const rolePermissions: Record<Role, readonly string[]> = {
+  platform_ops: ['tenant:configure', 'system:metrics'],
+  school_admin: ['org:manage', 'import:write', 'campaign:write', 'campaign:read', 'analytics:read'],
+  professional_lead: ['org:read', 'campaign:read', 'scale:write', 'scale:approve', 'report:read', 'report:approve', 'case:read', 'case:review', 'case:assign', 'case:ack', 'care:write', 'analytics:read', 'export:approve'],
+  counselor: ['org:read', 'campaign:read', 'report:read', 'case:read', 'case:review', 'case:ack', 'care:write'],
+  teacher: ['org:read', 'campaign:read', 'campaign:progress'],
+  student: ['self:read', 'self:assessment', 'self:help'],
+  guardian: ['self:read', 'rights:request'],
+  privacy_auditor: ['audit:read', 'rights:read', 'analytics:read'],
+};
+
+export function can(user: User, permission: string): boolean {
+  return rolePermissions[user.role]?.includes(permission) ?? false;
+}
+
+export function requirePermission(user: User, permission: string): void {
+  if (!can(user, permission)) throw forbidden();
+}
+
+export function safeUser(user: User): Omit<User, 'passwordHash'> {
+  const { passwordHash: _passwordHash, ...publicUser } = user;
+  return publicUser;
+}
+
+export async function login(store: JsonStore, email: string, password: string): Promise<{ token: string; user: Omit<User, 'passwordHash'>; expiresAt: string }> {
+  const normalized = email.trim().toLowerCase();
+  const token = randomToken();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + SESSION_DAYS * 86_400_000).toISOString();
+  await store.transaction((state) => {
+    const user = state.users.find((candidate) => candidate.email === normalized && candidate.active);
+    if (!user || !verifyPassword(password, user.passwordHash)) throw new DomainError('INVALID_CREDENTIALS', '邮箱或密码错误', 401);
+    if (user.mfaEnabled && process.env.CAMPMIND_DEMO_MFA !== 'true') {
+      throw new DomainError('MFA_REQUIRED', '需要完成管理账号二次验证', 401);
+    }
+    state.sessions = state.sessions.filter((session) => session.expiresAt > now.toISOString() && !session.revokedAt);
+    state.sessions.push({ tokenHash: hashToken(token), userId: user.id, tenantId: user.tenantId, expiresAt, createdAt: now.toISOString() });
+  });
+  const user = await store.read((state) => state.users.find((candidate) => candidate.email === normalized));
+  if (!user) throw unauthorized();
+  return { token, user: safeUser(user), expiresAt };
+}
+
+export async function authenticate(store: JsonStore, authorization: string | undefined): Promise<AuthenticatedUser> {
+  if (!authorization?.startsWith('Bearer ')) throw unauthorized();
+  const token = authorization.slice('Bearer '.length).trim();
+  if (!token) throw unauthorized();
+  const now = new Date().toISOString();
+  return store.read((state: DatabaseState) => {
+    const session = state.sessions.find((candidate) => candidate.tokenHash === hashToken(token) && !candidate.revokedAt && candidate.expiresAt > now);
+    if (!session) throw unauthorized();
+    const user = state.users.find((candidate) => candidate.id === session.userId && candidate.active && candidate.tenantId === session.tenantId);
+    if (!user) throw unauthorized();
+    return { user, session };
+  });
+}
+
+export async function logout(store: JsonStore, session: Session): Promise<void> {
+  await store.transaction((state) => {
+    const record = state.sessions.find((candidate) => candidate.tokenHash === session.tokenHash);
+    if (record) record.revokedAt = new Date().toISOString();
+  });
+}
+
+export function provisionPassword(password: string): string { return hashPassword(password); }
+
+export function isProfessional(user: User): boolean {
+  return user.role === 'professional_lead' || user.role === 'counselor';
+}
+
+export function isStudent(user: User): boolean { return user.role === 'student'; }

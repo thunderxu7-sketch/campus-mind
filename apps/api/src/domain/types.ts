@@ -1,0 +1,342 @@
+export type Role =
+  | 'platform_ops'
+  | 'school_admin'
+  | 'professional_lead'
+  | 'counselor'
+  | 'teacher'
+  | 'student'
+  | 'guardian'
+  | 'privacy_auditor';
+
+export type CampaignState = 'draft' | 'approved' | 'scheduled' | 'open' | 'paused' | 'closed' | 'cancelled' | 'archived';
+export type AttemptState = 'not_started' | 'in_progress' | 'submitted' | 'scoring_pending' | 'scored' | 'scoring_failed' | 'invalid' | 'withdrawn' | 'expired';
+export type ReportState = 'draft' | 'pending_review' | 'approved' | 'released' | 'revoked';
+export type CaseState = 'pending_review' | 'dismissed' | 'confirmed' | 'assigned' | 'in_support' | 'follow_up' | 'closure_requested' | 'closed';
+export type SignalSource = 'score_rule' | 'self_request' | 'staff_observation' | 'external_referral';
+
+export interface Tenant {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface School {
+  id: string;
+  tenantId: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface User {
+  id: string;
+  tenantId: string;
+  schoolId?: string;
+  email: string;
+  displayName: string;
+  passwordHash: string;
+  role: Role;
+  active: boolean;
+  mfaEnabled: boolean;
+  createdAt: string;
+}
+
+export interface Session {
+  tokenHash: string;
+  userId: string;
+  tenantId: string;
+  expiresAt: string;
+  createdAt: string;
+  revokedAt?: string;
+}
+
+export interface Student {
+  id: string;
+  tenantId: string;
+  schoolId: string;
+  classId: string;
+  displayNameCiphertext: string;
+  externalRefHash: string;
+  age?: number;
+  guardianVerified: boolean;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface ConsentRecord {
+  id: string;
+  tenantId: string;
+  studentId: string;
+  purpose: 'assessment' | 'support' | 'research';
+  noticeVersion: string;
+  actorType: 'student' | 'guardian' | 'school_legal_basis';
+  actorId: string;
+  status: 'active' | 'withdrawn' | 'expired';
+  recordedAt: string;
+  withdrawnAt?: string;
+}
+
+export interface ScaleItem {
+  id: string;
+  prompt: string;
+  min: number;
+  max: number;
+  reverse: boolean;
+  factor: string;
+}
+
+export interface ScaleVersion {
+  id: string;
+  tenantId: string;
+  code: string;
+  title: string;
+  version: string;
+  provenance: 'synthetic_only' | 'licensed';
+  status: 'draft' | 'approved' | 'revoked';
+  minAge: number;
+  maxAge: number;
+  scoringVersion: string;
+  noticeVersion: string;
+  items: ScaleItem[];
+  warningRule?: { threshold: number; level: 'attention' | 'urgent'; reason: string };
+  approvedBy?: string;
+  approvedAt?: string;
+}
+
+export interface Campaign {
+  id: string;
+  tenantId: string;
+  schoolId: string;
+  name: string;
+  purpose: 'screening' | 'survey';
+  state: CampaignState;
+  academicYear: string;
+  opensAt: string;
+  closesAt: string;
+  scaleVersionId: string;
+  reportVisibility: 'professional_review' | 'student_after_release';
+  participantStudentIds: string[];
+  createdBy: string;
+  publishedAt?: string;
+  createdAt: string;
+}
+
+export interface Assignment {
+  id: string;
+  tenantId: string;
+  campaignId: string;
+  studentId: string;
+  frequencyReservationId: string;
+  status: 'assigned' | 'started' | 'completed' | 'declined' | 'expired';
+  createdAt: string;
+}
+
+export interface FrequencyReservation {
+  id: string;
+  tenantId: string;
+  studentId: string;
+  academicYear: string;
+  purpose: 'assessment';
+  status: 'reserved' | 'consumed' | 'released' | 'exception';
+  campaignId: string;
+  approvedBy?: string;
+  reason?: string;
+  createdAt: string;
+}
+
+export interface AnswerRevision {
+  id: string;
+  tenantId: string;
+  attemptId: string;
+  revision: number;
+  answersCiphertext: string;
+  savedAt: string;
+  actorId: string;
+}
+
+export interface Attempt {
+  id: string;
+  tenantId: string;
+  assignmentId: string;
+  studentId: string;
+  scaleVersionId: string;
+  state: AttemptState;
+  currentRevision: number;
+  startedAt: string;
+  submittedAt?: string;
+  submissionId?: string;
+}
+
+export interface Submission {
+  id: string;
+  tenantId: string;
+  attemptId: string;
+  answerRevisionId: string;
+  idempotencyKey: string;
+  contentHash: string;
+  submittedAt: string;
+}
+
+export interface ScoreRun {
+  id: string;
+  tenantId: string;
+  submissionId: string;
+  scoringVersion: string;
+  status: 'pending' | 'completed' | 'failed';
+  factorScores: Record<string, number>;
+  total: number;
+  validity: 'valid' | 'invalid';
+  completedAt?: string;
+  errorCode?: string;
+}
+
+export interface ReportVersion {
+  id: string;
+  tenantId: string;
+  studentId: string;
+  scoreRunId: string;
+  state: ReportState;
+  title: string;
+  summaryCiphertext: string;
+  limitationsCiphertext: string;
+  createdAt: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  releasedAt?: string;
+  revokedAt?: string;
+}
+
+export interface RiskSignal {
+  id: string;
+  tenantId: string;
+  studentId: string;
+  source: SignalSource;
+  scoreRunId?: string;
+  ruleVersion?: string;
+  level: 'attention' | 'urgent';
+  reasonCiphertext: string;
+  createdAt: string;
+  status: 'open' | 'reviewed' | 'dismissed';
+}
+
+export interface RiskCase {
+  id: string;
+  tenantId: string;
+  studentId: string;
+  state: CaseState;
+  priority: 'attention' | 'urgent';
+  signalIds: string[];
+  assignedTo?: string;
+  createdAt: string;
+  updatedAt: string;
+  closureReasonCiphertext?: string;
+}
+
+export interface RiskReview {
+  id: string;
+  tenantId: string;
+  caseId: string;
+  reviewerId: string;
+  decision: 'dismiss' | 'confirm';
+  noteCiphertext: string;
+  createdAt: string;
+}
+
+export interface CaseAcknowledgement {
+  id: string;
+  tenantId: string;
+  caseId: string;
+  userId: string;
+  acknowledgedAt: string;
+}
+
+export interface FollowUp {
+  id: string;
+  tenantId: string;
+  caseId: string;
+  authorId: string;
+  kind: 'support' | 'referral' | 'follow_up';
+  noteCiphertext: string;
+  dueAt?: string;
+  createdAt: string;
+}
+
+export interface AuditEvent {
+  id: string;
+  tenantId: string;
+  actorId?: string;
+  action: string;
+  objectType: string;
+  objectId: string;
+  purpose?: string;
+  metadata: Record<string, string | number | boolean | null>;
+  createdAt: string;
+}
+
+export interface OutboxEvent {
+  id: string;
+  tenantId: string;
+  type: string;
+  aggregateId: string;
+  payload: Record<string, string | number | boolean | null>;
+  status: 'pending' | 'published' | 'dead_letter';
+  attempts: number;
+  availableAt: string;
+  createdAt: string;
+}
+
+export interface ImportBatch {
+  id: string;
+  tenantId: string;
+  schoolId: string;
+  createdBy: string;
+  filename: string;
+  status: 'previewed' | 'committed' | 'rejected';
+  mappingVersion: number;
+  rowCount: number;
+  validRowCount: number;
+  errorCount: number;
+  createdAt: string;
+}
+
+export interface ImportRowResult {
+  id: string;
+  tenantId: string;
+  batchId: string;
+  rowNumber: number;
+  status: 'valid' | 'error';
+  message?: string;
+  syntheticStudentId?: string;
+}
+
+export interface DatabaseState {
+  schemaVersion: number;
+  tenants: Tenant[];
+  schools: School[];
+  users: User[];
+  sessions: Session[];
+  students: Student[];
+  consents: ConsentRecord[];
+  scales: ScaleVersion[];
+  campaigns: Campaign[];
+  assignments: Assignment[];
+  frequencyReservations: FrequencyReservation[];
+  attempts: Attempt[];
+  answerRevisions: AnswerRevision[];
+  submissions: Submission[];
+  scoreRuns: ScoreRun[];
+  reports: ReportVersion[];
+  riskSignals: RiskSignal[];
+  riskCases: RiskCase[];
+  riskReviews: RiskReview[];
+  acknowledgements: CaseAcknowledgement[];
+  followUps: FollowUp[];
+  auditEvents: AuditEvent[];
+  outboxEvents: OutboxEvent[];
+  importBatches: ImportBatch[];
+  importRows: ImportRowResult[];
+}
+
+export interface AuthenticatedUser {
+  user: User;
+  session: Session;
+}

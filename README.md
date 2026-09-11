@@ -52,7 +52,15 @@
 
 TypeScript 单仓：React + Vite（管理端 / 学生端）、NestJS API 与 Worker、PostgreSQL、Redis 队列、私有对象存储。核心计分独立纯函数包；从模块化单体起步，不先上微服务、AI 诊断或 Kubernetes。
 
-目前没有 `npm install` 或启动命令，避免误把规划仓库当成可运行系统。
+当前已提供一个**合成数据参考实现**（Node 20+）：加密 JSON 本地适配器、学生/工作人员 API、静态响应式页面、版本化演示计分、人工复核工作流和 PostgreSQL 迁移草案。它不是生产部署，也不能接收真实学生资料。生产环境必须替换存储、密钥、通知和身份接入，并通过 M4 Gate。
+
+```sh
+npm install
+CAMPMIND_DEMO_MFA=true CAMPMIND_MASTER_KEY=local-only-key npm start
+# 管理端 http://localhost:8787/admin；学生端 http://localhost:8787/student
+```
+
+演示数据全部由代码生成，密码只用于本地测试；不要把其作为生产凭据。API 默认将本地数据写入被 `.gitignore` 忽略的 `private-data/`。
 
 ## 验证规划
 
