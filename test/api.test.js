@@ -224,10 +224,15 @@ test('professional review, assignment, acknowledgement and independent closure w
   assert.equal(assign.response.status, 200);
   const ack = await request(`/v1/cases/${caseId}/acknowledgements`, { method: 'POST', headers: auth(counselor), body: '{}' });
   assert.equal(ack.response.status, 201);
-  const follow = await request(`/v1/cases/${caseId}/follow-ups`, { method: 'POST', headers: auth(counselor), body: JSON.stringify({ kind: 'support', note: '合成支持记录；下一次随访待定。' }) });
+  const leadFollow = await request(`/v1/cases/${caseId}/follow-ups`, { method: 'POST', headers: auth(professional), body: JSON.stringify({ kind: 'support', note: '合成专业负责人支持记录；后续由指派咨询师随访。' }) });
+  assert.equal(leadFollow.response.status, 201);
+  const follow = await request(`/v1/cases/${caseId}/follow-ups`, { method: 'POST', headers: auth(counselor), body: JSON.stringify({ kind: 'follow_up', note: '合成支持记录；下一次随访待定。' }) });
   assert.equal(follow.response.status, 201);
   const closure = await request(`/v1/cases/${caseId}/closure-requests`, { method: 'POST', headers: auth(counselor), body: JSON.stringify({ reason: '合成随访已记录，申请独立复核。' }) });
   assert.equal(closure.response.status, 200);
+  const selfApproval = await request(`/v1/cases/${caseId}/closure-approvals`, { method: 'POST', headers: auth(counselor), body: '{}' });
+  assert.equal(selfApproval.response.status, 403);
+  assert.equal(selfApproval.body.error.code, 'SEPARATION_OF_DUTIES_REQUIRED');
   const approved = await request(`/v1/cases/${caseId}/closure-approvals`, { method: 'POST', headers: auth(professional), body: '{}' });
   assert.equal(approved.response.status, 200);
   assert.equal(approved.body.data.state, 'closed');
@@ -249,6 +254,11 @@ test('report release controls student visibility and service errors do not leak 
   assert.equal(archive.response.status, 200);
   assert.equal(archive.body.data.studentId, 'student-demo');
   const reportId = reports.body.data[0].id;
+  const prematureRelease = await request(`/v1/reports/${reportId}/release`, { method: 'POST', headers: auth(professional), body: '{}' });
+  assert.equal(prematureRelease.response.status, 400);
+  assert.equal(prematureRelease.body.error.code, 'REPORT_STATE_INVALID');
+  const approvedReport = await request(`/v1/reports/${reportId}/approve`, { method: 'POST', headers: auth(professional), body: '{}' });
+  assert.equal(approvedReport.response.status, 204);
   const released = await request(`/v1/reports/${reportId}/release`, { method: 'POST', headers: auth(professional), body: '{}' });
   assert.equal(released.response.status, 204);
   const student = await login('student@campus-mind.demo');

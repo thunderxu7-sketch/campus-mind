@@ -267,6 +267,8 @@ export interface RiskCase {
   priority: 'attention' | 'urgent';
   signalIds: string[];
   assignedTo?: string;
+  /** Actor who submitted the current closure request; used for separation of duties. */
+  closureRequestedBy?: string;
   createdAt: string;
   updatedAt: string;
   closureReasonCiphertext?: string;

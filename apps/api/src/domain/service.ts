@@ -670,7 +670,8 @@ export async function approveReport(store: Store, auth: AuthenticatedUser, repor
     const report = state.reports.find((candidate) => candidate.id === reportId && sameTenant(candidate, auth.user.tenantId));
     if (!report || report.state === 'revoked') throw notFound();
     if (!professionalCanReadStudent(state, auth, report.studentId)) throw notFound();
-    if (report.state !== 'pending_review' && report.state !== 'approved') throw new DomainError('REPORT_STATE_INVALID', '报告当前状态不能审核');
+    if (release && report.state !== 'approved') throw new DomainError('REPORT_STATE_INVALID', '报告必须先完成专业审核才能发布');
+    if (!release && report.state !== 'pending_review') throw new DomainError('REPORT_STATE_INVALID', '报告当前状态不能审核');
     report.state = release ? 'released' : 'approved'; report.approvedBy = auth.user.id; report.approvedAt = now(); if (release) report.releasedAt = now();
     audit(state, auth.user, release ? 'report.released' : 'report.approved', 'report', report.id, {});
   });
@@ -767,7 +768,7 @@ export async function requestClosure(store: Store, auth: AuthenticatedUser, case
     const riskCase = caseFor(state, auth, caseId);
     if (riskCase.assignedTo && riskCase.assignedTo !== auth.user.id && auth.user.role !== 'professional_lead') throw forbidden();
     if (!['follow_up', 'in_support'].includes(riskCase.state)) throw new DomainError('CASE_STATE_INVALID', '个案当前不能申请结案');
-    riskCase.state = 'closure_requested'; riskCase.closureReasonCiphertext = encrypt({ reason: reason.slice(0, 4000) }); riskCase.updatedAt = now(); audit(state, auth.user, 'risk.closure_requested', 'risk_case', caseId, {}); return riskCase;
+    riskCase.state = 'closure_requested'; riskCase.closureRequestedBy = auth.user.id; riskCase.closureReasonCiphertext = encrypt({ reason: reason.slice(0, 4000) }); riskCase.updatedAt = now(); audit(state, auth.user, 'risk.closure_requested', 'risk_case', caseId, {}); return riskCase;
   });
 }
 
@@ -777,8 +778,10 @@ export async function approveClosure(store: Store, auth: AuthenticatedUser, case
     const riskCase = caseFor(state, auth, caseId);
     if (riskCase.state !== 'closure_requested') throw new DomainError('CASE_STATE_INVALID', '个案尚未申请结案');
     if (auth.user.role === 'counselor' && riskCase.assignedTo !== auth.user.id) throw forbidden();
-    const requester = state.followUps.find((follow) => follow.tenantId === auth.user.tenantId && follow.caseId === caseId)?.authorId;
-    if (requester === auth.user.id && auth.user.role !== 'professional_lead') throw new DomainError('SEPARATION_OF_DUTIES_REQUIRED', '结案审批需要独立专业复核');
+    const requester = riskCase.closureRequestedBy;
+    // Legacy snapshots may not have the requester marker.  Fail closed for
+    // non-lead roles rather than inferring the actor from an arbitrary note.
+    if (auth.user.role !== 'professional_lead' && (!requester || requester === auth.user.id)) throw new DomainError('SEPARATION_OF_DUTIES_REQUIRED', '结案审批需要独立专业复核', 403);
     riskCase.state = 'closed'; riskCase.updatedAt = now(); audit(state, auth.user, 'risk.case_closed', 'risk_case', caseId, {}); return riskCase;
   });
 }

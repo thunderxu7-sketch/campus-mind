@@ -316,9 +316,10 @@ create table if not exists risk_signals (
 );
 create table if not exists risk_cases (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null,
-  state text not null, priority text not null, signal_ids jsonb not null, assigned_to uuid, created_at timestamptz not null default now(), updated_at timestamptz not null default now(), closure_reason_ciphertext text,
+  state text not null, priority text not null, signal_ids jsonb not null, assigned_to uuid, closure_requested_by uuid, created_at timestamptz not null default now(), updated_at timestamptz not null default now(), closure_reason_ciphertext text,
   foreign key (tenant_id, student_id) references students(tenant_id, id), unique (tenant_id, id)
 );
+alter table risk_cases add column if not exists closure_requested_by uuid;
 create table if not exists risk_reviews (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), case_id uuid not null,
   reviewer_id uuid not null, decision text not null, note_ciphertext text not null, created_at timestamptz not null default now(),
@@ -567,6 +568,11 @@ end $$;
 do $$
 begin
   alter table risk_cases add constraint risk_cases_assigned_to_fk foreign key (tenant_id, assigned_to) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter table risk_cases add constraint risk_cases_closure_requested_by_fk foreign key (tenant_id, closure_requested_by) references users(tenant_id, id);
 exception when duplicate_object then null;
 end $$;
 do $$

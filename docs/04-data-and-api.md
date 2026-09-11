@@ -20,7 +20,7 @@
 | 计分 | ScoreRun、FactorScore、ValidityResult | submission + scoring version 唯一；保留精度、常模版本、缺失策略和证据；invalid 不输出“正常” |
 | 报告 | ReportVersion、ReportRelease、ReportAccessRequest | 生成快照、专业审批、不同读者范围；撤回旧发布不删除历史审计 |
 | 风险 | RiskSignal、RiskCase、RiskReview、CaseAssignment | 信号有来源和版本；活跃个案可关联多个信号；复核和业务等级分开 |
-| 支持 | CarePlan、ContactNote、Referral、FollowUp、ClosureApproval | 最小化接触记录、外部转介状态、随访到期、独立结案审批 |
+| 支持 | CarePlan、ContactNote、Referral、FollowUp、ClosureApproval | 最小化接触记录、外部转介状态、随访到期；结案申请人单独留痕并由独立专业人员审批 |
 | 预约 | CounselorProfile、AvailabilitySlot、Appointment、Room | 资质审定状态；咨询师/房间时间窗不可冲突；不在预约提醒带心理原因 |
 | 内容 | ArticleVersion、MediaAsset、ContentReview | 适龄、版权、审核、有效期；公共教育内容与私有个案附件分开；媒体限制类型/大小、哈希与安全检查，并要求文字替代或字幕 |
 | 横切 | AuditEvent、OutboxEvent、DeliveryAttempt、ExportJob、RetentionPolicy、DeletionTombstone | 访问行为审计、投递/接单分别记录、下载再鉴权、保留与删除链路 |
