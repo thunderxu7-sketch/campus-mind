@@ -112,6 +112,7 @@ export class EncryptedFileObjectStore implements PrivateObjectStore {
     };
     const filename = fileFor(this.rootDir, input.tenantId, input.objectKey);
     mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
+    chmodSync(dirname(filename), 0o700);
     const temp = `${filename}.${randomBytes(8).toString('hex')}.tmp`;
     writeFileSync(temp, JSON.stringify(envelope), { mode: 0o600 });
     chmodSync(temp, 0o600);
