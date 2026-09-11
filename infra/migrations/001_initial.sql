@@ -220,9 +220,9 @@ create table if not exists reports (
 );
 create table if not exists risk_signals (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null,
-  source text not null, score_run_id uuid, rule_version text, level text not null, reason_ciphertext text not null,
+  source text not null, submission_id uuid, score_run_id uuid, rule_version text, level text not null, reason_ciphertext text not null,
   status text not null, created_at timestamptz not null default now(), foreign key (tenant_id, student_id) references students(tenant_id, id),
-  foreign key (tenant_id, score_run_id) references score_runs(tenant_id, id), unique (tenant_id, id)
+  foreign key (tenant_id, submission_id) references submissions(tenant_id, id), foreign key (tenant_id, score_run_id) references score_runs(tenant_id, id), unique (tenant_id, id), unique (tenant_id, submission_id)
 );
 create table if not exists risk_cases (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null,

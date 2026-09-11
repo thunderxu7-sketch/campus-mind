@@ -42,6 +42,8 @@ paths:
     post: {summary: Idempotently freeze a submission and enqueue scoring, parameters: [{$ref: '#/components/parameters/attemptId'}], responses: {'202': {description: Scoring pending}, '409': {description: Idempotency conflict}}}
   /v1/reports:
     get: {summary: Professional reports or released own reports, responses: {'200': {description: Reports}}}
+  /v1/students/{studentId}/archive:
+    get: {summary: Purpose-bound professional archive view, parameters: [{$ref: '#/components/parameters/studentId'}], responses: {'200': {description: Scoped archive}, '400': {description: Purpose required}, '404': {description: Outside professional scope}}}
   /v1/reports/{reportId}/approve:
     post: {summary: Professional report approval, parameters: [{$ref: '#/components/parameters/reportId'}], responses: {'204': {description: Approved}}}
   /v1/reports/{reportId}/release:
@@ -70,6 +72,8 @@ paths:
     get: {summary: Suppressed operational overview, responses: {'200': {description: Overview}}}
   /v1/analytics/summary:
     get: {summary: Whitelisted aggregate analytics with suppression, responses: {'200': {description: Aggregate rows}}}
+  /v1/exports/{jobId}/download:
+    get: {summary: Re-authorize and download a non-expired approved export, parameters: [{$ref: '#/components/parameters/jobId'}], responses: {'200': {description: Export payload}, '403': {description: Scope or approval failure}, '410': {description: Expired export}}}
   /v1/content/public:
     get:
       security: []
@@ -95,6 +99,8 @@ components:
     scaleId: {name: scaleId, in: path, required: true, schema: {type: string}}
     assetId: {name: assetId, in: path, required: true, schema: {type: string}}
     linkId: {name: linkId, in: path, required: true, schema: {type: string}}
+    studentId: {name: studentId, in: path, required: true, schema: {type: string}}
+    jobId: {name: jobId, in: path, required: true, schema: {type: string}}
   schemas:
     Login:
       type: object

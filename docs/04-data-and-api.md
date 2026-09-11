@@ -82,6 +82,7 @@ erDiagram
 | `PUT /v1/attempts/{id}/answers` | 保存答案 | `expectedRevision`、题目白名单、服务端持久化确认 |
 | `POST /v1/attempts/{id}/submit` | 提交 | 幂等键、内容 hash、事务快照与 outbox，不再修改 |
 | `GET /v1/reports/{id}`、`POST /v1/reports/{id}/release` | 查看/发布报告 | 字段权限、专业审核及读者范围；下载单独鉴权 |
+| `GET /v1/students/{id}/archive?purpose=...` | 个案级心理档案 | 仅同租户且在校/个案授权范围内的专业人员；用途必填并写入审计；班主任/运维拒绝 |
 | `POST /v1/risk-signals` | 主动求助/手工线索 | 合法主体、最小内容、加急独立持久化与通知 |
 | `POST /v1/cases/{id}/reviews`、`POST /v1/cases/{id}/acknowledgements` | 复核与接单 | 授权专业角色、状态版本，接单不等于已处置 |
 | `POST /v1/cases/{id}/follow-ups` | 支持与随访 | 个案范围、记录版本、到期提醒 |
@@ -98,4 +99,4 @@ erDiagram
 
 事件 envelope：`eventId`、`tenantId`、`type`、`aggregateId`、`aggregateVersion`、`occurredAt`、`schemaVersion`、`traceId`。正文只传必要引用，不传完整答案或咨询记录。
 
-关键事件：`assessment.submitted`、`score.completed`、`score.failed`、`risk.signal_created`、`risk.acknowledgement_overdue`、`report.released`、`consent.withdrawn`、`access.revoked`、`export.expired`。Worker 消费时再次验证状态与权限，重复消息不得产生重复个案/重复下载能力。
+关键事件：`assessment.submitted`、`risk.triage`、`score.completed`、`score.failed`、`risk.signal_created`、`risk.acknowledgement_overdue`、`report.released`、`consent.withdrawn`、`access.revoked`、`export.expired`。Worker 消费时再次验证状态与权限，重复消息不得产生重复个案/重复下载能力；规则线索通过 submission 引用与计分结果关联。

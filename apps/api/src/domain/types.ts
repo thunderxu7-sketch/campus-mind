@@ -232,6 +232,7 @@ export interface RiskSignal {
   tenantId: string;
   studentId: string;
   source: SignalSource;
+  submissionId?: string;
   scoreRunId?: string;
   ruleVersion?: string;
   level: 'attention' | 'urgent';

@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { approveFrequencyException, createCampaign, createSelfScreening, publishCampaign, revokeScale } from '../dist/apps/api/src/domain/service.js';
+import { approveFrequencyException, beginAttempt, createCampaign, createSelfScreening, publishCampaign, revokeScale, saveAnswers, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
 import { JsonStore } from '../dist/apps/api/src/domain/store.js';
 import { seedDemoState } from '../dist/apps/api/src/domain/seed.js';
 
@@ -71,4 +71,16 @@ test('revoking a scale blocks new use without changing historical identifiers', 
   await revokeScale(store, professional, 'scale-synthetic-demo-v1', '合成演示撤销');
   assert.equal(store.snapshot().scales.find((scale) => scale.id === 'scale-synthetic-demo-v1').status, 'revoked');
   assert.equal(store.snapshot().campaigns.find((campaign) => campaign.id === 'campaign-demo').scaleVersionId, 'scale-synthetic-demo-v1');
+});
+
+test('assessment consent withdrawal stops an in-progress draft and pending processing', async () => {
+  const store = new JsonStore({ initial: seedDemoState() });
+  const student = authFor(store.snapshot(), 'student-demo');
+  const started = await beginAttempt(store, student, 'assignment-demo');
+  await saveAnswers(store, student, started.attempt.id, { expectedRevision: 0, answers: { q1: 1 } });
+  const consent = store.snapshot().consents.find((record) => record.studentId === 'student-demo' && record.purpose === 'assessment' && record.status === 'active');
+  await withdrawConsent(store, student, consent.id);
+  assert.equal(store.snapshot().attempts.find((attempt) => attempt.id === started.attempt.id).state, 'withdrawn');
+  await assert.rejects(() => saveAnswers(store, student, started.attempt.id, { expectedRevision: 1, answers: { q1: 0 } }), (error) => error.code === 'NOT_FOUND');
+  assert.equal(store.snapshot().outboxEvents.some((event) => event.type === 'assessment.submitted'), false);
 });

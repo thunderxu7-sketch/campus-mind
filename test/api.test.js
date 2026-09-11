@@ -85,9 +85,12 @@ test('student assessment lifecycle is durable, revision-safe and idempotent', as
   const mismatch = await request(`/v1/attempts/${attemptId}/submit`, { method: 'POST', headers: auth(token), body: JSON.stringify({ idempotencyKey: 'another-submit-key-001' }) });
   assert.equal(mismatch.response.status, 409);
   assert.equal(mismatch.body.error.code, 'IDEMPOTENCY_CONFLICT');
+  assert.ok(store.snapshot().outboxEvents.some((event) => event.type === 'risk.triage' && event.status === 'pending'));
   const drained = await drainOutbox(store);
   assert.ok(drained.processed >= 1);
   assert.ok(store.snapshot().deliveryAttempts.some((attempt) => attempt.channel === 'in_app' && attempt.status === 'sent'));
+  const ruleSignal = store.snapshot().riskSignals.find((signal) => signal.submissionId === submitted.body.data.submissionId);
+  assert.ok(ruleSignal?.scoreRunId, 'risk signal is linked to the immutable score after scoring');
   assert.equal(store.snapshot().assignments.find((assignment) => assignment.id === assignmentId).status, 'completed');
   const reports = await request('/v1/reports', { headers: auth(token) });
   assert.equal(reports.response.status, 200);
@@ -114,6 +117,8 @@ test('professional review, assignment, acknowledgement and independent closure w
   const approved = await request(`/v1/cases/${caseId}/closure-approvals`, { method: 'POST', headers: auth(professional), body: '{}' });
   assert.equal(approved.response.status, 200);
   assert.equal(approved.body.data.state, 'closed');
+  const counselorArchive = await request('/v1/students/student-demo/archive?purpose=case_review', { headers: auth(counselor) });
+  assert.equal(counselorArchive.response.status, 404, '已结案且未重新授权的咨询师不能读取历史档案');
 });
 
 test('report release controls student visibility and service errors do not leak data', async () => {
@@ -121,6 +126,11 @@ test('report release controls student visibility and service errors do not leak 
   const reports = await request('/v1/reports?studentId=student-demo', { headers: auth(professional) });
   assert.equal(reports.response.status, 200);
   assert.equal(reports.body.data.length, 1);
+  const missingPurpose = await request('/v1/students/student-demo/archive', { headers: auth(professional) });
+  assert.equal(missingPurpose.response.status, 400);
+  const archive = await request('/v1/students/student-demo/archive?purpose=report_review', { headers: auth(professional) });
+  assert.equal(archive.response.status, 200);
+  assert.equal(archive.body.data.studentId, 'student-demo');
   const reportId = reports.body.data[0].id;
   const released = await request(`/v1/reports/${reportId}/release`, { method: 'POST', headers: auth(professional), body: '{}' });
   assert.equal(released.response.status, 204);
