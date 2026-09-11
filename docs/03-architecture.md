@@ -67,7 +67,7 @@ packages/
 infra/                # 环境模板与运行手册（后续）
 ```
 
-当前仓库已提供 `apps/api`、`apps/admin-web`、`apps/student-web`、`test` 和 `infra/migrations` 的合成数据参考实现；尚未创建空的 `packages/*`，避免产生“生产组件已实现”的误解。
+当前仓库已提供 `apps/api`、`apps/admin-web`、`apps/student-web`、`test` 和 `infra/migrations` 的合成数据参考实现；尚未创建空的 `packages/*`，避免产生“生产组件已实现”的误解。`apps/api/src/infra/postgres-context.ts` 提供不绑定驱动的租户事务/连接池生命周期辅助函数，需由真正的 PostgreSQL Store 适配器调用并在目标环境验证。
 
 ## 4. 租户与授权防线
 
