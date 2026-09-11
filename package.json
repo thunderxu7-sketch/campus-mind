@@ -12,10 +12,11 @@
     "start": "node dist/apps/api/src/main.js",
     "dev": "tsx apps/api/src/main.ts",
     "test": "npm run build && node --test test/*.test.js",
-    "check": "npm run build && npm test && python3 scripts/check_plan.py",
+    "check": "npm run build && npm test && npm run security:check && python3 scripts/check_plan.py",
     "check:plan": "python3 scripts/check_plan.py",
     "check:plan:write": "python3 scripts/check_plan.py --write",
-    "worker": "npm run build && node dist/apps/api/src/worker.js"
+    "worker": "npm run build && node dist/apps/api/src/worker.js",
+    "security:check": "node scripts/security-check.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",

@@ -25,5 +25,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      - run: npm audit --omit=dev --audit-level=high
+      - run: node scripts/security-check.mjs
       - run: python3 scripts/check_plan.py
       - run: python3 -m unittest discover -s tests -v

@@ -252,8 +252,9 @@ create table if not exists availability_slots (
 create table if not exists appointments (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null,
   counselor_id uuid not null, slot_id uuid not null, state text not null, note_ciphertext text, created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
-  foreign key (tenant_id, student_id) references students(tenant_id, id), foreign key (tenant_id, slot_id) references availability_slots(tenant_id, id), unique (tenant_id, slot_id)
+  foreign key (tenant_id, student_id) references students(tenant_id, id), foreign key (tenant_id, slot_id) references availability_slots(tenant_id, id)
 );
+create unique index if not exists active_appointment_slot on appointments(tenant_id, slot_id) where state in ('requested','confirmed');
 create table if not exists content_items (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), title text not null, kind text not null,
   age_min smallint not null, age_max smallint not null, body_ciphertext text not null, state text not null, copyright_source text not null,
