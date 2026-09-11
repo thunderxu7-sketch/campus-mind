@@ -197,6 +197,10 @@ test('student assessment lifecycle is durable, revision-safe and idempotent', as
   const assignmentId = tasks.body.data[0].id;
   const started = await request(`/v1/me/tasks/${assignmentId}/attempts`, { method: 'POST', headers: auth(token), body: '{}' });
   assert.equal(started.response.status, 201, JSON.stringify(started.body));
+  assert.deepEqual(Object.keys(started.body.data.attempt).sort(), ['currentRevision', 'id', 'startedAt', 'state']);
+  assert.equal(Object.hasOwn(started.body.data.attempt, 'tenantId'), false);
+  assert.equal(Object.hasOwn(started.body.data.attempt, 'studentId'), false);
+  assert.equal(Object.hasOwn(started.body.data.attempt, 'scaleVersionId'), false);
   const attemptId = started.body.data.attempt.id;
   const scale = started.body.data.scale;
   const saved = await request(`/v1/attempts/${attemptId}/answers`, { method: 'PUT', headers: auth(token), body: JSON.stringify({ expectedRevision: 0, answers: { q1: 1 } }) });
@@ -204,6 +208,8 @@ test('student assessment lifecycle is durable, revision-safe and idempotent', as
   const resumed = await request(`/v1/attempts/${attemptId}`, { headers: auth(token) });
   assert.equal(resumed.response.status, 200);
   assert.equal(resumed.body.data.attempt.currentRevision, saved.body.data.revision);
+  assert.equal(Object.hasOwn(resumed.body.data.attempt, 'assignmentId'), false);
+  assert.equal(Object.hasOwn(resumed.body.data.attempt, 'submissionId'), false);
   assert.equal(resumed.body.data.answers.q1, 1);
   const conflict = await request(`/v1/attempts/${attemptId}/answers`, { method: 'PUT', headers: auth(token), body: JSON.stringify({ expectedRevision: 0, answers: { q1: 0 } }) });
   assert.equal(conflict.response.status, 409);

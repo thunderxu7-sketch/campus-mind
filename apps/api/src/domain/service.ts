@@ -43,6 +43,12 @@ type PublicSelfScreening = {
   campaign: Pick<Campaign, 'id' | 'name' | 'purpose' | 'state' | 'academicYear' | 'opensAt' | 'closesAt' | 'reportVisibility'>;
   assignment: Pick<Assignment, 'id' | 'campaignId' | 'status' | 'createdAt'>;
 };
+/**
+ * The student answer flow only needs a stable handle and revision marker.
+ * Keep assignment, student, scale and submission identifiers server-side so a
+ * browser response cannot be reused as an object-discovery primitive.
+ */
+type PublicAttempt = Pick<Attempt, 'id' | 'state' | 'currentRevision' | 'startedAt' | 'submittedAt'>;
 type PublicRiskCase = Pick<RiskCase, 'id' | 'studentId' | 'state' | 'priority' | 'assignedTo' | 'createdAt' | 'updatedAt'> & { signalCount: number };
 type PublicFollowUp = Pick<FollowUp, 'id' | 'caseId' | 'kind' | 'dueAt' | 'createdAt'> & { hasNote: boolean };
 type PublicCaseAcknowledgement = Pick<CaseAcknowledgement, 'id' | 'caseId' | 'acknowledgedAt'>;
@@ -66,6 +72,10 @@ function publicFollowUp(followUp: FollowUp): PublicFollowUp {
 
 function publicCaseAcknowledgement(acknowledgement: CaseAcknowledgement): PublicCaseAcknowledgement {
   return { id: acknowledgement.id, caseId: acknowledgement.caseId, acknowledgedAt: acknowledgement.acknowledgedAt };
+}
+
+function publicAttempt(attempt: Attempt): PublicAttempt {
+  return { id: attempt.id, state: attempt.state, currentRevision: attempt.currentRevision, startedAt: attempt.startedAt, submittedAt: attempt.submittedAt };
 }
 
 function publicRightsRequest(request: RightsRequest): PublicRightsRequest {
@@ -488,7 +498,7 @@ export async function approveFrequencyException(store: Store, auth: Authenticate
   });
 }
 
-export async function beginAttempt(store: Store, auth: AuthenticatedUser, assignmentId: string): Promise<{ attempt: Attempt; scale: ScaleVersion }> {
+export async function beginAttempt(store: Store, auth: AuthenticatedUser, assignmentId: string): Promise<{ attempt: PublicAttempt; scale: ScaleVersion }> {
   requirePermission(auth.user, 'self:assessment');
   if (!isStudent(auth.user)) throw forbidden();
   return store.transaction((state) => {
@@ -506,14 +516,14 @@ export async function beginAttempt(store: Store, auth: AuthenticatedUser, assign
     const reservation = state.frequencyReservations.find((candidate) => candidate.id === assignment.frequencyReservationId && candidate.tenantId === auth.user.tenantId);
     if (!reservation || !['reserved', 'exception'].includes(reservation.status)) throw new DomainError('FREQUENCY_REVIEW_REQUIRED', '该测评场次已释放或已被占用', 409);
     const current = state.attempts.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.assignmentId === assignment.id);
-    if (current) return { attempt: current, scale };
+    if (current) return { attempt: publicAttempt(current), scale };
     const attempt: Attempt = { id: id(), tenantId: auth.user.tenantId, assignmentId: assignment.id, studentId: student.id, scaleVersionId: scale.id, state: 'in_progress', currentRevision: 0, startedAt: now() };
-    state.attempts.push(attempt); assignment.status = 'started'; audit(state, auth.user, 'attempt.started', 'attempt', attempt.id, {}, 'assessment'); return { attempt, scale };
+    state.attempts.push(attempt); assignment.status = 'started'; audit(state, auth.user, 'attempt.started', 'attempt', attempt.id, {}, 'assessment'); return { attempt: publicAttempt(attempt), scale };
   });
 }
 
 /** Return the student's latest server-confirmed draft for resume after a reload. */
-export async function getAttempt(store: Store, auth: AuthenticatedUser, attemptId: string): Promise<{ attempt: Attempt; answers: Record<string, unknown> }> {
+export async function getAttempt(store: Store, auth: AuthenticatedUser, attemptId: string): Promise<{ attempt: PublicAttempt; answers: Record<string, unknown> }> {
   requirePermission(auth.user, 'self:assessment');
   if (!isStudent(auth.user)) throw forbidden();
   return store.transaction((state) => {
@@ -525,7 +535,7 @@ export async function getAttempt(store: Store, auth: AuthenticatedUser, attemptI
     const revision = state.answerRevisions.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.attemptId === attempt.id && candidate.revision === attempt.currentRevision);
     const answers = revision ? decrypt<Record<string, unknown>>(revision.answersCiphertext) : {};
     audit(state, auth.user, 'attempt.draft_read', 'attempt', attempt.id, { revision: attempt.currentRevision }, 'assessment');
-    return { attempt, answers };
+    return { attempt: publicAttempt(attempt), answers };
   });
 }
 

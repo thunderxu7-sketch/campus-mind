@@ -92,6 +92,9 @@ test('closing an unfinished campaign expires drafts and releases unused frequenc
   await publishCampaign(store, admin, campaign.id);
   const student = authFor(store.snapshot(), 'student-demo');
   const started = await beginAttempt(store, student, store.snapshot().assignments.find((assignment) => assignment.campaignId === campaign.id).id);
+  assert.equal(Object.hasOwn(started.attempt, 'tenantId'), false);
+  assert.equal(Object.hasOwn(started.attempt, 'studentId'), false);
+  assert.equal(Object.hasOwn(started.attempt, 'scaleVersionId'), false);
   await saveAnswers(store, student, started.attempt.id, { expectedRevision: 0, answers: { q1: 1 } });
   await store.transaction((state) => { state.campaigns.find((candidate) => candidate.id === campaign.id).closesAt = '2020-01-01T00:00:00.000Z'; });
   const staleTasks = await listMyTasks(store, student);
