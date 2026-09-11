@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+coverage/
+__pycache__/
+*.pyc
+.venv/
+private-data/
+exports/
+backups/
+*.pem
+*.key
