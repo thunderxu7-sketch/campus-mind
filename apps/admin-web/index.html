@@ -32,6 +32,15 @@
     <div id="campaigns" aria-live="polite"></div>
     <p id="campaignStatus" class="status" role="status" aria-live="polite"></p>
     <div id="campaignProgress" aria-live="polite"><p class="muted">选择任务可读取完成进度。</p></div>
+    <h2>人员信息导入预检</h2>
+    <p class="muted">支持受限 CSV（字段：externalId、displayName、age、classId、guardianVerified）。服务端会再次校验；预检文件不应包含超出目的的敏感字段。</p>
+    <form id="importForm">
+      <label for="import-file">CSV 文件（≤2 MB）</label><input id="import-file" type="file" accept=".csv,text/csv">
+      <label for="import-csv">或粘贴 CSV 内容</label><textarea id="import-csv" rows="5" maxlength="2000000" placeholder="externalId,displayName,age,classId,guardianVerified&#10;synthetic-new-001,合成学生甲,14,class-demo-1,false"></textarea>
+      <button type="submit">预检名单</button> <button id="importCommit" type="button" class="secondary" disabled>确认导入</button>
+    </form>
+    <p id="importStatus" class="status" role="status" aria-live="polite"></p>
+    <div id="importPreview" aria-live="polite"><p class="muted">尚未预检导入文件。</p></div>
     <form id="campaignForm">
       <label for="campaign-name">任务名称</label><input id="campaign-name" name="name" placeholder="任务名称" value="合成演示任务" required>
       <label for="academic-year">学年</label><input id="academic-year" name="academicYear" value="2026-2027" required>
@@ -170,6 +179,79 @@
 
     const appointmentStateLabel = { requested: '待确认', confirmed: '已确认', completed: '已完成', cancelled: '已取消', no_show: '未到访' };
     const formatWhen = (value) => { const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString() : '时间不可用'; };
+    let pendingImport = null;
+    function parseCsvClient(text) {
+      const source = text.replace(/^\uFEFF/, '');
+      if (new Blob([source]).size > 2_000_000) throw new Error('CSV 文件大小超出限制');
+      const rows = [];
+      let row = [], cell = '', quoted = false;
+      const pushCell = () => { if (cell.length > 20000) throw new Error('CSV 单元格过大'); row.push(cell.trim()); cell = ''; };
+      for (let index = 0; index < source.length; index += 1) {
+        const char = source[index];
+        if (quoted) {
+          if (char === '"') {
+            if (source[index + 1] === '"') { cell += '"'; index += 1; } else quoted = false;
+          } else cell += char;
+          if (cell.length > 20000) throw new Error('CSV 单元格过大');
+          continue;
+        }
+        if (char === '"' && cell.length === 0) { quoted = true; continue; }
+        if (char === ',') { pushCell(); continue; }
+        if (char === '\n' || char === '\r') {
+          if (char === '\r' && source[index + 1] === '\n') index += 1;
+          pushCell();
+          if (row.some((value) => value !== '')) rows.push(row);
+          if (rows.length > 10001) throw new Error('CSV 行数超出限制');
+          row = [];
+          continue;
+        }
+        cell += char;
+        if (cell.length > 20000) throw new Error('CSV 单元格过大');
+      }
+      if (quoted) throw new Error('CSV 引号未闭合');
+      if (cell.length || row.length) { pushCell(); if (row.some((value) => value !== '')) rows.push(row); }
+      if (rows.length > 10001) throw new Error('CSV 行数超出限制');
+      if (rows.length < 2) throw new Error('CSV 至少需要表头和一行数据');
+      const headers = rows[0].map((header) => header.trim());
+      if (!headers.length || headers.length > 100 || headers.some((header) => !header) || new Set(headers).size !== headers.length || rows.slice(1).some((values) => values.length > headers.length)) throw new Error('CSV 表头无效或数据列超出范围');
+      return rows.slice(1).map((values) => {
+        const raw = Object.fromEntries(headers.map((header, index) => [header, values[index] || '']));
+        return { ...raw, age: Number(raw.age), guardianVerified: raw.guardianVerified === 'true' };
+      });
+    }
+    $('#import-file').onchange = async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      try { if (file.size > 2_000_000) throw new Error('CSV 文件大小超出限制'); $('#import-csv').value = await file.text(); $('#importStatus').textContent = '已读取文件，请先预检。'; }
+      catch (error) { $('#importStatus').textContent = error.message || '读取文件失败'; }
+    };
+    $('#importForm').onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        const rows = parseCsvClient($('#import-csv').value);
+        const file = $('#import-file').files[0];
+        const response = await fetch('/v1/imports/preview', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ schoolId: 'school-demo', filename: file?.name || 'pasted-students.csv', rows }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '导入预检失败');
+        pendingImport = { batchId: result.data.batch.id, rows };
+        $('#importCommit').disabled = false;
+        const batch = result.data.batch;
+        const errors = (result.data.rows || []).filter((row) => row.status === 'error').slice(0, 50);
+        const errorList = errors.length ? `<ul>${errors.map((row) => `<li>第 ${esc(row.rowNumber)} 行：${esc(row.message || '字段无效')}</li>`).join('')}</ul>${batch.errorCount > errors.length ? `<p class="muted">仅显示前 ${errors.length} 条错误。</p>` : ''}` : '<p class="muted">没有发现字段错误。</p>';
+        $('#importPreview').innerHTML = `<p>批次 ${esc(batch.id)}：共 ${esc(batch.rowCount)} 行，${esc(batch.validRowCount)} 行可导入，${esc(batch.errorCount)} 行有错误。</p>${errorList}`;
+        $('#importStatus').textContent = '预检完成；确认前可修改内容并重新预检。';
+      } catch (error) { pendingImport = null; $('#importCommit').disabled = true; $('#importStatus').textContent = error.message || '导入预检失败'; }
+    };
+    $('#importCommit').onclick = async () => {
+      if (!pendingImport) return;
+      try {
+        const response = await fetch('/v1/imports/' + encodeURIComponent(pendingImport.batchId) + '/commit', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ rows: pendingImport.rows }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '确认导入失败');
+        $('#importStatus').textContent = `名单导入完成（${result.data.id}），新学生仍需参与/监护流程后才能进入测评。`;
+        pendingImport = null; $('#importCommit').disabled = true; await load();
+      } catch (error) { $('#importStatus').textContent = error.message || '确认导入失败'; }
+    };
     const campaignStateLabel = { draft: '草稿', approved: '已批准', scheduled: '已排期', open: '开放中', paused: '已暂停', closed: '已关闭', cancelled: '已取消', archived: '已归档' };
     function renderCampaigns(campaigns) {
       $('#campaigns').innerHTML = campaigns.length ? campaigns.map((campaign) => {
