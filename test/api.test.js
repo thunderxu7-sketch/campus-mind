@@ -87,6 +87,8 @@ test('student assessment lifecycle is durable, revision-safe and idempotent', as
   assert.equal(mismatch.body.error.code, 'IDEMPOTENCY_CONFLICT');
   const drained = await drainOutbox(store);
   assert.ok(drained.processed >= 1);
+  assert.ok(store.snapshot().deliveryAttempts.some((attempt) => attempt.channel === 'in_app' && attempt.status === 'sent'));
+  assert.equal(store.snapshot().assignments.find((assignment) => assignment.id === assignmentId).status, 'completed');
   const reports = await request('/v1/reports', { headers: auth(token) });
   assert.equal(reports.response.status, 200);
   assert.equal(reports.body.data.length, 0, 'pending report must not be visible to a student');
@@ -130,6 +132,57 @@ test('report release controls student visibility and service errors do not leak 
   const unauthorized = await request('/v1/reports/does-not-exist', { headers: auth(student) });
   assert.equal(unauthorized.response.status, 404);
   assert.deepEqual(Object.keys(unauthorized.body.error).sort(), ['code', 'message']);
+});
+
+
+test('imports, governed schemas, aggregate analytics, exports and public content are controlled', async () => {
+  const admin = await login('admin@campus-mind.demo');
+  const professional = await login('professional@campus-mind.demo');
+  const preview = await request('/v1/imports/preview', { method: 'POST', headers: auth(admin), body: JSON.stringify({ schoolId: 'school-demo', filename: 'synthetic-students.csv', rows: [{ externalId: 'synthetic-new-001', displayName: '合成学生甲', age: 14, classId: 'class-demo-1', guardianVerified: false }, { externalId: '', displayName: '缺失编号', age: 14, classId: 'class-demo-1' }] }) });
+  assert.equal(preview.response.status, 201, JSON.stringify(preview.body));
+  assert.equal(preview.body.data.batch.validRowCount, 1);
+  const committed = await request(`/v1/imports/${preview.body.data.batch.id}/commit`, { method: 'POST', headers: auth(admin), body: JSON.stringify({ rows: [{ externalId: 'synthetic-new-001', displayName: '合成学生甲', age: 14, classId: 'class-demo-1', guardianVerified: false }, { externalId: '', displayName: '缺失编号', age: 14, classId: 'class-demo-1' }] }) });
+  assert.equal(committed.response.status, 200);
+  const schema = await request('/v1/profile-schemas', { method: 'POST', headers: auth(professional), body: JSON.stringify({ version: 'demo-v1', fields: [{ id: 'sleep', label: '睡眠情况', purpose: '合成演示字段', required: false, sensitive: true }] }) });
+  assert.equal(schema.response.status, 201);
+  const schemaApproved = await request(`/v1/profile-schemas/${schema.body.data.id}/approve`, { method: 'POST', headers: auth(professional), body: '{}' });
+  assert.equal(schemaApproved.response.status, 200);
+  const analytics = await request('/v1/analytics/summary?groupBy=school', { headers: auth(professional) });
+  assert.equal(analytics.response.status, 200);
+  assert.equal(analytics.body.data.rows[0].suppressed, true);
+  const exportRequest = await request('/v1/exports', { method: 'POST', headers: auth(admin), body: JSON.stringify({ kind: 'aggregate' }) });
+  assert.equal(exportRequest.response.status, 201);
+  const exportApprove = await request(`/v1/exports/${exportRequest.body.data.id}/approve`, { method: 'POST', headers: auth(professional), body: '{}' });
+  assert.equal(exportApprove.response.status, 200);
+  const exportDownload = await request(`/v1/exports/${exportRequest.body.data.id}`, { headers: auth(admin) });
+  assert.equal(exportDownload.response.status, 200);
+  assert.equal(exportDownload.body.data.suppressionThreshold, 10);
+  const slot = await request('/v1/availability-slots', { method: 'POST', headers: auth(professional), body: JSON.stringify({ counselorId: 'user-counselor-demo', startsAt: new Date(Date.now() + 3_600_000).toISOString(), endsAt: new Date(Date.now() + 7_200_000).toISOString(), room: '合成咨询室' }) });
+  assert.equal(slot.response.status, 201);
+  const student = await login('student@campus-mind.demo');
+  const appointment = await request('/v1/appointments', { method: 'POST', headers: auth(student), body: JSON.stringify({ slotId: slot.body.data.id, note: '合成预约说明' }) });
+  assert.equal(appointment.response.status, 201);
+  const confirmed = await request(`/v1/appointments/${appointment.body.data.id}/state`, { method: 'POST', headers: auth(professional), body: JSON.stringify({ state: 'confirmed' }) });
+  assert.equal(confirmed.response.status, 200);
+  const content = await request('/v1/content', { method: 'POST', headers: auth(professional), body: JSON.stringify({ title: '如何找到可信任的支持', kind: 'article', body: '合成教育内容：可以向可信任的成人或专业老师表达需要。', ageMin: 12, ageMax: 18, copyrightSource: 'synthetic-only' }) });
+  assert.equal(content.response.status, 201);
+  const published = await request(`/v1/content/${content.body.data.id}/publish`, { method: 'POST', headers: auth(professional), body: '{}' });
+  assert.equal(published.response.status, 200);
+  const publicContent = await request('/v1/content/public?age=15');
+  assert.equal(publicContent.response.status, 200);
+  assert.ok(publicContent.body.data.some((item) => item.id === content.body.data.id));
+});
+
+test('rights requests are auditable and privacy staff can complete non-destructive access requests', async () => {
+  const student = await login('student@campus-mind.demo');
+  const privacy = await login('privacy@campus-mind.demo');
+  const created = await request('/v1/rights-requests', { method: 'POST', headers: auth(student), body: JSON.stringify({ studentId: 'student-demo', kind: 'access', reason: '合成演示查阅申请' }) });
+  assert.equal(created.response.status, 201);
+  const listed = await request('/v1/admin/rights-requests', { headers: auth(privacy) });
+  assert.equal(listed.response.status, 200);
+  const completed = await request(`/v1/admin/rights-requests/${created.body.data.id}/complete`, { method: 'POST', headers: auth(privacy), body: JSON.stringify({ decision: 'complete' }) });
+  assert.equal(completed.response.status, 200);
+  assert.equal(completed.body.data.status, 'completed');
 });
 
 test('consent withdrawal blocks future assessment and leaves audit evidence', async () => {

@@ -14,7 +14,8 @@
     "test": "npm run build && node --test test/*.test.js",
     "check": "npm run build && npm test && python3 scripts/check_plan.py",
     "check:plan": "python3 scripts/check_plan.py",
-    "check:plan:write": "python3 scripts/check_plan.py --write"
+    "check:plan:write": "python3 scripts/check_plan.py --write",
+    "worker": "npm run build && node dist/apps/api/src/worker.js"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",

@@ -22,6 +22,7 @@ export function seedDemoState(): DatabaseState {
   const user = (id: string, email: string, displayName: string, role: User['role'], schoolId?: string, mfaEnabled = false): User => ({ id, tenantId: DEMO_IDS.tenant, schoolId, email, displayName, passwordHash: hashPassword(DEMO_PASSWORD), role, active: true, mfaEnabled, createdAt });
   state.users.push(
     user('user-ops-demo', 'ops@campus-mind.demo', '演示平台运维', 'platform_ops', undefined, true),
+    user('user-privacy-demo', 'privacy@campus-mind.demo', '演示隐私审计员', 'privacy_auditor', DEMO_IDS.school),
     user('user-admin-demo', 'admin@campus-mind.demo', '演示校务管理员', 'school_admin', DEMO_IDS.school, true),
     user('user-professional-demo', 'professional@campus-mind.demo', '演示心理专业负责人', 'professional_lead', DEMO_IDS.school),
     user('user-counselor-demo', 'counselor@campus-mind.demo', '演示心理咨询师', 'counselor', DEMO_IDS.school),

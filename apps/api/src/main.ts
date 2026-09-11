@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveReport, approveScale, assignCase, beginAttempt, commitImport, createCampaign, createConsent, createRiskSignal, createScale, currentUser, drainOutbox, listCases, listMyTasks, listReports, previewImport, publishCampaign, requestClosure, reviewCase, saveAnswers, submitAttempt, withdrawConsent } from './domain/service.js';
+import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createProfileSchema, createRiskSignal, createScale, currentUser, drainOutbox, downloadExport, getAnalytics, listCases, listMyTasks, listPublicContent, listReports, listRightsRequests, parseCsv, previewImport, publishCampaign, requestAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, withdrawConsent, completeRightsRequest, createRightsRequest } from './domain/service.js';
 import { authenticate, login as loginUser, logout, requirePermission } from './domain/auth.js';
 import { DomainError, unauthorized } from './domain/errors.js';
 import { JsonStore } from './domain/store.js';
@@ -111,6 +111,7 @@ async function getAuth(req: IncomingMessage, store: JsonStore): Promise<Authenti
 async function routeApi(req: IncomingMessage, res: ServerResponse, method: string, path: string, url: URL, store: JsonStore): Promise<void> {
   const segments = path.split('/').filter(Boolean);
   const input = method !== 'GET' && method !== 'DELETE' ? await body(req) : {};
+  if (method === 'GET' && path === '/v1/content/public') { json(res, 200, { data: await listPublicContent(store, url.searchParams.has('age') ? Number(url.searchParams.get('age')) : undefined) }); return; }
   if (method === 'POST' && path === '/v1/auth/login') {
     const result = await loginUser(store, stringField(input, 'email'), stringField(input, 'password'));
     json(res, 200, { data: result }); return;
@@ -126,6 +127,11 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
     json(res, 201, { data: result }); return;
   }
   if (method === 'POST' && segments[1] === 'me' && segments[2] === 'consents' && segments[4] === 'withdraw') { await withdrawConsent(store, auth, segments[3]!); json(res, 204, {}); return; }
+  if (method === 'POST' && path === '/v1/imports/preview-csv') {
+    const csv = stringField(input, 'csv');
+    const rows = parseCsv(csv).map((row) => ({ ...row, age: Number(row.age), guardianVerified: row.guardianVerified === 'true' }));
+    const result = await previewImport(store, auth, { schoolId: stringField(input, 'schoolId'), filename: typeof input.filename === 'string' ? input.filename : 'upload.csv', rows }); json(res, 201, { data: result }); return;
+  }
   if (method === 'POST' && path === '/v1/imports/preview') {
     const rows = arrayField(input, 'rows').filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object' && !Array.isArray(row)));
     const result = await previewImport(store, auth, { schoolId: stringField(input, 'schoolId'), filename: stringField(input, 'filename'), rows }); json(res, 201, { data: result }); return;
@@ -166,6 +172,20 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   if (method === 'POST' && segments[1] === 'cases' && segments[3] === 'follow-ups') { const result = await addFollowUp(store, auth, segments[2]!, { kind: (input.kind as 'support' | 'referral' | 'follow_up') ?? 'support', note: stringField(input, 'note'), dueAt: typeof input.dueAt === 'string' ? input.dueAt : undefined }); json(res, 201, { data: result }); return; }
   if (method === 'POST' && segments[1] === 'cases' && segments[3] === 'closure-requests') { const result = await requestClosure(store, auth, segments[2]!, stringField(input, 'reason')); json(res, 200, { data: result }); return; }
   if (method === 'POST' && segments[1] === 'cases' && segments[3] === 'closure-approvals') { const result = await approveClosure(store, auth, segments[2]!); json(res, 200, { data: result }); return; }
+  if (method === 'POST' && path === '/v1/rights-requests') { const result = await createRightsRequest(store, auth, { studentId: stringField(input, 'studentId'), kind: (input.kind as 'access' | 'correct' | 'delete' | 'withdraw') ?? 'access', reason: typeof input.reason === 'string' ? input.reason : undefined }); json(res, 201, { data: result }); return; }
+  if (method === 'GET' && path === '/v1/admin/rights-requests') { json(res, 200, { data: await listRightsRequests(store, auth) }); return; }
+  if (method === 'POST' && segments[1] === 'admin' && segments[2] === 'rights-requests' && segments[4] === 'complete') { const result = await completeRightsRequest(store, auth, segments[3]!, input.decision === 'reject' ? 'reject' : 'complete'); json(res, 200, { data: result }); return; }
+  if (method === 'POST' && path === '/v1/exports') { const result = await requestExport(store, auth, { kind: input.kind === 'report' ? 'report' : 'aggregate', studentId: typeof input.studentId === 'string' ? input.studentId : undefined }); json(res, 201, { data: result }); return; }
+  if (method === 'POST' && segments[1] === 'exports' && segments[3] === 'approve') { const result = await approveExport(store, auth, segments[2]!); json(res, 200, { data: result }); return; }
+  if (method === 'GET' && segments[1] === 'exports' && segments.length === 3) { const result = await downloadExport(store, auth, segments[2]!); json(res, 200, { data: result }); return; }
+  if (method === 'GET' && path === '/v1/analytics/summary') { json(res, 200, { data: await getAnalytics(store, auth, url.searchParams.get('groupBy') ?? 'school') }); return; }
+  if (method === 'POST' && path === '/v1/profile-schemas') { const result = await createProfileSchema(store, auth, { version: stringField(input, 'version'), fields: arrayField(input, 'fields') as never }); json(res, 201, { data: result }); return; }
+  if (method === 'POST' && segments[1] === 'profile-schemas' && segments[3] === 'approve') { const result = await approveProfileSchema(store, auth, segments[2]!); json(res, 200, { data: result }); return; }
+  if (method === 'POST' && path === '/v1/availability-slots') { const result = await createAvailabilitySlot(store, auth, { counselorId: stringField(input, 'counselorId'), startsAt: stringField(input, 'startsAt'), endsAt: stringField(input, 'endsAt'), room: typeof input.room === 'string' ? input.room : undefined }); json(res, 201, { data: result }); return; }
+  if (method === 'POST' && path === '/v1/appointments') { const result = await requestAppointment(store, auth, { slotId: stringField(input, 'slotId'), note: typeof input.note === 'string' ? input.note : undefined }); json(res, 201, { data: result }); return; }
+  if (method === 'POST' && segments[1] === 'appointments' && segments[3] === 'state') { const result = await updateAppointment(store, auth, segments[2]!, (input.state as 'requested' | 'confirmed' | 'completed' | 'cancelled' | 'no_show') ?? 'cancelled'); json(res, 200, { data: result }); return; }
+  if (method === 'POST' && path === '/v1/content') { const result = await createContent(store, auth, { title: stringField(input, 'title'), kind: (input.kind as 'article' | 'announcement' | 'media') ?? 'article', body: stringField(input, 'body'), ageMin: Number(input.ageMin), ageMax: Number(input.ageMax), copyrightSource: stringField(input, 'copyrightSource') }); json(res, 201, { data: { ...result, bodyCiphertext: undefined } }); return; }
+  if (method === 'POST' && segments[1] === 'content' && segments[3] === 'publish') { const result = await approveContent(store, auth, segments[2]!); json(res, 200, { data: { id: result.id, state: result.state, publishedAt: result.publishedAt } }); return; }
   if (method === 'GET' && path === '/v1/admin/overview') { json(res, 200, { data: await adminOverview(store, auth) }); return; }
   if (method === 'POST' && path === '/v1/admin/worker/drain') { requirePermission(auth.user, 'system:metrics'); json(res, 200, { data: await drainOutbox(store) }); return; }
   if (method === 'GET' && path === '/v1/admin/audit') { requirePermission(auth.user, 'audit:read'); const events = await store.read((state) => state.auditEvents.filter((event) => event.tenantId === auth.user.tenantId).map(({ metadata, ...event }) => ({ ...event, metadata }))); json(res, 200, { data: events.slice(-200) }); return; }

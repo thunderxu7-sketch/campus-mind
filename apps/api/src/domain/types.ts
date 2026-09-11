@@ -13,6 +13,9 @@ export type AttemptState = 'not_started' | 'in_progress' | 'submitted' | 'scorin
 export type ReportState = 'draft' | 'pending_review' | 'approved' | 'released' | 'revoked';
 export type CaseState = 'pending_review' | 'dismissed' | 'confirmed' | 'assigned' | 'in_support' | 'follow_up' | 'closure_requested' | 'closed';
 export type SignalSource = 'score_rule' | 'self_request' | 'staff_observation' | 'external_referral';
+export type RightsKind = 'access' | 'correct' | 'delete' | 'withdraw';
+export type AppointmentState = 'requested' | 'confirmed' | 'completed' | 'cancelled' | 'no_show';
+export type ContentState = 'draft' | 'professional_review' | 'published' | 'retired';
 
 export interface Tenant {
   id: string;
@@ -298,6 +301,99 @@ export interface ImportBatch {
   createdAt: string;
 }
 
+export interface RightsRequest {
+  id: string;
+  tenantId: string;
+  studentId: string;
+  kind: RightsKind;
+  requesterId: string;
+  status: 'open' | 'processing' | 'completed' | 'rejected';
+  reason?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface DeletionTombstone {
+  id: string;
+  tenantId: string;
+  studentId: string;
+  requestId: string;
+  deletedAt: string;
+  retainedCategories: string[];
+}
+
+export interface ExportJob {
+  id: string;
+  tenantId: string;
+  requestedBy: string;
+  approvedBy?: string;
+  kind: 'aggregate' | 'report';
+  studentId?: string;
+  status: 'requested' | 'approved' | 'ready' | 'expired' | 'revoked';
+  expiresAt: string;
+  payloadCiphertext?: string;
+  createdAt: string;
+  approvedAt?: string;
+}
+
+export interface DeliveryAttempt {
+  id: string;
+  tenantId: string;
+  outboxEventId: string;
+  channel: 'in_app' | 'sms' | 'email';
+  status: 'queued' | 'sent' | 'failed';
+  attemptedAt: string;
+  errorCode?: string;
+}
+
+export interface AvailabilitySlot {
+  id: string;
+  tenantId: string;
+  counselorId: string;
+  startsAt: string;
+  endsAt: string;
+  room?: string;
+  status: 'available' | 'held' | 'blocked';
+}
+
+export interface Appointment {
+  id: string;
+  tenantId: string;
+  studentId: string;
+  counselorId: string;
+  slotId: string;
+  state: AppointmentState;
+  noteCiphertext?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ContentItem {
+  id: string;
+  tenantId: string;
+  title: string;
+  kind: 'article' | 'announcement' | 'media';
+  ageMin: number;
+  ageMax: number;
+  bodyCiphertext: string;
+  state: ContentState;
+  copyrightSource: string;
+  createdBy: string;
+  reviewedBy?: string;
+  publishedAt?: string;
+  createdAt: string;
+}
+
+export interface ProfileSchemaVersion {
+  id: string;
+  tenantId: string;
+  version: string;
+  fields: Array<{ id: string; label: string; purpose: string; required: boolean; sensitive: boolean }>;
+  state: 'draft' | 'approved' | 'retired';
+  approvedBy?: string;
+  createdAt: string;
+}
+
 export interface ImportRowResult {
   id: string;
   tenantId: string;
@@ -334,6 +430,14 @@ export interface DatabaseState {
   outboxEvents: OutboxEvent[];
   importBatches: ImportBatch[];
   importRows: ImportRowResult[];
+  rightsRequests: RightsRequest[];
+  deletionTombstones: DeletionTombstone[];
+  exportJobs: ExportJob[];
+  deliveryAttempts: DeliveryAttempt[];
+  availabilitySlots: AvailabilitySlot[];
+  appointments: Appointment[];
+  contentItems: ContentItem[];
+  profileSchemas: ProfileSchemaVersion[];
 }
 
 export interface AuthenticatedUser {

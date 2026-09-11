@@ -8,13 +8,13 @@ const SESSION_DAYS = 8;
 
 export const rolePermissions: Record<Role, readonly string[]> = {
   platform_ops: ['tenant:configure', 'system:metrics'],
-  school_admin: ['org:manage', 'import:write', 'campaign:write', 'campaign:read', 'analytics:read'],
-  professional_lead: ['org:read', 'campaign:read', 'scale:write', 'scale:approve', 'report:read', 'report:approve', 'case:read', 'case:review', 'case:assign', 'case:ack', 'care:write', 'analytics:read', 'export:approve'],
+  school_admin: ['org:manage', 'import:write', 'campaign:write', 'campaign:read', 'analytics:read', 'export:request', 'appointment:manage', 'content:write'],
+  professional_lead: ['org:read', 'campaign:read', 'scale:write', 'scale:approve', 'report:read', 'report:approve', 'case:read', 'case:review', 'case:assign', 'case:ack', 'care:write', 'analytics:read', 'export:request', 'export:approve', 'rights:manage', 'appointment:manage', 'content:write', 'content:approve', 'profile:write', 'profile:approve'],
   counselor: ['org:read', 'campaign:read', 'report:read', 'case:read', 'case:review', 'case:ack', 'care:write'],
   teacher: ['org:read', 'campaign:read', 'campaign:progress'],
-  student: ['self:read', 'self:assessment', 'self:help'],
+  student: ['self:read', 'self:assessment', 'self:help', 'self:appointment'],
   guardian: ['self:read', 'rights:request'],
-  privacy_auditor: ['audit:read', 'rights:read', 'analytics:read'],
+  privacy_auditor: ['audit:read', 'rights:read', 'rights:manage', 'analytics:read', 'export:approve'],
 };
 
 export function can(user: User, permission: string): boolean {

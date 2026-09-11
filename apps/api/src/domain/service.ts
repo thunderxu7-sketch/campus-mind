@@ -5,8 +5,8 @@ import { DomainError, forbidden, notFound } from './errors.js';
 import { assertUsableScale, score } from './scoring.js';
 import { JsonStore } from './store.js';
 import type {
-  Assignment, Attempt, AuthenticatedUser, Campaign, CaseAcknowledgement, CaseState, ConsentRecord,
-  DatabaseState, FollowUp, ImportBatch, ImportRowResult, RiskCase, RiskReview, RiskSignal, Role,
+  Appointment, AppointmentState, Assignment, Attempt, AuthenticatedUser, AvailabilitySlot, Campaign, CaseAcknowledgement, CaseState, ConsentRecord,
+  ContentItem, DatabaseState, DeletionTombstone, ExportJob, FollowUp, ImportBatch, ImportRowResult, ProfileSchemaVersion, RightsRequest, RiskCase, RiskReview, RiskSignal, Role,
   ScaleVersion, Student, User,
 } from './types.js';
 
@@ -15,15 +15,15 @@ const id = () => randomUUID();
 const sameTenant = <T extends { tenantId: string }>(record: T, tenantId: string): boolean => record.tenantId === tenantId;
 const hashExternal = (value: string): string => createHash('sha256').update(value.trim()).digest('hex');
 
-function audit(state: DatabaseState, actor: User | undefined, action: string, objectType: string, objectId: string, metadata: Record<string, string | number | boolean | null> = {}, purpose?: string): void {
-  state.auditEvents.push({ id: id(), tenantId: actor?.tenantId ?? 'system', actorId: actor?.id, action, objectType, objectId, purpose, metadata, createdAt: now() });
+function audit(state: DatabaseState, actor: User | undefined, action: string, objectType: string, objectId: string, metadata: Record<string, string | number | boolean | null> = {}, purpose?: string, tenantIdOverride?: string): void {
+  state.auditEvents.push({ id: id(), tenantId: actor?.tenantId ?? tenantIdOverride ?? 'system', actorId: actor?.id, action, objectType, objectId, purpose, metadata, createdAt: now() });
 }
 
 function studentFor(state: DatabaseState, user: User, studentId: string): Student {
   const student = state.students.find((candidate) => candidate.id === studentId && sameTenant(candidate, user.tenantId) && candidate.active);
   if (!student) throw notFound();
   if (isStudent(user) && user.id !== studentId) throw forbidden();
-  if (user.role === 'teacher' && student.classId !== user.schoolId) throw forbidden();
+  if (user.role === 'teacher' && student.schoolId !== user.schoolId) throw forbidden();
   return student;
 }
 
@@ -313,6 +313,10 @@ async function processOutboxEvent(store: JsonStore, eventId: string): Promise<vo
       if (run) { event.status = 'published'; return; }
       const scoreRun = { id: id(), tenantId: event.tenantId, submissionId: submission.id, scoringVersion: scale.scoringVersion, status: 'completed' as const, factorScores: output.factorScores, total: output.total, validity: output.validity, completedAt: now(), errorCode: output.invalidReason };
       state.scoreRuns.push(scoreRun); attempt.state = output.validity === 'valid' ? 'scored' : 'invalid';
+      const assignment = state.assignments.find((candidate) => candidate.id === attempt.assignmentId);
+      if (assignment) assignment.status = 'completed';
+      const reservation = assignment ? state.frequencyReservations.find((candidate) => candidate.id === assignment.frequencyReservationId) : undefined;
+      if (reservation) reservation.status = 'consumed';
       const report: import('./types.js').ReportVersion = { id: id(), tenantId: event.tenantId, studentId: attempt.studentId, scoreRunId: scoreRun.id, state: 'pending_review', title: scale.title, summaryCiphertext: encrypt({ total: output.total, factorScores: output.factorScores, text: '这是演示反馈，不构成心理诊断；如有困扰请联系学校心理专业人员。' }), limitationsCiphertext: encrypt({ text: '演示方案仅用于软件流程验证，不代表有效量表、医学诊断或风险结论。' }), createdAt: now() };
       state.reports.push(report);
       if (scale.warningRule && output.validity === 'valid' && output.total >= scale.warningRule.threshold) {
@@ -323,9 +327,15 @@ async function processOutboxEvent(store: JsonStore, eventId: string): Promise<vo
         riskCase.signalIds.push(signal.id); riskCase.updatedAt = now();
         state.outboxEvents.push({ id: id(), tenantId: event.tenantId, type: 'risk.signal_created', aggregateId: riskCase.id, payload: { signalId: signal.id, level: signal.level }, status: 'pending', attempts: 0, availableAt: now(), createdAt: now() });
       }
-      audit(state, undefined, 'score.completed', 'score_run', scoreRun.id, { validity: output.validity, reportId: report.id });
+      audit(state, undefined, 'score.completed', 'score_run', scoreRun.id, { validity: output.validity, reportId: report.id }, undefined, event.tenantId);
     }
-    // Notification events are acknowledged as delivered only; case acknowledgement remains a human action.
+    if (event.type === 'risk.signal_created') {
+      const existingDelivery = state.deliveryAttempts.find((attempt) => attempt.outboxEventId === event.id && attempt.channel === 'in_app');
+      if (!existingDelivery) {
+        state.deliveryAttempts.push({ id: id(), tenantId: event.tenantId, outboxEventId: event.id, channel: 'in_app', status: 'sent', attemptedAt: now() });
+      }
+    }
+    // Notification delivery is recorded separately; case acknowledgement remains a human action.
     event.status = 'published';
   });
 }
@@ -462,4 +472,193 @@ export function parseCsv(text: string): Array<Record<string, string>> {
   const headers = parse(lines[0]!);
   if (headers.length === 0 || headers.some((header) => !header)) throw new DomainError('IMPORT_INVALID', 'CSV 表头无效');
   return lines.slice(1).map((line) => Object.fromEntries(parse(line).map((value, index) => [headers[index] ?? `column_${index}`, value])));
+}
+
+export async function createRightsRequest(store: JsonStore, auth: AuthenticatedUser, input: { studentId: string; kind: RightsRequest['kind']; reason?: string }): Promise<RightsRequest> {
+  if (!isStudent(auth.user) && !can(auth.user, 'rights:request')) throw forbidden();
+  return store.transaction((state) => {
+    const student = studentFor(state, auth.user, input.studentId);
+    const request: RightsRequest = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, kind: input.kind, requesterId: auth.user.id, status: 'open', reason: input.reason?.slice(0, 1000), createdAt: now() };
+    state.rightsRequests.push(request);
+    audit(state, auth.user, 'rights.requested', 'rights_request', request.id, { kind: request.kind });
+    return request;
+  });
+}
+
+export async function listRightsRequests(store: JsonStore, auth: AuthenticatedUser): Promise<RightsRequest[]> {
+  requirePermission(auth.user, 'rights:read');
+  return store.read((state) => state.rightsRequests.filter((request) => request.tenantId === auth.user.tenantId).map((request) => ({ ...request })));
+}
+
+export async function completeRightsRequest(store: JsonStore, auth: AuthenticatedUser, requestId: string, decision: 'complete' | 'reject'): Promise<RightsRequest> {
+  requirePermission(auth.user, 'rights:manage');
+  return store.transaction((state) => {
+    const request = state.rightsRequests.find((candidate) => candidate.id === requestId && candidate.tenantId === auth.user.tenantId);
+    if (!request) throw notFound();
+    if (!['open', 'processing'].includes(request.status)) throw new DomainError('RIGHTS_REQUEST_STATE_INVALID', '权利请求已处理');
+    request.status = decision === 'complete' ? 'completed' : 'rejected'; request.completedAt = now();
+    if (decision === 'complete' && request.kind === 'delete') {
+      const student = state.students.find((candidate) => candidate.id === request.studentId && candidate.tenantId === auth.user.tenantId);
+      if (student) {
+        student.active = false;
+        student.displayNameCiphertext = encrypt('已删除');
+        student.externalRefHash = hashExternal(`${student.id}:deleted`);
+      }
+      for (const assignment of state.assignments.filter((candidate) => candidate.studentId === request.studentId)) assignment.status = 'declined';
+      state.consents = state.consents.filter((consent) => consent.studentId !== request.studentId);
+      state.answerRevisions = state.answerRevisions.filter((revision) => revision.attemptId && !state.attempts.some((attempt) => attempt.id === revision.attemptId && attempt.studentId === request.studentId));
+      state.attempts = state.attempts.filter((attempt) => attempt.studentId !== request.studentId);
+      state.submissions = state.submissions.filter((submission) => state.attempts.some((attempt) => attempt.id === submission.attemptId));
+      state.scoreRuns = state.scoreRuns.filter((run) => state.submissions.some((submission) => submission.id === run.submissionId));
+      state.reports = state.reports.filter((report) => report.studentId !== request.studentId);
+      state.riskSignals = state.riskSignals.filter((signal) => signal.studentId !== request.studentId);
+      state.riskCases = state.riskCases.filter((riskCase) => riskCase.studentId !== request.studentId);
+      state.followUps = state.followUps.filter((followUp) => state.riskCases.some((riskCase) => riskCase.id === followUp.caseId));
+      const tombstone: DeletionTombstone = { id: id(), tenantId: auth.user.tenantId, studentId: request.studentId, requestId, deletedAt: now(), retainedCategories: ['minimal_audit_event', 'deletion_tombstone'] };
+      state.deletionTombstones.push(tombstone);
+      state.outboxEvents.push({ id: id(), tenantId: auth.user.tenantId, type: 'student.data_deleted', aggregateId: request.studentId, payload: { requestId }, status: 'pending', attempts: 0, availableAt: now(), createdAt: now() });
+    }
+    audit(state, auth.user, 'rights.completed', 'rights_request', request.id, { kind: request.kind, decision });
+    return request;
+  });
+}
+
+function aggregatePayload(state: DatabaseState, tenantId: string): Record<string, unknown> {
+  const students = state.students.filter((student) => student.tenantId === tenantId && student.active);
+  const assignments = state.assignments.filter((assignment) => assignment.tenantId === tenantId);
+  const cases = state.riskCases.filter((riskCase) => riskCase.tenantId === tenantId && !['closed', 'dismissed'].includes(riskCase.state));
+  const suppress = (value: number, size = students.length): number | null => size < 10 ? null : value;
+  return { studentCount: students.length, assignmentCount: assignments.length, completedCount: assignments.filter((assignment) => assignment.status === 'completed').length, openCaseCount: suppress(cases.length), suppressionThreshold: 10, generatedAt: now() };
+}
+
+export async function requestExport(store: JsonStore, auth: AuthenticatedUser, input: { kind: ExportJob['kind']; studentId?: string }): Promise<ExportJob> {
+  requirePermission(auth.user, 'export:request');
+  if (input.kind === 'report' && !isProfessional(auth.user)) throw forbidden();
+  return store.transaction((state) => {
+    if (input.studentId) {
+      const student = state.students.find((candidate) => candidate.id === input.studentId && candidate.tenantId === auth.user.tenantId && candidate.active);
+      if (!student) throw notFound();
+    }
+    const job: ExportJob = { id: id(), tenantId: auth.user.tenantId, requestedBy: auth.user.id, kind: input.kind, studentId: input.studentId, status: 'requested', expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(), createdAt: now() };
+    state.exportJobs.push(job); audit(state, auth.user, 'export.requested', 'export_job', job.id, { kind: job.kind }); return job;
+  });
+}
+
+export async function approveExport(store: JsonStore, auth: AuthenticatedUser, jobId: string): Promise<ExportJob> {
+  requirePermission(auth.user, 'export:approve');
+  return store.transaction((state) => {
+    const job = state.exportJobs.find((candidate) => candidate.id === jobId && candidate.tenantId === auth.user.tenantId);
+    if (!job) throw notFound();
+    if (job.status !== 'requested') throw new DomainError('EXPORT_STATE_INVALID', '导出任务当前不可审批');
+    if (new Date(job.expiresAt) <= new Date()) { job.status = 'expired'; throw new DomainError('EXPORT_EXPIRED', '导出请求已过期'); }
+    let payload: unknown;
+    if (job.kind === 'aggregate') payload = aggregatePayload(state, auth.user.tenantId);
+    else {
+      if (!job.studentId) throw new DomainError('EXPORT_SCOPE_REQUIRED', '报告导出需要明确学生范围');
+      const report = state.reports.find((candidate) => candidate.studentId === job.studentId && candidate.tenantId === auth.user.tenantId && candidate.state === 'released');
+      if (!report) throw new DomainError('REPORT_NOT_RELEASED', '只有已发布报告可导出');
+      payload = { reportId: report.id, studentId: report.studentId, title: report.title, summary: decrypt(report.summaryCiphertext), exportedAt: now(), note: '导出内容来自已发布报告，不包含原始答卷。' };
+    }
+    job.approvedBy = auth.user.id; job.approvedAt = now(); job.status = 'ready'; job.payloadCiphertext = encrypt(payload); audit(state, auth.user, 'export.approved', 'export_job', job.id, { kind: job.kind }); return job;
+  });
+}
+
+export async function downloadExport(store: JsonStore, auth: AuthenticatedUser, jobId: string): Promise<Record<string, unknown>> {
+  return store.transaction((state) => {
+    const job = state.exportJobs.find((candidate) => candidate.id === jobId && candidate.tenantId === auth.user.tenantId);
+    if (!job || (job.requestedBy !== auth.user.id && !can(auth.user, 'export:approve'))) throw forbidden();
+    if (job.status !== 'ready' || !job.payloadCiphertext) throw new DomainError('EXPORT_NOT_READY', '导出尚未准备好');
+    if (new Date(job.expiresAt) <= new Date()) { job.status = 'expired'; throw new DomainError('EXPORT_EXPIRED', '导出已过期'); }
+    audit(state, auth.user, 'export.downloaded', 'export_job', job.id, { kind: job.kind });
+    return decrypt<Record<string, unknown>>(job.payloadCiphertext);
+  });
+}
+
+export async function getAnalytics(store: JsonStore, auth: AuthenticatedUser, groupBy: string): Promise<Record<string, unknown>> {
+  requirePermission(auth.user, 'analytics:read');
+  const allowed = new Set(['school', 'age_band', 'academic_year']);
+  if (!allowed.has(groupBy)) throw new DomainError('ANALYTICS_DIMENSION_INVALID', '该统计维度未获批准');
+  return store.read((state) => {
+    const tenantStudents = state.students.filter((student) => student.tenantId === auth.user.tenantId && student.active);
+    const groups = new Map<string, number>();
+    for (const student of tenantStudents) {
+      const key = groupBy === 'school' ? student.schoolId : groupBy === 'age_band' ? (student.age === undefined ? 'unknown' : student.age < 14 ? '6-13' : '14-19') : '2026-2027';
+      groups.set(key, (groups.get(key) ?? 0) + 1);
+    }
+    const rows = [...groups.entries()].map(([key, count]) => ({ key, count: count < 10 ? null : count, suppressed: count < 10 }));
+    audit(state, auth.user, 'analytics.viewed', 'analytics', groupBy, { groupCount: rows.length });
+    return { groupBy, rows, suppressionThreshold: 10, note: '小样本与可重识别单元已抑制；指标不是疾病患病率。' };
+  });
+}
+
+export async function createProfileSchema(store: JsonStore, auth: AuthenticatedUser, input: { version: string; fields: ProfileSchemaVersion['fields'] }): Promise<ProfileSchemaVersion> {
+  requirePermission(auth.user, 'profile:write');
+  if (input.fields.length === 0 || input.fields.length > 50) throw new DomainError('PROFILE_SCHEMA_INVALID', '字段数量无效');
+  if (input.fields.some((field) => !field.id || !field.label || !field.purpose)) throw new DomainError('PROFILE_SCHEMA_INVALID', '字段必须包含目的与标签');
+  return store.transaction((state) => {
+    const schema: ProfileSchemaVersion = { id: id(), tenantId: auth.user.tenantId, version: input.version, fields: input.fields, state: 'draft', createdAt: now() }; state.profileSchemas.push(schema); audit(state, auth.user, 'profile_schema.created', 'profile_schema', schema.id, { fieldCount: input.fields.length }); return schema;
+  });
+}
+
+export async function approveProfileSchema(store: JsonStore, auth: AuthenticatedUser, schemaId: string): Promise<ProfileSchemaVersion> {
+  requirePermission(auth.user, 'profile:approve');
+  return store.transaction((state) => {
+    const schema = state.profileSchemas.find((candidate) => candidate.id === schemaId && candidate.tenantId === auth.user.tenantId);
+    if (!schema) throw notFound();
+    schema.state = 'approved'; schema.approvedBy = auth.user.id; audit(state, auth.user, 'profile_schema.approved', 'profile_schema', schema.id, {}); return schema;
+  });
+}
+
+export async function createAvailabilitySlot(store: JsonStore, auth: AuthenticatedUser, input: { counselorId: string; startsAt: string; endsAt: string; room?: string }): Promise<AvailabilitySlot> {
+  requirePermission(auth.user, 'appointment:manage');
+  return store.transaction((state) => {
+    const counselor = state.users.find((candidate) => candidate.id === input.counselorId && candidate.tenantId === auth.user.tenantId && isProfessional(candidate));
+    if (!counselor || new Date(input.startsAt) >= new Date(input.endsAt)) throw new DomainError('SLOT_INVALID', '排班人员或时间窗无效');
+    const overlap = state.availabilitySlots.some((slot) => slot.tenantId === auth.user.tenantId && slot.counselorId === counselor.id && slot.status !== 'blocked' && new Date(input.startsAt) < new Date(slot.endsAt) && new Date(input.endsAt) > new Date(slot.startsAt));
+    if (overlap) throw new DomainError('SLOT_CONFLICT', '咨询师时间段重叠', 409);
+    const slot: AvailabilitySlot = { id: id(), tenantId: auth.user.tenantId, counselorId: counselor.id, startsAt: input.startsAt, endsAt: input.endsAt, room: input.room?.slice(0, 100), status: 'available' }; state.availabilitySlots.push(slot); audit(state, auth.user, 'availability.created', 'availability_slot', slot.id, {}); return slot;
+  });
+}
+
+export async function requestAppointment(store: JsonStore, auth: AuthenticatedUser, input: { slotId: string; note?: string }): Promise<Appointment> {
+  requirePermission(auth.user, 'self:appointment');
+  if (!isStudent(auth.user)) throw forbidden();
+  return store.transaction((state) => {
+    const slot = state.availabilitySlots.find((candidate) => candidate.id === input.slotId && candidate.tenantId === auth.user.tenantId && candidate.status === 'available');
+    const student = state.students.find((candidate) => candidate.id === auth.user.id && candidate.tenantId === auth.user.tenantId && candidate.active);
+    if (!slot || !student || new Date(slot.startsAt) <= new Date()) throw new DomainError('SLOT_UNAVAILABLE', '该时段不可预约', 409);
+    if (state.appointments.some((appointment) => appointment.slotId === slot.id && ['requested', 'confirmed'].includes(appointment.state))) throw new DomainError('SLOT_UNAVAILABLE', '该时段刚刚被预约', 409);
+    const appointment: Appointment = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, counselorId: slot.counselorId, slotId: slot.id, state: 'requested', noteCiphertext: input.note ? encrypt({ note: input.note.slice(0, 1000) }) : undefined, createdAt: now(), updatedAt: now() }; state.appointments.push(appointment); slot.status = 'held'; audit(state, auth.user, 'appointment.requested', 'appointment', appointment.id, {}); return appointment;
+  });
+}
+
+export async function updateAppointment(store: JsonStore, auth: AuthenticatedUser, appointmentId: string, stateValue: AppointmentState): Promise<Appointment> {
+  if (!isStudent(auth.user) && !can(auth.user, 'appointment:manage')) throw forbidden();
+  return store.transaction((state) => {
+    const appointment = state.appointments.find((candidate) => candidate.id === appointmentId && candidate.tenantId === auth.user.tenantId);
+    if (!appointment) throw notFound();
+    if (isStudent(auth.user) && appointment.studentId !== auth.user.id) throw forbidden();
+    if (stateValue === 'confirmed' && !can(auth.user, 'appointment:manage')) throw forbidden();
+    if (['completed', 'no_show'].includes(stateValue) && !can(auth.user, 'appointment:manage')) throw forbidden();
+    appointment.state = stateValue; appointment.updatedAt = now();
+    const slot = state.availabilitySlots.find((candidate) => candidate.id === appointment.slotId);
+    if (slot && ['cancelled', 'completed', 'no_show'].includes(stateValue)) slot.status = 'available';
+    if (slot && stateValue === 'confirmed') slot.status = 'held';
+    audit(state, auth.user, `appointment.${stateValue}`, 'appointment', appointment.id, {}); return appointment;
+  });
+}
+
+export async function createContent(store: JsonStore, auth: AuthenticatedUser, input: { title: string; kind: ContentItem['kind']; body: string; ageMin: number; ageMax: number; copyrightSource: string }): Promise<ContentItem> {
+  requirePermission(auth.user, 'content:write');
+  if (!input.title.trim() || !input.body.trim() || !input.copyrightSource.trim() || input.ageMin < 6 || input.ageMax > 19 || input.ageMin > input.ageMax) throw new DomainError('CONTENT_INVALID', '内容、版权或适龄范围无效');
+  return store.transaction((state) => { const item: ContentItem = { id: id(), tenantId: auth.user.tenantId, title: input.title.trim().slice(0, 200), kind: input.kind, ageMin: input.ageMin, ageMax: input.ageMax, bodyCiphertext: encrypt({ body: input.body.slice(0, 30_000) }), state: 'draft', copyrightSource: input.copyrightSource.slice(0, 500), createdBy: auth.user.id, createdAt: now() }; state.contentItems.push(item); audit(state, auth.user, 'content.created', 'content', item.id, { kind: item.kind }); return item; });
+}
+
+export async function approveContent(store: JsonStore, auth: AuthenticatedUser, contentId: string): Promise<ContentItem> {
+  requirePermission(auth.user, 'content:approve');
+  return store.transaction((state) => { const item = state.contentItems.find((candidate) => candidate.id === contentId && candidate.tenantId === auth.user.tenantId); if (!item) throw notFound(); if (item.state !== 'draft' && item.state !== 'professional_review') throw new DomainError('CONTENT_STATE_INVALID', '内容当前不可审核'); item.state = 'published'; item.reviewedBy = auth.user.id; item.publishedAt = now(); audit(state, auth.user, 'content.published', 'content', item.id, {}); return item; });
+}
+
+export async function listPublicContent(store: JsonStore, age?: number): Promise<Array<Record<string, unknown>>> {
+  return store.read((state) => state.contentItems.filter((item) => item.state === 'published' && (age === undefined || (age >= item.ageMin && age <= item.ageMax))).map((item) => ({ id: item.id, title: item.title, kind: item.kind, ageMin: item.ageMin, ageMax: item.ageMax, body: decrypt<{ body: string }>(item.bodyCiphertext).body, publishedAt: item.publishedAt })));
 }

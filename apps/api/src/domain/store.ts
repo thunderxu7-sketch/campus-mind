@@ -9,7 +9,7 @@ export function emptyState(): DatabaseState {
     tenants: [], schools: [], users: [], sessions: [], students: [], consents: [], scales: [], campaigns: [],
     assignments: [], frequencyReservations: [], attempts: [], answerRevisions: [], submissions: [], scoreRuns: [],
     reports: [], riskSignals: [], riskCases: [], riskReviews: [], acknowledgements: [], followUps: [], auditEvents: [],
-    outboxEvents: [], importBatches: [], importRows: [],
+    outboxEvents: [], importBatches: [], importRows: [], rightsRequests: [], deletionTombstones: [], exportJobs: [], deliveryAttempts: [], availabilitySlots: [], appointments: [], contentItems: [], profileSchemas: [],
   };
 }
 
