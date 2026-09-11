@@ -51,6 +51,13 @@
     <p id="consentStatus" class="status" role="status" aria-live="polite"></p>
   </section>
 
+  <section id="selfScreening" hidden aria-labelledby="self-screening-title">
+    <h2 id="self-screening-title">自选支持筛查</h2>
+    <p class="muted">这里只列出当前年龄适用且已通过版本治理的方案。自选筛查仍受同意、学年频次和人工支持流程约束；反馈不是诊断，也不会用于排名。</p>
+    <div id="selfScaleList" aria-live="polite"><p class="muted">正在读取可用方案…</p></div>
+    <p id="selfScreeningStatus" class="status" role="status" aria-live="polite"></p>
+  </section>
+
   <section id="appointments" hidden aria-labelledby="appointments-title">
     <h2 id="appointments-title">咨询预约</h2>
     <p class="muted">预约不是即时咨询或紧急救助。如需立即帮助，请使用“我想找人聊聊”或联系学校提供的人工支持渠道。</p>
@@ -225,11 +232,14 @@
       saveTimer = null;
       $('#tasks').hidden = true;
       $('#participation').hidden = true;
+      $('#selfScreening').hidden = true;
       $('#appointments').hidden = true;
       $('#reports').hidden = true;
       $('#rights').hidden = true;
       $('#taskList').replaceChildren();
       $('#questions').replaceChildren();
+      $('#selfScaleList').replaceChildren();
+      $('#selfScreeningStatus').textContent = '';
       $('#appointmentSlots').replaceChildren();
       $('#myAppointments').replaceChildren();
       $('#appointment-note').value = '';
@@ -304,6 +314,23 @@
       document.querySelectorAll('[data-id]').forEach((button) => { button.onclick = () => start(button.dataset.id); });
     }
 
+    async function loadSelfScales() {
+      try {
+        const scales = await api('/v1/me/scales');
+        $('#selfScaleList').innerHTML = scales.length ? scales.map((scale) => `<article class="task"><b>${esc(scale.title)}</b> · ${esc(scale.version)}<br><span class="muted">适用 ${esc(scale.minAge)}–${esc(scale.maxAge)} 岁 · ${(Array.isArray(scale.dimensions) ? esc(scale.dimensions.join('、')) : '')}</span><br><button type="button" data-self-scale="${esc(scale.id)}">申请此方案</button></article>`).join('') : '<p class="muted">当前没有符合年龄或治理条件的自选方案；你仍可以使用人工求助和教育资源。</p>';
+        document.querySelectorAll('[data-self-scale]').forEach((button) => { button.onclick = () => requestSelfScreening(button.dataset.selfScale, button); });
+      } catch (error) { $('#selfScaleList').innerHTML = `<p class="muted">${esc(error.message || '自选方案暂时不可用')}</p>`; }
+    }
+    async function requestSelfScreening(scaleId, button) {
+      if (!scaleId) return;
+      button.disabled = true;
+      try {
+        await api('/v1/self-screenings', { method: 'POST', body: JSON.stringify({ scaleId, academicYear: String(new Date().getFullYear()) + '-' + String(new Date().getFullYear() + 1) }) });
+        $('#selfScreeningStatus').textContent = '自选筛查任务已创建，已按学年频次和同意状态登记。';
+        renderTasks(await api('/v1/me/tasks'));
+      } catch (error) { $('#selfScreeningStatus').textContent = error.code === 'FREQUENCY_REVIEW_REQUIRED' ? '本学年已有测评场次，需要学校专业人员复核后才能再次申请。' : error.message || '自选筛查申请失败'; button.disabled = false; }
+    }
+
     $('#login').onsubmit = async (event) => {
       event.preventDefault();
       try {
@@ -319,12 +346,13 @@
         setStatus('已登录');
         $('#tasks').hidden = false;
         $('#participation').hidden = false;
+        $('#selfScreening').hidden = false;
         $('#appointments').hidden = false;
         $('#reports').hidden = false;
         $('#rights').hidden = false;
         const tasks = await api('/v1/me/tasks');
         renderTasks(tasks);
-        await Promise.all([loadConsent(), loadAppointments(), loadReports(), loadRights()]);
+        await Promise.all([loadConsent(), loadSelfScales(), loadAppointments(), loadReports(), loadRights()]);
       } catch (error) { setStatus(error.message); }
     };
 
