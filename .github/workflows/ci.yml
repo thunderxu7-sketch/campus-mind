@@ -58,5 +58,11 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: node scripts/security-check.mjs
       - run: npm run release:check
+      - name: verify production release gate fails closed without external evidence
+        run: |
+          if CAMPMIND_RELEASE_MODE=production npm run release:check; then
+            echo 'production gate unexpectedly passed without external evidence'
+            exit 1
+          fi
       - run: python3 scripts/check_plan.py
       - run: python3 -m unittest discover -s tests -v
