@@ -84,7 +84,7 @@ erDiagram
 | `POST /v1/campaigns`、`POST /v1/campaigns/{id}/publish` | 创建/发布任务 | 名单快照、频次、值班、所需审批、不可变版本 |
 | `POST /v1/campaigns/{id}/frequency-exceptions` | 必要复评审批 | 专业负责人记录用途/依据；依据使用 `reason_ciphertext` 加密保存，仅返回 `hasReason`；例外与普通学年场次分开留痕 |
 | `POST /v1/scales/{id}/revoke` | 撤销量表版本 | 只阻断新使用，不改写历史答卷和计分；必须记录原因 |
-| `GET /v1/me/tasks` | 当前学生任务 | 仅自己，服务端返回适龄、任务窗口、频次状态、量表授权/撤回状态和 `available/availabilityReason`（包括 `scale_unavailable`）；前端不得自行推断可作答 |
+| `GET /v1/me/tasks` | 当前学生任务 | 仅自己，服务端返回适龄、任务窗口、频次状态、量表授权/撤回状态和 `available/availabilityReason`（包括 `scale_unavailable`、`academic_year_invalid`）；前端不得自行推断可作答 |
 | `POST /v1/me/tasks/{id}/attempts` | 开始作答 | 同意/适龄/频次/任务时窗原子验证；已释放场次不能靠旧 assignment 重开；响应只返回答题句柄和 revision，不暴露租户、学生、方案或提交内部 ID |
 | `GET /v1/attempts/{id}` | 恢复草稿 | 仅本人读取服务端已确认的答案与 revision；答题元数据最小化且不暴露关联内部 ID；已提交/关闭答题不可恢复 |
 | `PUT /v1/attempts/{id}/answers` | 保存答案 | `expectedRevision`、题目白名单、服务端持久化确认；每次写入重新检查任务窗口/场次 |
@@ -104,7 +104,7 @@ erDiagram
 | `POST /v1/content/{id}/retire` | 教育内容下架 | 仅专业审批权限；立即从公开列表移除并使关联媒体 URL 不再可用，保留审计历史 |
 | `POST /v1/media-assets`、`GET /v1/content/public/{assetId}/media` | 媒体上传与公开播放 | 仅允许批准类型/大小；签名、脚本特征和哈希检查；媒体正文写入私有对象存储并只在已审核内容关联时公开读取；生产适配器必须隔离租户与 KMS 密钥 |
 
-建议错误码：`CONSENT_REQUIRED`、`AGE_REVIEW_REQUIRED`、`FREQUENCY_REVIEW_REQUIRED`、`CAMPAIGN_CLOSED`、`LICENSE_UNAVAILABLE`、`LICENSE_EXPIRY_REQUIRED`、`LICENSE_EXPIRY_INVALID`、`LICENSE_EXPIRED`、`REVISION_CONFLICT`、`IDEMPOTENCY_CONFLICT`、`APPOINTMENT_IDEMPOTENCY_INVALID`、`SLOT_STATUS_INVALID`、`SLOT_HELD`、`PROFESSIONAL_REVIEW_REQUIRED`、`SLOT_UNAVAILABLE`、`EXPORT_REVOKED`。敏感权限错误不返回其他学生信息。
+建议错误码：`CONSENT_REQUIRED`、`AGE_REVIEW_REQUIRED`、`FREQUENCY_REVIEW_REQUIRED`、`ACADEMIC_YEAR_INVALID`、`CAMPAIGN_CLOSED`、`LICENSE_UNAVAILABLE`、`LICENSE_EXPIRY_REQUIRED`、`LICENSE_EXPIRY_INVALID`、`LICENSE_EXPIRED`、`REVISION_CONFLICT`、`IDEMPOTENCY_CONFLICT`、`APPOINTMENT_IDEMPOTENCY_INVALID`、`SLOT_STATUS_INVALID`、`SLOT_HELD`、`PROFESSIONAL_REVIEW_REQUIRED`、`SLOT_UNAVAILABLE`、`EXPORT_REVOKED`。敏感权限错误不返回其他学生信息。
 
 ## 5. 事件契约
 

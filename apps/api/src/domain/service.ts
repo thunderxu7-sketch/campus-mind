@@ -16,11 +16,15 @@ const sameTenant = <T extends { tenantId: string }>(record: T, tenantId: string)
 const hashExternal = (value: string): string => createHash('sha256').update(value.trim()).digest('hex');
 const validDate = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(new Date(value).getTime());
 const academicYearPattern = /^(\d{4})-(\d{4})$/;
+function validAcademicYear(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const match = value.match(academicYearPattern);
+  return Boolean(match && Number(match[2]) === Number(match[1]) + 1);
+}
 function currentAcademicYear(date = new Date()): string {
   const configured = process.env.CAMPMIND_ACADEMIC_YEAR?.trim();
   if (configured !== undefined) {
-    const configuredMatch = configured.match(academicYearPattern);
-    if (!configuredMatch || Number(configuredMatch[2]) !== Number(configuredMatch[1]) + 1) throw new DomainError('ACADEMIC_YEAR_CONFIG_INVALID', '服务器学年配置无效');
+    if (!validAcademicYear(configured)) throw new DomainError('ACADEMIC_YEAR_CONFIG_INVALID', '服务器学年配置无效');
     return configured;
   }
   // Chinese school years normally begin in September.  Keep the fallback
@@ -199,7 +203,7 @@ export async function listMyTasks(store: Store, auth: AuthenticatedUser): Promis
       const attempt = state.attempts.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.assignmentId === assignment.id);
       const reservation = assignment.frequencyReservationId ? state.frequencyReservations.find((candidate) => candidate.id === assignment.frequencyReservationId && candidate.tenantId === auth.user.tenantId) : undefined;
       const terminal = ['completed', 'declined', 'expired'].includes(assignment.status) || Boolean(attempt && ['submitted', 'scoring_pending', 'scored', 'scoring_failed', 'invalid', 'withdrawn', 'expired'].includes(attempt.state));
-      const inWindow = Boolean(campaign && ['open', 'scheduled'].includes(campaign.state) && validDate(campaign.opensAt) && validDate(campaign.closesAt) && new Date(campaign.opensAt) <= currentTime && new Date(campaign.closesAt) > currentTime);
+      const inWindow = Boolean(campaign && validAcademicYear(campaign.academicYear) && ['open', 'scheduled'].includes(campaign.state) && validDate(campaign.opensAt) && validDate(campaign.closesAt) && new Date(campaign.opensAt) <= currentTime && new Date(campaign.closesAt) > currentTime);
       // Keep the task list server-authoritative: a revoked/expired/licence-
       // invalid scale must not be shown as startable just because its campaign
       // and frequency reservation still look open.  Use the same guard as the
@@ -211,7 +215,7 @@ export async function listMyTasks(store: Store, auth: AuthenticatedUser): Promis
       const consented = Boolean(student && activeConsent(state, student.id, 'assessment', auth.user.tenantId));
       const ageEligible = Boolean(scaleUsable && student && scale && ageAllowed(student, scale));
       const available = !terminal && ['assigned', 'started'].includes(assignment.status) && inWindow && scaleUsable && ageEligible && consented && Boolean(reservation && ['reserved', 'exception'].includes(reservation.status));
-      const availabilityReason = terminal ? 'terminal' : !['assigned', 'started'].includes(assignment.status) ? 'assignment_unavailable' : !inWindow ? 'outside_window' : !scaleUsable ? 'scale_unavailable' : !consented ? 'consent_required' : !ageEligible ? 'age_not_allowed' : !reservation || !['reserved', 'exception'].includes(reservation.status) ? 'frequency_review' : 'available';
+      const availabilityReason = terminal ? 'terminal' : !['assigned', 'started'].includes(assignment.status) ? 'assignment_unavailable' : !campaign || !validAcademicYear(campaign.academicYear) ? 'academic_year_invalid' : !inWindow ? 'outside_window' : !scaleUsable ? 'scale_unavailable' : !consented ? 'consent_required' : !ageEligible ? 'age_not_allowed' : !reservation || !['reserved', 'exception'].includes(reservation.status) ? 'frequency_review' : 'available';
       return {
         id: assignment.id,
         name: campaign?.name ?? '测评任务',
@@ -422,15 +426,17 @@ export async function approveScale(store: Store, auth: AuthenticatedUser, scaleI
 
 export async function createCampaign(store: Store, auth: AuthenticatedUser, input: { schoolId: string; name: string; purpose: Campaign['purpose']; academicYear: string; opensAt: string; closesAt: string; scaleVersionId: string; participantStudentIds: string[] }): Promise<Campaign> {
   requirePermission(auth.user, 'campaign:write');
+  const academicYear = typeof input.academicYear === 'string' ? input.academicYear.trim() : '';
+  if (!validAcademicYear(academicYear)) throw new DomainError('CAMPAIGN_INVALID', '学年必须是连续的 YYYY-YYYY 格式');
   return store.transaction((state) => {
     const school = state.schools.find((candidate) => candidate.id === input.schoolId && sameTenant(candidate, auth.user.tenantId));
     const scale = state.scales.find((candidate) => candidate.id === input.scaleVersionId && sameTenant(candidate, auth.user.tenantId));
     if (!school || !scale) throw notFound();
     if (auth.user.schoolId && auth.user.schoolId !== school.id) throw forbidden();
-    if (!['screening', 'survey'].includes(input.purpose) || typeof input.name !== 'string' || !input.name.trim() || typeof input.academicYear !== 'string' || !input.academicYear.trim() || !validDate(input.opensAt) || !validDate(input.closesAt) || new Date(input.opensAt) >= new Date(input.closesAt) || !Array.isArray(input.participantStudentIds)) throw new DomainError('CAMPAIGN_INVALID', '任务名称、用途或时间窗无效');
+    if (!['screening', 'survey'].includes(input.purpose) || typeof input.name !== 'string' || !input.name.trim() || !validDate(input.opensAt) || !validDate(input.closesAt) || new Date(input.opensAt) >= new Date(input.closesAt) || !Array.isArray(input.participantStudentIds)) throw new DomainError('CAMPAIGN_INVALID', '任务名称、用途或时间窗无效');
     const uniqueStudents = [...new Set(input.participantStudentIds)];
     if (uniqueStudents.some((studentId) => !state.students.some((student) => student.id === studentId && student.schoolId === school.id && sameTenant(student, auth.user.tenantId) && student.active))) throw forbidden();
-    const campaign: Campaign = { id: id(), tenantId: auth.user.tenantId, schoolId: school.id, name: input.name.trim(), purpose: input.purpose, state: 'draft', academicYear: input.academicYear, opensAt: input.opensAt, closesAt: input.closesAt, scaleVersionId: scale.id, reportVisibility: 'professional_review', participantStudentIds: uniqueStudents, createdBy: auth.user.id, createdAt: now() };
+    const campaign: Campaign = { id: id(), tenantId: auth.user.tenantId, schoolId: school.id, name: input.name.trim(), purpose: input.purpose, state: 'draft', academicYear, opensAt: input.opensAt, closesAt: input.closesAt, scaleVersionId: scale.id, reportVisibility: 'professional_review', participantStudentIds: uniqueStudents, createdBy: auth.user.id, createdAt: now() };
     state.campaigns.push(campaign); audit(state, auth.user, 'campaign.created', 'campaign', campaign.id, { participantCount: uniqueStudents.length }); return campaign;
   });
 }
@@ -440,6 +446,7 @@ export async function publishCampaign(store: Store, auth: AuthenticatedUser, cam
   return store.transaction((state) => {
     const campaign = state.campaigns.find((candidate) => candidate.id === campaignId && sameTenant(candidate, auth.user.tenantId));
     if (!campaign) throw notFound();
+    if (!validAcademicYear(campaign.academicYear)) throw new DomainError('ACADEMIC_YEAR_INVALID', '任务学年配置无效，不能发布');
     if (auth.user.schoolId && auth.user.schoolId !== campaign.schoolId) throw forbidden();
     const scale = state.scales.find((candidate) => candidate.id === campaign.scaleVersionId && sameTenant(candidate, auth.user.tenantId));
     if (!scale) throw notFound();
@@ -479,6 +486,7 @@ export async function approveFrequencyException(store: Store, auth: Authenticate
     const student = state.students.find((candidate) => candidate.id === input.studentId && candidate.tenantId === auth.user.tenantId && candidate.active);
     const scale = campaign ? state.scales.find((candidate) => candidate.id === campaign.scaleVersionId && candidate.tenantId === auth.user.tenantId) : undefined;
     if (!campaign || !student || !scale) throw notFound();
+    if (!validAcademicYear(campaign.academicYear)) throw new DomainError('ACADEMIC_YEAR_INVALID', '任务学年配置无效，不能审批复评例外');
     if (campaign.state !== 'draft' && campaign.state !== 'approved') throw new DomainError('CAMPAIGN_STATE_INVALID', '只能为尚未发布的任务申请复评例外');
     if (auth.user.schoolId && auth.user.schoolId !== campaign.schoolId) throw forbidden();
     if (student.schoolId !== campaign.schoolId || !ageAllowed(student, scale)) throw new DomainError('AGE_REVIEW_REQUIRED', '学生不属于任务学校或不在量表适龄范围');
@@ -508,6 +516,7 @@ export async function beginAttempt(store: Store, auth: AuthenticatedUser, assign
     const student = state.students.find((candidate) => candidate.id === auth.user.id && sameTenant(candidate, auth.user.tenantId));
     const scale = campaign ? state.scales.find((candidate) => candidate.id === campaign.scaleVersionId && sameTenant(candidate, auth.user.tenantId)) : undefined;
     if (!campaign || !student || !scale) throw notFound();
+    if (!validAcademicYear(campaign.academicYear)) throw new DomainError('ACADEMIC_YEAR_INVALID', '任务学年配置无效，不能开始答题');
     if (!['open', 'scheduled'].includes(campaign.state) || new Date(campaign.opensAt) > new Date() || new Date(campaign.closesAt) <= new Date()) throw new DomainError('CAMPAIGN_CLOSED', '任务当前不在开放时间');
     assertUsableScale(scale);
     if (!activeConsent(state, student.id, 'assessment', auth.user.tenantId)) throw new DomainError('CONSENT_REQUIRED', '需要有效的测评参与记录');
@@ -554,6 +563,7 @@ function assertAttemptWritable(state: DatabaseState, attempt: Attempt): void {
   const campaign = assignment && state.campaigns.find((candidate) => candidate.tenantId === attempt.tenantId && candidate.id === assignment.campaignId);
   const reservation = assignment && state.frequencyReservations.find((candidate) => candidate.tenantId === attempt.tenantId && candidate.id === assignment.frequencyReservationId);
   if (!assignment || !campaign) throw notFound();
+  if (!validAcademicYear(campaign.academicYear)) throw new DomainError('ACADEMIC_YEAR_INVALID', '任务学年配置无效，不能继续答题', 409);
   if (!['open', 'scheduled'].includes(campaign.state) || !validDate(campaign.opensAt) || !validDate(campaign.closesAt) || new Date(campaign.opensAt) > new Date() || new Date(campaign.closesAt) <= new Date()) {
     attempt.state = 'expired';
     if (['assigned', 'started'].includes(assignment.status)) assignment.status = 'expired';

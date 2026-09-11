@@ -84,7 +84,7 @@ paths:
   /v1/me:
     get: {summary: Current named user, responses: {'200': {description: User}}}
   /v1/me/tasks:
-    get: {summary: Student's own assignments with server-authoritative scale, age and availability checks, responses: {'200': {description: Tasks include available and availabilityReason; revoked or expired scales are not startable}}}
+    get: {summary: Student's own assignments with server-authoritative scale, age, academic-year and availability checks, responses: {'200': {description: Tasks include available and availabilityReason; revoked, expired or malformed-year campaigns are not startable}}}
   /v1/me/scales:
     get: {summary: List only age-eligible, usable self-screening scale versions, responses: {'200': {description: Available scale catalog}}}
   /v1/self-screenings:
@@ -116,7 +116,7 @@ paths:
   /v1/scales/{scaleId}/revoke:
     post: {summary: Revoke a scale version for new use without rewriting history, parameters: [{$ref: '#/components/parameters/scaleId'}], responses: {'204': {description: Revoked}}}
   /v1/campaigns:
-    post: {summary: Create a draft screening or survey campaign with a participant snapshot, responses: {'201': {description: Draft campaign}, '400': {description: Invalid time window or purpose}}}
+    post: {summary: Create a draft screening or survey campaign with a participant snapshot, responses: {'201': {description: Draft campaign}, '400': {description: Invalid consecutive YYYY-YYYY academic year, time window or purpose}}}
   /v1/campaigns/{campaignId}/publish:
     post: {summary: Publish a campaign after consent, age, licensing and frequency checks, parameters: [{$ref: '#/components/parameters/campaignId'}], responses: {'200': {description: Scheduled or open campaign}, '409': {description: Frequency conflict}}}
   /v1/campaigns/{campaignId}/state:

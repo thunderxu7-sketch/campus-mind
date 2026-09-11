@@ -32,6 +32,7 @@ test('frequency reservation is atomic when two campaigns publish concurrently', 
   const store = new JsonStore({ initial: state });
   const auth = authFor(store.snapshot(), 'user-admin-demo');
   const base = { schoolId: 'school-demo', purpose: 'screening', academicYear: '2026-2027', opensAt: new Date(Date.now() - 1_000).toISOString(), closesAt: new Date(Date.now() + 3_600_000).toISOString(), scaleVersionId: 'scale-synthetic-demo-v1', participantStudentIds: ['student-demo'] };
+  await assert.rejects(() => createCampaign(store, auth, { ...base, name: '合成非法学年任务', academicYear: '2026/2027' }), (error) => error.code === 'CAMPAIGN_INVALID');
   const first = await createCampaign(store, auth, { ...base, name: '合成并发任务 A' });
   const second = await createCampaign(store, auth, { ...base, name: '合成并发任务 B' });
   const results = await Promise.allSettled([publishCampaign(store, auth, first.id), publishCampaign(store, auth, second.id)]);
