@@ -16,9 +16,9 @@
     <h2 id="login-title">登录</h2>
     <form id="login">
       <label for="email">邮箱</label>
-      <input id="email" name="email" type="email" autocomplete="username" value="student@campus-mind.demo" required>
+      <input id="email" name="email" type="email" autocomplete="username" value="student@campus-mind.demo">
       <label for="password">密码</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" value="CampusMind-Demo-2026!" required>
+      <input id="password" name="password" type="password" autocomplete="current-password" value="CampusMind-Demo-2026!">
       <label for="access-code">学校一次性凭证（无手机时填写，可替代邮箱密码）</label>
       <input id="access-code" name="accessCode" type="text" autocomplete="one-time-code" inputmode="text" pattern="[A-Za-z0-9_-]{20,}" minlength="20">
       <button type="submit">进入任务</button>
@@ -46,6 +46,12 @@
     const $ = (selector) => document.querySelector(selector);
     const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     const setStatus = (message) => { $('#status').textContent = message; };
+    $('#access-code').addEventListener('input', (event) => {
+      const usingCode = Boolean(event.target.value.trim());
+      $('#email').type = usingCode ? 'text' : 'email';
+      $('#email').required = !usingCode;
+      $('#password').required = !usingCode;
+    });
 
     async function api(path, opts = {}) {
       opts.headers = { ...(opts.headers || {}), authorization: 'Bearer ' + token, 'content-type': 'application/json' };
@@ -130,6 +136,7 @@
         const body = Object.fromEntries(new FormData(event.target));
         if (!body.accessCode) delete body.accessCode;
         else { delete body.email; delete body.password; delete body.mfaCode; }
+        if (!body.accessCode && (!body.email || !body.password)) { setStatus('请输入邮箱和密码，或填写学校一次性凭证。'); return; }
         const response = await fetch('/v1/auth/login', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body) });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error?.message || '登录失败');
