@@ -302,6 +302,16 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   assert.equal(exportDownload.body.data.suppressionThreshold, 10);
   assert.equal(exportDownload.body.data.watermark.jobId, exportRequest.body.data.id);
   assert.equal(exportDownload.body.data.watermark.approvedBy, 'user-professional-demo');
+  await store.transaction((state) => {
+    const job = state.exportJobs.find((candidate) => candidate.id === exportRequest.body.data.id);
+    job.expiresAt = '2020-01-01T00:00:00.000Z';
+  });
+  const expiredDownload = await request(`/v1/exports/${exportRequest.body.data.id}`, { headers: auth(admin) });
+  assert.equal(expiredDownload.response.status, 410);
+  assert.equal(expiredDownload.body.error.code, 'EXPORT_EXPIRED');
+  const expiredJob = store.snapshot().exportJobs.find((job) => job.id === exportRequest.body.data.id);
+  assert.equal(expiredJob.status, 'expired');
+  assert.equal(expiredJob.payloadCiphertext, undefined);
 
   const selfApproval = await request('/v1/exports', { method: 'POST', headers: auth(professional), body: JSON.stringify({ kind: 'aggregate', purpose: 'synthetic_self_approval_check' }) });
   assert.equal(selfApproval.response.status, 201);

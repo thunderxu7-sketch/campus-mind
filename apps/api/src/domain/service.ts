@@ -1041,9 +1041,10 @@ export async function downloadExport(store: Store, auth: AuthenticatedUser, jobI
   const preflight = await store.read((state) => {
     const job = state.exportJobs.find((candidate) => candidate.id === jobId && candidate.tenantId === auth.user.tenantId);
     const isRequester = job?.requestedBy === auth.user.id && can(auth.user, 'export:request');
-    if (!job || (!isRequester && !can(auth.user, 'export:approve'))) return { allowed: false, revoke: false };
+    if (!job || (!isRequester && !can(auth.user, 'export:approve'))) return { allowed: false, revoke: false, expire: false };
     const revoke = job.kind === 'report' && job.status === 'ready' && Boolean(job.payloadCiphertext) && (!job.studentId || !state.reports.some((report) => report.tenantId === job.tenantId && report.studentId === job.studentId && report.state === 'released'));
-    return { allowed: true, revoke };
+    const expire = job.status === 'ready' && Boolean(job.payloadCiphertext) && validDate(job.expiresAt) && new Date(job.expiresAt) <= new Date();
+    return { allowed: true, revoke, expire };
   });
   if (!preflight.allowed) throw forbidden();
   if (preflight.revoke) {
@@ -1057,6 +1058,17 @@ export async function downloadExport(store: Store, auth: AuthenticatedUser, jobI
     });
     throw new DomainError('EXPORT_REVOKED', '关联报告已撤回，导出已失效', 410);
   }
+  if (preflight.expire) {
+    await store.transaction((state) => {
+      const job = state.exportJobs.find((candidate) => candidate.id === jobId && candidate.tenantId === auth.user.tenantId);
+      if (job && job.status === 'ready' && job.payloadCiphertext && validDate(job.expiresAt) && new Date(job.expiresAt) <= new Date()) {
+        job.status = 'expired';
+        job.payloadCiphertext = undefined;
+        audit(state, auth.user, 'export.expired', 'export_job', job.id, { kind: job.kind });
+      }
+    });
+    throw new DomainError('EXPORT_EXPIRED', '导出已过期', 410);
+  }
   try {
     return await store.transaction((state) => {
       const job = state.exportJobs.find((candidate) => candidate.id === jobId && candidate.tenantId === auth.user.tenantId);
@@ -1064,20 +1076,20 @@ export async function downloadExport(store: Store, auth: AuthenticatedUser, jobI
       if (!job || (!isRequester && !can(auth.user, 'export:approve'))) throw forbidden();
       if (job.kind === 'report' && (!isProfessional(auth.user) || !job.studentId || !professionalCanReadStudent(state, auth, job.studentId))) throw forbidden();
       if (job.status !== 'ready' || !job.payloadCiphertext) throw new DomainError('EXPORT_NOT_READY', '导出尚未准备好');
-      if (new Date(job.expiresAt) <= new Date()) { job.status = 'expired'; throw new DomainError('EXPORT_EXPIRED', '导出已过期', 410); }
+      if (new Date(job.expiresAt) <= new Date()) throw new DomainError('EXPORT_EXPIRED', '导出已过期', 410);
       if (job.kind === 'report' && (!job.studentId || !state.reports.some((report) => report.tenantId === job.tenantId && report.studentId === job.studentId && report.state === 'released'))) throw new DomainError('EXPORT_REVOKED', '关联报告已撤回，导出已失效', 410);
       audit(state, auth.user, 'export.downloaded', 'export_job', job.id, { kind: job.kind });
       return decrypt<Record<string, unknown>>(job.payloadCiphertext);
     });
   } catch (error) {
     // Close a narrow race where a report was revoked after the preflight read.
-    if (error instanceof DomainError && error.code === 'EXPORT_REVOKED') {
+    if (error instanceof DomainError && ['EXPORT_REVOKED', 'EXPORT_EXPIRED'].includes(error.code)) {
       await store.transaction((state) => {
         const job = state.exportJobs.find((candidate) => candidate.id === jobId && candidate.tenantId === auth.user.tenantId);
-        if (job && job.status === 'ready') {
-          job.status = 'revoked';
+        if (job && job.status === 'ready' && job.payloadCiphertext) {
+          job.status = error.code === 'EXPORT_REVOKED' ? 'revoked' : 'expired';
           job.payloadCiphertext = undefined;
-          audit(state, auth.user, 'export.revoked', 'export_job', job.id, { kind: job.kind });
+          audit(state, auth.user, error.code === 'EXPORT_REVOKED' ? 'export.revoked' : 'export.expired', 'export_job', job.id, { kind: job.kind });
         }
       });
     }
