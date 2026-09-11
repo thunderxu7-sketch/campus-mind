@@ -242,6 +242,30 @@ test('report release controls student visibility and service errors do not leak 
   const unauthorized = await request('/v1/reports/does-not-exist', { headers: auth(student) });
   assert.equal(unauthorized.response.status, 404);
   assert.deepEqual(Object.keys(unauthorized.body.error).sort(), ['code', 'message']);
+
+  // A report export is a derived artifact: once the source report is revoked,
+  // the previously approved ciphertext must not remain downloadable.
+  await store.transaction((state) => {
+    const source = state.users.find((candidate) => candidate.id === 'user-professional-demo');
+    assert.ok(source);
+    if (!state.users.some((candidate) => candidate.id === 'user-professional-export-reviewer')) {
+      state.users.push({ ...source, id: 'user-professional-export-reviewer', email: 'export-reviewer@campus-mind.demo', displayName: '演示独立导出审核人' });
+    }
+  });
+  const exportReviewer = await login('export-reviewer@campus-mind.demo');
+  const reportExportRequest = await request('/v1/exports', { method: 'POST', headers: auth(professional), body: JSON.stringify({ kind: 'report', studentId: 'student-demo', purpose: 'synthetic_report_export' }) });
+  assert.equal(reportExportRequest.response.status, 201, JSON.stringify(reportExportRequest.body));
+  const reportExportApprove = await request(`/v1/exports/${reportExportRequest.body.data.id}/approve`, { method: 'POST', headers: auth(exportReviewer), body: '{}' });
+  assert.equal(reportExportApprove.response.status, 200, JSON.stringify(reportExportApprove.body));
+  assert.equal(reportExportApprove.body.data.ready, true);
+  const revoked = await request(`/v1/reports/${reportId}/revoke`, { method: 'POST', headers: auth(professional), body: JSON.stringify({ reason: '合成测试：撤回后导出不得继续使用。' }) });
+  assert.equal(revoked.response.status, 204);
+  const revokedDownload = await request(`/v1/exports/${reportExportRequest.body.data.id}`, { headers: auth(professional) });
+  assert.equal(revokedDownload.response.status, 410);
+  assert.equal(revokedDownload.body.error.code, 'EXPORT_REVOKED');
+  const revokedJob = store.snapshot().exportJobs.find((job) => job.id === reportExportRequest.body.data.id);
+  assert.equal(revokedJob.status, 'revoked');
+  assert.equal(revokedJob.payloadCiphertext, undefined);
 });
 
 
