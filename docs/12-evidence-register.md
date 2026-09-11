@@ -38,6 +38,7 @@
 | CM-007 / CM-008 / CM-010 / CM-011 | 真实 PostgreSQL Store、SSO/MFA、KMS、私有桶、审计和连接池演练 | 后端、运维、安全 | _待填写_ | `unverified` |
 | CM-038 / CM-039 | 目标环境容量、备份恢复、删除重放、安全评审和影响评估 | 运维、安全、隐私/法律 | _待填写_ | `unverified` |
 | CM-040 | 校方试点人数/窗口/停止条件、人工接管和共同签署 | 校方、产品、专业、隐私 | _待填写_ | `unverified` |
+| CM-044 | 媒体来源/适龄/无障碍、附件扫描与公共/私有边界（生产还需 `CAMPMIND_MEDIA_SCANNER_READY=true`） | 内容负责人、安全、运维 | _待填写_ | `unverified` |
 | CM-048 | 新用途/接收方授权、聚合互补抑制、逐校扩张验收（生产还需 `CAMPMIND_REGIONAL_ANALYTICS_APPROVED=true`） | 数据、安全、校方 | _待填写_ | `unverified` |
 
 只有外部 Gate 证据齐全、严重问题关闭且 `CAMPMIND_RELEASE_MODE=production npm run release:check` 通过，才可进入受控真实试点。任何 `unverified` 不得被改写成 `verified`，也不得以合成测试或 GitHub Issue 代替签署。

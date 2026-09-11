@@ -22,6 +22,7 @@ const productionEvidence = [
   ['CAMPMIND_SECURITY_REVIEWED', '安全与隐私上线评审'],
   ['CAMPMIND_PILOT_APPROVED', '校方受控试点批准'],
   ['CAMPMIND_REGIONAL_ANALYTICS_APPROVED', '区域聚合用途与接收范围审批'],
+  ['CAMPMIND_MEDIA_SCANNER_READY', '媒体恶意文件扫描适配器就绪'],
 ].map(([env, label]) => ({ id: env.replace(/^CAMPMIND_/, '').toLowerCase(), label, pass: process.env[env] === 'true' }));
 
 if (mode === 'production') checks.push(...productionEvidence, { id: 'postgres-backend', label: '生产使用 PostgreSQL 适配器', pass: process.env.CAMPMIND_DATA_BACKEND === 'postgres' && process.env.CAMPMIND_POSTGRES_ADAPTER_READY === 'true' }, { id: 'object-store-adapter', label: '生产使用私有对象存储适配器', pass: process.env.CAMPMIND_OBJECT_STORE_ADAPTER_READY === 'true' }, { id: 'demo-mfa-disabled', label: '生产未启用演示 MFA 绕过', pass: process.env.CAMPMIND_DEMO_MFA !== 'true' });

@@ -397,6 +397,18 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   assert.equal(retired.response.status, 200);
   const afterRetire = await request('/v1/content/public?age=15');
   assert.equal(afterRetire.body.data.some((item) => item.id === content.body.data.id), false);
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousMediaScanner = process.env.CAMPMIND_MEDIA_SCANNER_READY;
+  process.env.NODE_ENV = 'production';
+  delete process.env.CAMPMIND_MEDIA_SCANNER_READY;
+  try {
+    const blockedMedia = await request('/v1/media-assets', { method: 'POST', headers: auth(professional), body: JSON.stringify({ filename: 'blocked.png', mediaType: 'image/png', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }) });
+    assert.equal(blockedMedia.response.status, 503);
+    assert.equal(blockedMedia.body.error.code, 'MEDIA_SCANNER_NOT_CONFIGURED');
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
+    if (previousMediaScanner === undefined) delete process.env.CAMPMIND_MEDIA_SCANNER_READY; else process.env.CAMPMIND_MEDIA_SCANNER_READY = previousMediaScanner;
+  }
   const media = await request('/v1/media-assets', { method: 'POST', headers: auth(professional), body: JSON.stringify({ filename: 'synthetic.png', mediaType: 'image/png', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }) });
   assert.equal(media.response.status, 201, JSON.stringify(media.body));
   const duplicateMedia = await request('/v1/media-assets', { method: 'POST', headers: auth(professional), body: JSON.stringify({ filename: 'synthetic-copy.png', mediaType: 'image/png', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }) });

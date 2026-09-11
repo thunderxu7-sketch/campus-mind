@@ -1416,6 +1416,11 @@ function decodeMedia(encoded: string): Buffer {
 
 export async function createMediaAsset(store: Store, auth: AuthenticatedUser, input: { filename: string; mediaType: string; base64: string }): Promise<MediaAsset> {
   requirePermission(auth.user, 'content:write');
+  // The reference implementation performs bounded signature and content
+  // heuristics below. Production uploads additionally require an approved
+  // malware-scanning adapter; never mark a provider-less upload clean merely
+  // because the local checks passed.
+  if (process.env.NODE_ENV === 'production' && process.env.CAMPMIND_MEDIA_SCANNER_READY !== 'true') throw new DomainError('MEDIA_SCANNER_NOT_CONFIGURED', '生产媒体上传尚未接入恶意文件扫描', 503);
   if (typeof input.filename !== 'string' || typeof input.mediaType !== 'string' || typeof input.base64 !== 'string') throw new DomainError('MEDIA_INVALID', '媒体字段格式无效');
   const policy = MEDIA_POLICIES[input.mediaType];
   if (!policy) throw new DomainError('MEDIA_TYPE_NOT_ALLOWED', '媒体类型未获批准');
