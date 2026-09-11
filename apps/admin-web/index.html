@@ -179,7 +179,7 @@
     // and in-progress form/import state before hiding the dashboard.
     function clearDashboard() {
       pendingImport = null;
-      const empty = ['metrics', 'campaigns', 'scaleCatalog', 'importPreview', 'campaignProgress', 'analyticsView', 'slotList', 'appointmentList', 'contentList', 'caseList', 'professionalReports', 'rightsAdminList', 'operationsView'];
+      const empty = ['metrics', 'campaigns', 'scale', 'scaleCatalog', 'importPreview', 'campaignProgress', 'analyticsView', 'slotList', 'appointmentList', 'contentList', 'caseList', 'professionalReports', 'rightsAdminList', 'operationsView'];
       for (const id of empty) document.getElementById(id)?.replaceChildren();
       for (const id of ['campaignStatus', 'scaleCatalogStatus', 'importStatus', 'frequencyStatus', 'analyticsStatus', 'contentStatus', 'archiveStatus', 'operationsStatus']) {
         const node = document.getElementById(id); if (node) node.textContent = '';
