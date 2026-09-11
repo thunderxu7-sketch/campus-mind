@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { approveFrequencyException, approveScale, beginAttempt, createCampaign, createScale, createSelfScreening, listMyTasks, publishCampaign, revokeScale, saveAnswers, updateCampaignState, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
+import { approveFrequencyException, approveScale, beginAttempt, createCampaign, createScale, createSelfScreening, listAvailableScales, listMyTasks, publishCampaign, revokeScale, saveAnswers, updateCampaignState, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
 import { JsonStore } from '../dist/apps/api/src/domain/store.js';
 import { DEMO_IDS, seedDemoState } from '../dist/apps/api/src/domain/seed.js';
 
@@ -104,6 +104,31 @@ test('declined or completed assignments cannot be reopened after their session i
     state.frequencyReservations.find((reservation) => reservation.id === 'frequency-demo').status = 'released';
   });
   await assert.rejects(() => beginAttempt(store, auth, DEMO_IDS.assignment), (error) => error.code === 'FREQUENCY_REVIEW_REQUIRED');
+});
+
+test('task availability and self-service catalog hide revoked or expired scales', async () => {
+  const state = seedDemoState();
+  const store = new JsonStore({ initial: state });
+  const student = authFor(store.snapshot(), DEMO_IDS.student);
+  await store.transaction((draft) => {
+    const scale = draft.scales.find((candidate) => candidate.id === DEMO_IDS.scale);
+    scale.status = 'revoked';
+  });
+  const revokedTasks = await listMyTasks(store, student);
+  assert.equal(revokedTasks[0].available, false);
+  assert.equal(revokedTasks[0].availabilityReason, 'scale_unavailable');
+  assert.deepEqual(await listAvailableScales(store, student), []);
+
+  await store.transaction((draft) => {
+    const scale = draft.scales.find((candidate) => candidate.id === DEMO_IDS.scale);
+    scale.status = 'approved';
+    scale.provenance = 'licensed';
+    scale.licenseExpiresAt = '2020-01-01T00:00:00.000Z';
+  });
+  const expiredTasks = await listMyTasks(store, student);
+  assert.equal(expiredTasks[0].available, false);
+  assert.equal(expiredTasks[0].availabilityReason, 'scale_unavailable');
+  assert.deepEqual(await listAvailableScales(store, student), []);
 });
 
 test('revoking a scale blocks new use without changing historical identifiers', async () => {

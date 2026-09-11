@@ -366,6 +366,7 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   const mediaBytes = await fetch(`${base}/v1/content/public/${media.body.data.id}/media`);
   assert.equal(mediaBytes.status, 200);
   assert.equal(mediaBytes.headers.get('content-type'), 'image/png');
+  assert.equal(mediaBytes.headers.get('cache-control'), 'no-store');
   assert.equal((await mediaBytes.arrayBuffer()).byteLength > 8, true);
   const retiredMedia = await request(`/v1/content/${mediaContent.body.data.id}/retire`, { method: 'POST', headers: auth(professional), body: '{}' });
   assert.equal(retiredMedia.response.status, 200);

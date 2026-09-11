@@ -141,9 +141,17 @@ export async function listMyTasks(store: Store, auth: AuthenticatedUser): Promis
       const reservation = assignment.frequencyReservationId ? state.frequencyReservations.find((candidate) => candidate.id === assignment.frequencyReservationId && candidate.tenantId === auth.user.tenantId) : undefined;
       const terminal = ['completed', 'declined', 'expired'].includes(assignment.status) || Boolean(attempt && ['submitted', 'scoring_pending', 'scored', 'scoring_failed', 'invalid', 'withdrawn', 'expired'].includes(attempt.state));
       const inWindow = Boolean(campaign && ['open', 'scheduled'].includes(campaign.state) && validDate(campaign.opensAt) && validDate(campaign.closesAt) && new Date(campaign.opensAt) <= currentTime && new Date(campaign.closesAt) > currentTime);
-      const ageEligible = Boolean(scale && student && ageAllowed(student, scale));
-      const available = !terminal && ['assigned', 'started'].includes(assignment.status) && inWindow && ageEligible && Boolean(reservation && ['reserved', 'exception'].includes(reservation.status));
-      const availabilityReason = terminal ? 'terminal' : !['assigned', 'started'].includes(assignment.status) ? 'assignment_unavailable' : !inWindow ? 'outside_window' : !ageEligible ? 'age_not_allowed' : !reservation || !['reserved', 'exception'].includes(reservation.status) ? 'frequency_review' : 'available';
+      // Keep the task list server-authoritative: a revoked/expired/licence-
+      // invalid scale must not be shown as startable just because its campaign
+      // and frequency reservation still look open.  Use the same guard as the
+      // begin/save/submit paths, but map the failure to a stable UI reason.
+      const scaleUsable = (() => {
+        if (!scale) return false;
+        try { assertUsableScale(scale, currentTime); return true; } catch { return false; }
+      })();
+      const ageEligible = Boolean(scaleUsable && student && scale && ageAllowed(student, scale));
+      const available = !terminal && ['assigned', 'started'].includes(assignment.status) && inWindow && scaleUsable && ageEligible && Boolean(reservation && ['reserved', 'exception'].includes(reservation.status));
+      const availabilityReason = terminal ? 'terminal' : !['assigned', 'started'].includes(assignment.status) ? 'assignment_unavailable' : !inWindow ? 'outside_window' : !scaleUsable ? 'scale_unavailable' : !ageEligible ? 'age_not_allowed' : !reservation || !['reserved', 'exception'].includes(reservation.status) ? 'frequency_review' : 'available';
       return {
         id: assignment.id,
         name: campaign?.name ?? '测评任务',
@@ -1446,7 +1454,10 @@ export async function listAvailableScales(store: Store, auth: AuthenticatedUser)
   if (!isStudent(auth.user)) throw forbidden();
   return store.transaction((state) => {
     const student = state.students.find((candidate) => candidate.id === auth.user.id && candidate.tenantId === auth.user.tenantId && candidate.active);
-    const scales = state.scales.filter((scale) => scale.tenantId === auth.user.tenantId && scale.status === 'approved' && student && ageAllowed(student, scale)).map((scale) => ({ id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, minAge: scale.minAge, maxAge: scale.maxAge, noticeVersion: scale.noticeVersion, dimensions: scale.dimensions ?? [], population: scale.population ?? 'mixed', language: scale.language ?? 'zh-CN', items: scale.items.map((item) => ({ id: item.id, prompt: item.prompt, min: item.min, max: item.max, factor: item.factor })) }));
+    const scales = state.scales.filter((scale) => {
+      if (scale.tenantId !== auth.user.tenantId || !student || !ageAllowed(student, scale)) return false;
+      try { assertUsableScale(scale); return true; } catch { return false; }
+    }).map((scale) => ({ id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, minAge: scale.minAge, maxAge: scale.maxAge, noticeVersion: scale.noticeVersion, dimensions: scale.dimensions ?? [], population: scale.population ?? 'mixed', language: scale.language ?? 'zh-CN', items: scale.items.map((item) => ({ id: item.id, prompt: item.prompt, min: item.min, max: item.max, factor: item.factor })) }));
     audit(state, auth.user, 'scale.available_listed', 'scale_version', 'self', { count: scales.length }, 'self:assessment');
     return scales;
   });

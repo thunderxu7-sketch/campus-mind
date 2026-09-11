@@ -167,7 +167,12 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   if (method === 'GET' && path === '/v1/content/public') { json(res, 200, { data: await listPublicContent(store, url.searchParams.has('age') ? Number(url.searchParams.get('age')) : undefined) }); return; }
   if (method === 'GET' && segments[1] === 'content' && segments[2] === 'public' && segments[4] === 'media') {
     const media = await readPublicMedia(store, segments[3]!);
-    res.statusCode = 200; res.setHeader('Content-Type', media.mediaType); res.setHeader('Content-Length', media.bytes.byteLength); res.setHeader('Cache-Control', 'public, max-age=300'); res.setHeader('Content-Disposition', `inline; filename="${media.filename.replace(/"/g, '')}"`); res.end(media.bytes); return;
+    res.statusCode = 200; res.setHeader('Content-Type', media.mediaType); res.setHeader('Content-Length', media.bytes.byteLength);
+    // Do not let a browser/CDN keep a copy after content is retired or its
+    // backing object is revoked. Public education content is intentionally
+    // revalidated through the publication check on every request.
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Disposition', `inline; filename="${media.filename.replace(/"/g, '')}"`); res.end(media.bytes); return;
   }
   if (method === 'POST' && path === '/v1/auth/login') {
     const result = typeof input.accessCode === 'string' ? await loginWithStudentAccessCode(store, input.accessCode.trim()) : await loginUser(store, stringField(input, 'email'), stringField(input, 'password'), typeof input.mfaCode === 'string' ? input.mfaCode : undefined);
