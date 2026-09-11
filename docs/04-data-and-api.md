@@ -73,7 +73,7 @@ erDiagram
 | `POST /v1/imports/{id}/commit` | 确认导入 | 审批、幂等、校验预览内容 hash；组织映射人工确认 |
 | `POST /v1/guardian-links/verify` | 监护关系核验 | 经确认渠道、限流，不以学号为验证凭据 |
 | `POST /v1/guardian-links` | 建立待核验监护关系 | 校务账号只能关联本租户的监护账号与学生；未核验前不能记录监护同意 |
-| `GET/POST /v1/me/consents`、`POST /v1/me/consents/{id}/withdraw` | 同意与撤回 | 主体可查看目的绑定的参与元数据；记录时校验目的/版本/主体/年龄，撤回触发权限与任务更新 |
+| `GET/POST /v1/me/consents`、`POST /v1/me/consents/{id}/withdraw` | 同意与撤回 | 主体可查看目的绑定的参与元数据；记录时校验目的/版本/主体/年龄，当前告知版本变化会保留历史并生成新的 active 记录，任务只接受与量表 `noticeVersion` 匹配的参与记录，撤回触发权限与任务更新 |
 | `POST /v1/rights-requests`、`GET /v1/me/rights-requests`、`GET /v1/rights-requests/{id}/result` | 查阅/更正/删除申请与结果 | 便捷提交、身份核验、时限跟踪；处理人必须保存加密决定说明，主体只能查看自己提交的申请及完成/拒绝结果，查阅结果只含基本资料与已发布报告，不含原始答卷 |
 | `POST /v1/admin/retention/run` | 过期导出/导入预检失效与删除台账重放 | 仅运维指标权限；预检元数据 24 小时后清理，恢复备份后先重放，再开放服务；重复执行幂等 |
 | `GET /v1/admin/operations/status`、`POST /v1/admin/operations/requeue-dead-letters` | 队列/通知运行状态与死信补投 | 仅运维指标权限；返回计数和时间，不返回学生或风险正文 |
@@ -85,7 +85,7 @@ erDiagram
 | `POST /v1/campaigns/{id}/frequency-exceptions` | 必要复评审批 | 专业负责人记录用途/依据；依据使用 `reason_ciphertext` 加密保存，仅返回 `hasReason`；例外与普通学年场次分开留痕 |
 | `POST /v1/scales/{id}/revoke` | 撤销量表版本 | 只阻断新使用，不改写历史答卷和计分；必须记录原因 |
 | `GET /v1/me/tasks` | 当前学生任务 | 仅自己，服务端返回适龄、任务窗口、频次状态、量表授权/撤回状态和 `available/availabilityReason`（包括 `scale_unavailable`、`academic_year_invalid`）；前端不得自行推断可作答 |
-| `POST /v1/me/tasks/{id}/attempts` | 开始作答 | 同意/适龄/频次/任务时窗原子验证；已释放场次不能靠旧 assignment 重开；响应只返回答题句柄和 revision，不暴露租户、学生、方案或提交内部 ID |
+| `POST /v1/me/tasks/{id}/attempts` | 开始作答 | 同意/当前告知版本/适龄/频次/任务时窗原子验证；已释放场次不能靠旧 assignment 重开；响应只返回答题句柄和 revision，不暴露租户、学生、方案或提交内部 ID |
 | `GET /v1/attempts/{id}` | 恢复草稿 | 仅本人读取服务端已确认的答案与 revision；答题元数据最小化且不暴露关联内部 ID；已提交/关闭答题不可恢复 |
 | `PUT /v1/attempts/{id}/answers` | 保存答案 | `expectedRevision`、题目白名单、服务端持久化确认；每次写入重新检查任务窗口/场次 |
 | `POST /v1/attempts/{id}/submit` | 提交 | 幂等键、内容 hash、事务快照与 outbox，不再修改；提交前再次检查窗口/场次 |

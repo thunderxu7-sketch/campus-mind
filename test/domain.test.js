@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { approveFrequencyException, approveScale, beginAttempt, createCampaign, createScale, createSelfScreening, listAvailableScales, listMyTasks, listScaleCatalog, publishCampaign, revokeScale, saveAnswers, updateCampaignState, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
+import { approveFrequencyException, approveScale, beginAttempt, createCampaign, createConsent, createScale, createSelfScreening, listAvailableScales, listMyTasks, listScaleCatalog, publishCampaign, revokeScale, saveAnswers, updateCampaignState, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
 import { JsonStore } from '../dist/apps/api/src/domain/store.js';
 import { DEMO_IDS, seedDemoState } from '../dist/apps/api/src/domain/seed.js';
 
@@ -57,6 +57,11 @@ test('self screening uses the same consent and academic-year frequency guard', a
     if (previousAcademicYear === undefined) delete process.env.CAMPMIND_ACADEMIC_YEAR; else process.env.CAMPMIND_ACADEMIC_YEAR = previousAcademicYear;
   }
   await assert.rejects(() => createSelfScreening(store, auth, 'scale-synthetic-demo-v1', '9999-10000'), (error) => error.code === 'ACADEMIC_YEAR_INVALID');
+  await store.transaction((draft) => { draft.scales.find((candidate) => candidate.id === 'scale-synthetic-demo-v1').noticeVersion = 'notice-updated-v2'; });
+  await assert.rejects(() => createSelfScreening(store, auth, 'scale-synthetic-demo-v1'), (error) => error.code === 'CONSENT_REQUIRED');
+  const renewed = await createConsent(store, auth, { studentId: 'student-demo', actorType: 'student', noticeVersion: 'notice-updated-v2', purpose: 'assessment' });
+  assert.equal(renewed.noticeVersion, 'notice-updated-v2');
+  assert.equal(store.snapshot().consents.filter((consent) => consent.purpose === 'assessment' && consent.status === 'active').length, 1);
   const first = await createSelfScreening(store, auth, 'scale-synthetic-demo-v1');
   assert.equal(first.campaign.purpose, 'screening');
   assert.equal(Object.hasOwn(first.campaign, 'tenantId'), false);

@@ -107,8 +107,8 @@ function studentFor(state: DatabaseState, user: User, studentId: string): Studen
   return student;
 }
 
-function activeConsent(state: DatabaseState, studentId: string, purpose: ConsentRecord['purpose'], tenantId?: string): ConsentRecord | undefined {
-  return state.consents.find((consent) => consent.studentId === studentId && (!tenantId || consent.tenantId === tenantId) && consent.purpose === purpose && consent.status === 'active');
+function activeConsent(state: DatabaseState, studentId: string, purpose: ConsentRecord['purpose'], tenantId?: string, noticeVersion?: string): ConsentRecord | undefined {
+  return state.consents.find((consent) => consent.studentId === studentId && (!tenantId || consent.tenantId === tenantId) && consent.purpose === purpose && consent.status === 'active' && (!noticeVersion || consent.noticeVersion === noticeVersion));
 }
 
 function revokeStudentAssessmentProcessing(state: DatabaseState, tenantId: string, studentId: string): void {
@@ -212,7 +212,7 @@ export async function listMyTasks(store: Store, auth: AuthenticatedUser): Promis
         if (!scale) return false;
         try { assertUsableScale(scale, currentTime); return true; } catch { return false; }
       })();
-      const consented = Boolean(student && activeConsent(state, student.id, 'assessment', auth.user.tenantId));
+      const consented = Boolean(student && activeConsent(state, student.id, 'assessment', auth.user.tenantId, scale?.noticeVersion));
       const ageEligible = Boolean(scaleUsable && student && scale && ageAllowed(student, scale));
       const available = !terminal && ['assigned', 'started'].includes(assignment.status) && inWindow && scaleUsable && ageEligible && consented && Boolean(reservation && ['reserved', 'exception'].includes(reservation.status));
       const availabilityReason = terminal ? 'terminal' : !['assigned', 'started'].includes(assignment.status) ? 'assignment_unavailable' : !campaign || !validAcademicYear(campaign.academicYear) ? 'academic_year_invalid' : !inWindow ? 'outside_window' : !scaleUsable ? 'scale_unavailable' : !consented ? 'consent_required' : !ageEligible ? 'age_not_allowed' : !reservation || !['reserved', 'exception'].includes(reservation.status) ? 'frequency_review' : 'available';
@@ -267,7 +267,8 @@ export async function verifyGuardianLink(store: Store, auth: AuthenticatedUser, 
 export async function createConsent(store: Store, auth: AuthenticatedUser, input: { studentId: string; actorType: ConsentRecord['actorType']; noticeVersion: string; purpose?: ConsentRecord['purpose'] }): Promise<PublicConsent> {
   if (!isStudent(auth.user) && !can(auth.user, 'org:manage') && !can(auth.user, 'rights:request')) throw forbidden();
   const purpose = input.purpose ?? 'assessment';
-  if (!['student', 'guardian', 'school_legal_basis'].includes(input.actorType) || !['assessment', 'support', 'research'].includes(purpose) || typeof input.noticeVersion !== 'string' || !input.noticeVersion.trim()) throw new DomainError('CONSENT_INVALID', '参与记录类型、用途或告知版本无效');
+  const noticeVersion = typeof input.noticeVersion === 'string' ? input.noticeVersion.trim() : '';
+  if (!['student', 'guardian', 'school_legal_basis'].includes(input.actorType) || !['assessment', 'support', 'research'].includes(purpose) || !noticeVersion || noticeVersion.length > 80 || /[\0\r\n]/.test(noticeVersion)) throw new DomainError('CONSENT_INVALID', '参与记录类型、用途或告知版本无效');
   return store.transaction((state) => {
     const student = studentFor(state, auth.user, input.studentId);
     if (input.actorType === 'student' && (!isStudent(auth.user) || auth.user.id !== student.id)) throw forbidden('学生参与记录必须由本人提交');
@@ -278,8 +279,15 @@ export async function createConsent(store: Store, auth: AuthenticatedUser, input
     }
     if (input.actorType === 'guardian' && !student.guardianVerified) throw new DomainError('GUARDIAN_NOT_VERIFIED', '监护关系尚未核验');
     const existing = state.consents.find((c) => c.tenantId === auth.user.tenantId && c.studentId === student.id && c.purpose === purpose && c.status === 'active');
-    if (existing) return publicConsent(existing);
-    const consent: ConsentRecord = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, purpose, noticeVersion: input.noticeVersion, actorType: input.actorType, actorId: auth.user.id, status: 'active', recordedAt: now() };
+    if (existing && existing.noticeVersion === noticeVersion) return publicConsent(existing);
+    // A changed notice is a new participation record, not an in-place edit.
+    // Expire the old record so task gates cannot accidentally accept stale
+    // terms while preserving the historical evidence of what was shown.
+    if (existing) {
+      existing.status = 'expired';
+      audit(state, auth.user, 'consent.superseded', 'consent', existing.id, { purpose });
+    }
+    const consent: ConsentRecord = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, purpose, noticeVersion, actorType: input.actorType, actorId: auth.user.id, status: 'active', recordedAt: now() };
     state.consents.push(consent);
     audit(state, auth.user, 'consent.recorded', 'consent', consent.id, { purpose, actorType: input.actorType });
     return publicConsent(consent);
@@ -455,7 +463,7 @@ export async function publishCampaign(store: Store, auth: AuthenticatedUser, cam
     const studentList = campaign.participantStudentIds.map((studentId) => state.students.find((student) => student.id === studentId && sameTenant(student, auth.user.tenantId))).filter((student): student is Student => Boolean(student));
     if (studentList.length !== new Set(campaign.participantStudentIds).size || studentList.some((student) => !student.active || student.schoolId !== campaign.schoolId)) throw new DomainError('STUDENT_NOT_ELIGIBLE', '名单中有不存在、已停用或已转校的学生');
     if (studentList.some((student) => !ageAllowed(student, scale))) throw new DomainError('AGE_REVIEW_REQUIRED', '名单中有不适龄或年龄未知的学生');
-    if (studentList.some((student) => !activeConsent(state, student.id, 'assessment', auth.user.tenantId))) throw new DomainError('CONSENT_REQUIRED', '名单中有学生缺少有效测评参与记录');
+    if (studentList.some((student) => !activeConsent(state, student.id, 'assessment', auth.user.tenantId, scale.noticeVersion))) throw new DomainError('CONSENT_REQUIRED', '名单中有学生缺少当前告知版本的测评参与记录');
     const existing = new Set(state.assignments.filter((a) => a.tenantId === auth.user.tenantId && a.campaignId === campaign.id).map((a) => a.studentId));
     for (const student of studentList) {
       if (existing.has(student.id)) continue;
@@ -490,7 +498,7 @@ export async function approveFrequencyException(store: Store, auth: Authenticate
     if (campaign.state !== 'draft' && campaign.state !== 'approved') throw new DomainError('CAMPAIGN_STATE_INVALID', '只能为尚未发布的任务申请复评例外');
     if (auth.user.schoolId && auth.user.schoolId !== campaign.schoolId) throw forbidden();
     if (student.schoolId !== campaign.schoolId || !ageAllowed(student, scale)) throw new DomainError('AGE_REVIEW_REQUIRED', '学生不属于任务学校或不在量表适龄范围');
-    if (!activeConsent(state, student.id, 'assessment', auth.user.tenantId)) throw new DomainError('CONSENT_REQUIRED', '复评前需要有效的测评参与记录');
+    if (!activeConsent(state, student.id, 'assessment', auth.user.tenantId, scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '复评前需要当前告知版本的测评参与记录');
     const existingException = state.frequencyReservations.find((reservation) => reservation.tenantId === auth.user.tenantId && reservation.studentId === student.id && reservation.academicYear === campaign.academicYear && reservation.campaignId === campaign.id && reservation.status === 'exception');
     if (existingException) {
       existingException.approvedBy = auth.user.id;
@@ -519,7 +527,7 @@ export async function beginAttempt(store: Store, auth: AuthenticatedUser, assign
     if (!validAcademicYear(campaign.academicYear)) throw new DomainError('ACADEMIC_YEAR_INVALID', '任务学年配置无效，不能开始答题');
     if (!['open', 'scheduled'].includes(campaign.state) || new Date(campaign.opensAt) > new Date() || new Date(campaign.closesAt) <= new Date()) throw new DomainError('CAMPAIGN_CLOSED', '任务当前不在开放时间');
     assertUsableScale(scale);
-    if (!activeConsent(state, student.id, 'assessment', auth.user.tenantId)) throw new DomainError('CONSENT_REQUIRED', '需要有效的测评参与记录');
+    if (!activeConsent(state, student.id, 'assessment', auth.user.tenantId, scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '需要当前告知版本的测评参与记录');
     if (!ageAllowed(student, scale)) throw new DomainError('AGE_REVIEW_REQUIRED', '年龄不在该方案适用范围');
     if (!['assigned', 'started'].includes(assignment.status)) throw new DomainError('ASSIGNMENT_NOT_AVAILABLE', '该任务已结束或不再接受答题', 409);
     const reservation = state.frequencyReservations.find((candidate) => candidate.id === assignment.frequencyReservationId && candidate.tenantId === auth.user.tenantId);
@@ -540,7 +548,9 @@ export async function getAttempt(store: Store, auth: AuthenticatedUser, attemptI
     if (!attempt) throw notFound();
     if (attempt.state !== 'in_progress') throw new DomainError('ATTEMPT_NOT_RESUMABLE', '该答题已提交或已关闭', 409);
     assertAttemptWritable(state, attempt);
-    if (!activeConsent(state, attempt.studentId, 'assessment', auth.user.tenantId)) throw new DomainError('CONSENT_REQUIRED', '需要有效的测评参与记录');
+    const scale = state.scales.find((candidate) => candidate.id === attempt.scaleVersionId && sameTenant(candidate, auth.user.tenantId));
+    if (!scale) throw notFound();
+    if (!activeConsent(state, attempt.studentId, 'assessment', auth.user.tenantId, scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '需要当前告知版本的测评参与记录');
     const revision = state.answerRevisions.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.attemptId === attempt.id && candidate.revision === attempt.currentRevision);
     const answers = revision ? decrypt<Record<string, unknown>>(revision.answersCiphertext) : {};
     audit(state, auth.user, 'attempt.draft_read', 'attempt', attempt.id, { revision: attempt.currentRevision }, 'assessment');
@@ -580,11 +590,11 @@ export async function saveAnswers(store: Store, auth: AuthenticatedUser, attempt
   return store.transaction((state) => {
     const attempt = state.attempts.find((candidate) => candidate.id === attemptId && sameTenant(candidate, auth.user.tenantId) && candidate.studentId === auth.user.id);
     if (!attempt || attempt.state !== 'in_progress') throw notFound();
-    if (!activeConsent(state, attempt.studentId, 'assessment', auth.user.tenantId)) throw new DomainError('CONSENT_REQUIRED', '需要有效的测评参与记录');
-    assertAttemptWritable(state, attempt);
-    if (attempt.currentRevision !== input.expectedRevision) throw new DomainError('REVISION_CONFLICT', '答题内容已在其他窗口更新', 409, { currentRevision: attempt.currentRevision });
     const scale = state.scales.find((candidate) => candidate.id === attempt.scaleVersionId && sameTenant(candidate, auth.user.tenantId));
     if (!scale) throw notFound();
+    if (!activeConsent(state, attempt.studentId, 'assessment', auth.user.tenantId, scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '需要当前告知版本的测评参与记录');
+    assertAttemptWritable(state, attempt);
+    if (attempt.currentRevision !== input.expectedRevision) throw new DomainError('REVISION_CONFLICT', '答题内容已在其他窗口更新', 409, { currentRevision: attempt.currentRevision });
     const allowed = new Set(scale.items.map((item) => item.id));
     if (Object.keys(input.answers).some((key) => !allowed.has(key))) throw new DomainError('ANSWER_ITEM_INVALID', '答题项不属于当前方案');
     const savedAt = now(); const revision = attempt.currentRevision + 1;
@@ -600,7 +610,9 @@ export async function submitAttempt(store: Store, auth: AuthenticatedUser, attem
   return store.transaction((state) => {
     const attempt = state.attempts.find((candidate) => candidate.id === attemptId && sameTenant(candidate, auth.user.tenantId) && candidate.studentId === auth.user.id);
     if (!attempt) throw notFound();
-    if (!activeConsent(state, attempt.studentId, 'assessment', auth.user.tenantId)) throw new DomainError('CONSENT_REQUIRED', '需要有效的测评参与记录');
+    const scale = state.scales.find((candidate) => candidate.id === attempt.scaleVersionId && sameTenant(candidate, auth.user.tenantId));
+    if (!scale) throw notFound();
+    if (!activeConsent(state, attempt.studentId, 'assessment', auth.user.tenantId, scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '需要当前告知版本的测评参与记录');
     const existing = state.submissions.find((submission) => submission.tenantId === auth.user.tenantId && submission.attemptId === attempt.id);
     if (existing) {
       if (existing.idempotencyKey !== idempotencyKey) throw new DomainError('IDEMPOTENCY_CONFLICT', '该答卷已经提交', 409);
@@ -609,8 +621,6 @@ export async function submitAttempt(store: Store, auth: AuthenticatedUser, attem
     if (attempt.state !== 'in_progress') throw new DomainError('ATTEMPT_NOT_SUBMITTABLE', '该答题已提交或已关闭', 409);
     assertAttemptWritable(state, attempt);
     const answers = answersFrom(state, attempt);
-    const scale = state.scales.find((candidate) => candidate.id === attempt.scaleVersionId && sameTenant(candidate, auth.user.tenantId));
-    if (!scale) throw notFound();
     const answerRevision = state.answerRevisions.find((r) => r.tenantId === auth.user.tenantId && r.attemptId === attempt.id && r.revision === attempt.currentRevision);
     if (!answerRevision) throw new DomainError('ANSWERS_NOT_SAVED', '尚未保存答题内容');
     const submission: import('./types.js').Submission = { id: id(), tenantId: auth.user.tenantId, attemptId: attempt.id, answerRevisionId: answerRevision.id, idempotencyKey, contentHash: contentHash(answers), submittedAt: now() };
@@ -1674,7 +1684,7 @@ export async function createSelfScreening(store: Store, auth: AuthenticatedUser,
     const scale = state.scales.find((candidate) => candidate.id === scaleId && candidate.tenantId === auth.user.tenantId);
     if (!student || !scale) throw notFound();
     assertUsableScale(scale);
-    if (!activeConsent(state, student.id, 'assessment', auth.user.tenantId)) throw new DomainError('CONSENT_REQUIRED', '需要有效的测评参与记录');
+    if (!activeConsent(state, student.id, 'assessment', auth.user.tenantId, scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '需要当前告知版本的测评参与记录');
     if (!ageAllowed(student, scale)) throw new DomainError('AGE_REVIEW_REQUIRED', '年龄不在该方案适用范围');
     if (state.frequencyReservations.some((reservation) => reservation.tenantId === auth.user.tenantId && reservation.studentId === student.id && reservation.academicYear === academicYear && reservation.status !== 'released')) throw new DomainError('FREQUENCY_REVIEW_REQUIRED', '本学年已有测评场次');
     const campaign: Campaign = { id: id(), tenantId: auth.user.tenantId, schoolId: student.schoolId, name: '学生自选支持筛查（需专业复核）', purpose: 'screening', state: 'open', academicYear, opensAt: now(), closesAt: new Date(Date.now() + 24 * 60 * 60_000).toISOString(), scaleVersionId: scale.id, reportVisibility: 'professional_review', participantStudentIds: [student.id], createdBy: auth.user.id, publishedAt: now(), createdAt: now() };
