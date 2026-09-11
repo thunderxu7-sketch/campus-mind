@@ -47,6 +47,22 @@ jobs:
           test "$(psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --tuples-only --no-align --command "select count(*) from pg_policies where schemaname = 'public';")" = "36"
           test "$(psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --tuples-only --no-align --command "select count(*) from information_schema.columns where table_name = 'media_assets' and column_name = 'object_key';")" = "1"
           test "$(psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --tuples-only --no-align --command "select count(*) from pg_constraint where conname in ('campaigns_created_by_fk','risk_cases_assigned_to_fk','availability_slots_counselor_fk','attempts_submission_fk');")" = "4"
+          psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --set ON_ERROR_STOP=1 <<'SQL'
+          begin;
+          insert into tenants (id, name) values ('00000000-0000-0000-0000-0000000000a1', 'synthetic-a'), ('00000000-0000-0000-0000-0000000000b1', 'synthetic-b') on conflict (id) do nothing;
+          insert into schools (id, tenant_id, name) values ('00000000-0000-0000-0000-0000000000a2', '00000000-0000-0000-0000-0000000000a1', 'school-a'), ('00000000-0000-0000-0000-0000000000b2', '00000000-0000-0000-0000-0000000000b1', 'school-b') on conflict (id) do nothing;
+          insert into users (id, tenant_id, school_id, email, display_name, password_hash, role) values ('00000000-0000-0000-0000-0000000000a3', '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000a2', 'a@example.invalid', 'synthetic-a', 'synthetic', 'school_admin'), ('00000000-0000-0000-0000-0000000000b3', '00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000000b2', 'b@example.invalid', 'synthetic-b', 'synthetic', 'school_admin') on conflict (id) do nothing;
+          insert into assessment_plans (id, tenant_id, code, title, version, provenance, status, min_age, max_age, scoring_version, notice_version, config_json, created_by) values ('00000000-0000-0000-0000-0000000000a4', '00000000-0000-0000-0000-0000000000a1', 'SYNTH-CI', 'synthetic', '1', 'synthetic_only', 'draft', 12, 18, 'synthetic', 'notice', '{}', '00000000-0000-0000-0000-0000000000a3') on conflict (id) do nothing;
+          do $$
+          begin
+            begin
+              insert into campaigns (id, tenant_id, school_id, name, purpose, state, academic_year, opens_at, closes_at, plan_id, participant_snapshot, report_visibility, created_by) values ('00000000-0000-0000-0000-0000000000a5', '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000a2', 'cross-tenant should fail', 'screening', 'draft', '2026-2027', now(), now() + interval '1 hour', '00000000-0000-0000-0000-0000000000a4', '{}', 'professional_review', '00000000-0000-0000-0000-0000000000b3');
+              raise exception 'cross-tenant composite foreign key accepted';
+            exception when foreign_key_violation then null;
+            end;
+          end $$;
+          rollback;
+          SQL
           psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --set ON_ERROR_STOP=1 --file infra/roles.sql.example
           test "$(psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --tuples-only --no-align --command "select rolsuper::int || '|' || rolbypassrls::int from pg_roles where rolname = 'campus_mind_app';")" = "0|0"
           test "$(psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --tuples-only --no-align --command "select has_table_privilege('campus_mind_app', 'public.audit_events', 'UPDATE')::int || '|' || has_table_privilege('campus_mind_app', 'public.audit_events', 'DELETE')::int;")" = "0|0"
