@@ -329,6 +329,7 @@ export interface RightsRequest {
   requesterId: string;
   status: 'open' | 'processing' | 'completed' | 'rejected';
   reason?: string;
+  resultCiphertext?: string;
   createdAt: string;
   completedAt?: string;
 }

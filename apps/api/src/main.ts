@@ -4,9 +4,9 @@ import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseXlsxBase64 } from './domain/spreadsheet.js';
-import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveFrequencyException, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, campaignProgress, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createGuardianLink, createMediaAsset, createProfileSchema, createRiskSignal, createScale, createSelfScreening, currentUser, getStudentArchive, listAvailableScales, regionalAnalytics, submitProfileResponse, drainOutbox, downloadExport, getAnalytics, listCases, listCampaigns, listMyTasks, listPublicContent, listReports, listScaleCatalog, listStudents, listRightsRequests, parseCsv, previewImport, publishCampaign, readPublicMedia, requestAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, updateCampaignState, revokeReport, revokeScale, verifyGuardianLink, withdrawConsent, completeRightsRequest, createRightsRequest } from './domain/service.js';
+import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveFrequencyException, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, campaignProgress, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createGuardianLink, createMediaAsset, createProfileSchema, createRiskSignal, createScale, createSelfScreening, currentUser, downloadRightsResult, getStudentArchive, listAvailableScales, regionalAnalytics, submitProfileResponse, drainOutbox, downloadExport, getAnalytics, listCases, listCampaigns, listMyTasks, listPublicContent, listReports, listScaleCatalog, listStudents, listRightsRequests, parseCsv, previewImport, publishCampaign, readPublicMedia, requestAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, updateCampaignState, revokeReport, revokeScale, verifyGuardianLink, withdrawConsent, completeRightsRequest, createRightsRequest } from './domain/service.js';
 import { authenticate, login as loginUser, logout, requirePermission } from './domain/auth.js';
-import { DomainError, unauthorized } from './domain/errors.js';
+import { DomainError } from './domain/errors.js';
 import { JsonStore } from './domain/store.js';
 import { seedDemoState } from './domain/seed.js';
 import type { AuthenticatedUser, DatabaseState } from './domain/types.js';
@@ -112,7 +112,7 @@ function servePage(res: ServerResponse, path: string): void {
   const file = path === '/admin' ? 'apps/admin-web/index.html' : path === '/student' ? 'apps/student-web/index.html' : 'README.md';
   const fullPath = resolve(process.cwd(), file);
   if (path === '/') { json(res, 200, { service: 'campus-mind', links: { admin: '/admin', student: '/student', health: '/health' }, notice: '开发演示，不连接真实学生资料。' }); return; }
-  res.statusCode = 200; res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(readFileSync(fullPath));
+  res.statusCode = 200; res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.setHeader('Cache-Control', 'no-store'); res.end(readFileSync(fullPath));
 }
 
 async function getAuth(req: IncomingMessage, store: JsonStore): Promise<AuthenticatedUser> {
@@ -141,6 +141,7 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   if (method === 'GET' && path === '/v1/admin/scales') { json(res, 200, { data: await listScaleCatalog(store, auth) }); return; }
   if (method === 'GET' && path === '/v1/me/tasks') { json(res, 200, { data: await listMyTasks(store, auth) }); return; }
   if (method === 'GET' && segments[1] === 'students' && segments[3] === 'archive') { json(res, 200, { data: await getStudentArchive(store, auth, segments[2]!, url.searchParams.get('purpose') ?? '') }); return; }
+  if (method === 'GET' && segments[1] === 'rights-requests' && segments[3] === 'result') { json(res, 200, { data: await downloadRightsResult(store, auth, segments[2]!) }); return; }
   if (method === 'POST' && path === '/v1/me/consents') {
     const result = await createConsent(store, auth, { studentId: stringField(input, 'studentId'), actorType: (input.actorType as 'student' | 'guardian' | 'school_legal_basis') ?? 'student', noticeVersion: stringField(input, 'noticeVersion'), purpose: (input.purpose as 'assessment' | 'support' | 'research') ?? 'assessment' });
     json(res, 201, { data: result }); return;
@@ -200,7 +201,7 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   if (method === 'POST' && segments[1] === 'reports' && segments[3] === 'revoke') { await revokeReport(store, auth, segments[2]!, stringField(input, 'reason')); json(res, 204, {}); return; }
   if (method === 'POST' && path === '/v1/risk-signals') { const riskCase = await createRiskSignal(store, auth, { studentId: stringField(input, 'studentId'), level: (input.level as 'attention' | 'urgent') ?? 'attention', reason: stringField(input, 'reason'), source: input.source as never }); json(res, 201, { data: riskCase }); return; }
   if (method === 'GET' && path === '/v1/cases') { json(res, 200, { data: await listCases(store, auth) }); return; }
-  if (method === 'POST' && segments[1] === 'cases' && segments[3] === 'reviews') { const result = await reviewCase(store, auth, segments[2]!, { decision: input.decision === 'dismiss' ? 'dismiss' : 'confirm', note: stringField(input, 'note') }); json(res, 200, { data: result }); return; }
+  if (method === 'POST' && segments[1] === 'cases' && segments[3] === 'reviews') { const result = await reviewCase(store, auth, segments[2]!, { decision: input.decision as 'dismiss' | 'confirm', note: stringField(input, 'note') }); json(res, 200, { data: result }); return; }
   if (method === 'POST' && segments[1] === 'cases' && segments[3] === 'assign') { const result = await assignCase(store, auth, segments[2]!, stringField(input, 'assigneeId')); json(res, 200, { data: result }); return; }
   if (method === 'POST' && segments[1] === 'cases' && segments[3] === 'acknowledgements') { const result = await acknowledgeCase(store, auth, segments[2]!); json(res, 201, { data: result }); return; }
   if (method === 'POST' && segments[1] === 'cases' && segments[3] === 'follow-ups') { const result = await addFollowUp(store, auth, segments[2]!, { kind: (input.kind as 'support' | 'referral' | 'follow_up') ?? 'support', note: stringField(input, 'note'), dueAt: typeof input.dueAt === 'string' ? input.dueAt : undefined }); json(res, 201, { data: result }); return; }
@@ -209,7 +210,7 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   if (method === 'POST' && path === '/v1/rights-requests') { const result = await createRightsRequest(store, auth, { studentId: stringField(input, 'studentId'), kind: (input.kind as 'access' | 'correct' | 'delete' | 'withdraw') ?? 'access', reason: typeof input.reason === 'string' ? input.reason : undefined }); json(res, 201, { data: result }); return; }
   if (method === 'GET' && path === '/v1/admin/rights-requests') { json(res, 200, { data: await listRightsRequests(store, auth) }); return; }
   if (method === 'POST' && segments[1] === 'admin' && segments[2] === 'rights-requests' && segments[4] === 'complete') { const result = await completeRightsRequest(store, auth, segments[3]!, input.decision === 'reject' ? 'reject' : 'complete'); json(res, 200, { data: result }); return; }
-  if (method === 'POST' && path === '/v1/exports') { const result = await requestExport(store, auth, { kind: input.kind === 'report' ? 'report' : 'aggregate', studentId: typeof input.studentId === 'string' ? input.studentId : undefined }); json(res, 201, { data: result }); return; }
+  if (method === 'POST' && path === '/v1/exports') { const result = await requestExport(store, auth, { kind: input.kind as 'aggregate' | 'report', studentId: typeof input.studentId === 'string' ? input.studentId : undefined }); json(res, 201, { data: result }); return; }
   if (method === 'POST' && segments[1] === 'exports' && segments[3] === 'approve') { const result = await approveExport(store, auth, segments[2]!); json(res, 200, { data: result }); return; }
   if (method === 'GET' && segments[1] === 'exports' && (segments.length === 3 || (segments.length === 4 && segments[3] === 'download'))) { const result = await downloadExport(store, auth, segments[2]!); json(res, 200, { data: result }); return; }
   if (method === 'GET' && path === '/v1/analytics/summary') { json(res, 200, { data: await getAnalytics(store, auth, url.searchParams.get('groupBy') ?? 'school') }); return; }

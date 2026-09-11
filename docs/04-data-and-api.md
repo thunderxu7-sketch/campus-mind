@@ -71,7 +71,7 @@ erDiagram
 | `POST /v1/guardian-links/verify` | 监护关系核验 | 经确认渠道、限流，不以学号为验证凭据 |
 | `POST /v1/guardian-links` | 建立待核验监护关系 | 校务账号只能关联本租户的监护账号与学生；未核验前不能记录监护同意 |
 | `POST /v1/me/consents`、`POST /v1/me/consents/{id}/withdraw` | 同意与撤回 | 目的/版本/主体/年龄验证，撤回触发权限与任务更新 |
-| `POST /v1/rights-requests` | 查阅/更正/删除申请 | 便捷提交、身份核验、时限跟踪、拒绝依据 |
+| `POST /v1/rights-requests`、`GET /v1/rights-requests/{id}/result` | 查阅/更正/删除申请与结果 | 便捷提交、身份核验、时限跟踪、拒绝依据；查阅结果只含基本资料与已发布报告，不含原始答卷 |
 | `POST /v1/scales/{id}/versions` | 创建量表草稿版本 | 仅专业授权人员，正文不进入普通日志 |
 | `POST /v1/scale-versions/{id}/approve` | 专业审定 | 作者/审批人分离；版权、适龄和金标准记录必填 |
 | `POST /v1/campaigns`、`POST /v1/campaigns/{id}/publish` | 创建/发布任务 | 名单快照、频次、值班、所需审批、不可变版本 |

@@ -30,6 +30,8 @@ paths:
     post: {summary: Create a pending guardian relationship for verification, responses: {'201': {description: Pending relationship}}}
   /v1/guardian-links/{linkId}/verify:
     post: {summary: Verify a guardian relationship, parameters: [{$ref: '#/components/parameters/linkId'}], responses: {'200': {description: Verified relationship}}}
+  /v1/rights-requests/{requestId}/result:
+    get: {summary: Download an approved access or correction result after authorization, parameters: [{$ref: '#/components/parameters/requestId'}], responses: {'200': {description: Rights result}, '403': {description: Not the requester or privacy role}}}
   /v1/me:
     get: {summary: Current named user, responses: {'200': {description: User}}}
   /v1/me/tasks:
@@ -101,6 +103,7 @@ components:
     linkId: {name: linkId, in: path, required: true, schema: {type: string}}
     studentId: {name: studentId, in: path, required: true, schema: {type: string}}
     jobId: {name: jobId, in: path, required: true, schema: {type: string}}
+    requestId: {name: requestId, in: path, required: true, schema: {type: string}}
   schemas:
     Login:
       type: object

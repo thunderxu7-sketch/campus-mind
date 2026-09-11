@@ -45,6 +45,7 @@ test('health and browser surfaces expose safety headers', async () => {
   assert.match(response.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   const page = await fetch(base + '/student');
   assert.equal(page.status, 200);
+  assert.equal(page.headers.get('cache-control'), 'no-store');
   assert.match(await page.text(), /不是诊断/);
 });
 
@@ -167,6 +168,8 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   assert.equal(exportRequest.response.status, 201);
   const exportApprove = await request(`/v1/exports/${exportRequest.body.data.id}/approve`, { method: 'POST', headers: auth(professional), body: '{}' });
   assert.equal(exportApprove.response.status, 200);
+  assert.equal(Object.hasOwn(exportApprove.body.data, 'payloadCiphertext'), false);
+  assert.equal(exportApprove.body.data.ready, true);
   const exportDownload = await request(`/v1/exports/${exportRequest.body.data.id}`, { headers: auth(admin) });
   assert.equal(exportDownload.response.status, 200);
   assert.equal(exportDownload.body.data.suppressionThreshold, 10);
@@ -185,6 +188,9 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   assert.ok(publicContent.body.data.some((item) => item.id === content.body.data.id));
   const media = await request('/v1/media-assets', { method: 'POST', headers: auth(professional), body: JSON.stringify({ filename: 'synthetic.png', mediaType: 'image/png', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }) });
   assert.equal(media.response.status, 201, JSON.stringify(media.body));
+  const duplicateMedia = await request('/v1/media-assets', { method: 'POST', headers: auth(professional), body: JSON.stringify({ filename: 'synthetic-copy.png', mediaType: 'image/png', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }) });
+  assert.equal(duplicateMedia.response.status, 409);
+  assert.equal(duplicateMedia.body.error.code, 'MEDIA_DUPLICATE');
   const mediaContent = await request('/v1/content', { method: 'POST', headers: auth(professional), body: JSON.stringify({ title: '合成图示', kind: 'media', body: '合成教育图示说明。', ageMin: 12, ageMax: 18, copyrightSource: 'synthetic-only', mediaAssetId: media.body.data.id, altText: '合成的安全支持图示' }) });
   assert.equal(mediaContent.response.status, 201, JSON.stringify(mediaContent.body));
   const mediaPublished = await request(`/v1/content/${mediaContent.body.data.id}/publish`, { method: 'POST', headers: auth(professional), body: '{}' });
@@ -220,6 +226,11 @@ test('rights requests are auditable and privacy staff can complete non-destructi
   const completed = await request(`/v1/admin/rights-requests/${created.body.data.id}/complete`, { method: 'POST', headers: auth(privacy), body: JSON.stringify({ decision: 'complete' }) });
   assert.equal(completed.response.status, 200);
   assert.equal(completed.body.data.status, 'completed');
+  assert.equal(Object.hasOwn(completed.body.data, 'resultCiphertext'), false);
+  assert.equal(completed.body.data.resultReady, true);
+  const result = await request(`/v1/rights-requests/${created.body.data.id}/result`, { headers: auth(student) });
+  assert.equal(result.response.status, 200);
+  assert.match(result.body.data.note, /不包含原始答卷/);
 });
 
 test('guardian consent requires a verified guardian link and rejects role spoofing', async () => {
@@ -229,6 +240,8 @@ test('guardian consent requires a verified guardian link and rejects role spoofi
   assert.equal(verified.response.status, 200);
   const consent = await request('/v1/me/consents', { method: 'POST', headers: auth(guardian), body: JSON.stringify({ studentId: 'student-demo', actorType: 'guardian', noticeVersion: 'notice-support-v1', purpose: 'support' }) });
   assert.equal(consent.response.status, 201);
+  const withdrawn = await request(`/v1/me/consents/${consent.body.data.id}/withdraw`, { method: 'POST', headers: auth(guardian), body: '{}' });
+  assert.equal(withdrawn.response.status, 204);
   const student = await login('student@campus-mind.demo');
   const spoof = await request('/v1/me/consents', { method: 'POST', headers: auth(student), body: JSON.stringify({ studentId: 'student-demo', actorType: 'guardian', noticeVersion: 'notice-spoof-v1', purpose: 'research' }) });
   assert.equal(spoof.response.status, 403);
@@ -258,4 +271,30 @@ test('consent withdrawal blocks future assessment and leaves audit evidence', as
   assert.equal(regional.body.data.rows[0].suppressed, true);
   assert.ok(store.snapshot().auditEvents.some((event) => event.action === 'analytics.viewed'));
   assert.ok(store.snapshot().auditEvents.some((event) => event.action === 'analytics.regional_viewed'));
+});
+
+test('workflow inputs reject invalid enums, dates and governed field shapes', async () => {
+  const admin = await login('admin@campus-mind.demo');
+  const professional = await login('professional@campus-mind.demo');
+  const invalidCampaign = await request('/v1/campaigns', { method: 'POST', headers: auth(admin), body: JSON.stringify({ schoolId: 'school-demo', name: 'invalid', purpose: 'diagnosis', academicYear: '2026-2027', opensAt: 'not-a-date', closesAt: 'also-not-a-date', scaleVersionId: 'scale-synthetic-demo-v1', participantStudentIds: [] }) });
+  assert.equal(invalidCampaign.response.status, 400);
+  assert.equal(invalidCampaign.body.error.code, 'CAMPAIGN_INVALID');
+  const invalidContent = await request('/v1/content', { method: 'POST', headers: auth(professional), body: JSON.stringify({ title: 'invalid', kind: 'diagnosis', body: '内容', ageMin: 12, ageMax: 18, copyrightSource: 'synthetic-only' }) });
+  assert.equal(invalidContent.response.status, 400);
+  assert.equal(invalidContent.body.error.code, 'CONTENT_INVALID');
+  const invalidSchema = await request('/v1/profile-schemas', { method: 'POST', headers: auth(professional), body: JSON.stringify({ version: 'invalid-v1', fields: [{ id: 'field', label: '字段', purpose: '演示', required: 'yes', sensitive: true }] }) });
+  assert.equal(invalidSchema.response.status, 400);
+  assert.equal(invalidSchema.body.error.code, 'PROFILE_SCHEMA_INVALID');
+  const duplicateSchema = await request('/v1/profile-schemas', { method: 'POST', headers: auth(professional), body: JSON.stringify({ version: 'demo-v1', fields: [{ id: 'sleep', label: '睡眠情况', purpose: '合成演示字段', required: false, sensitive: true }] }) });
+  assert.equal(duplicateSchema.response.status, 409);
+  assert.equal(duplicateSchema.body.error.code, 'PROFILE_SCHEMA_VERSION_EXISTS');
+  const invalidSignal = await request('/v1/risk-signals', { method: 'POST', headers: auth(professional), body: JSON.stringify({ studentId: 'student-demo', level: 'urgent', reason: '' }) });
+  assert.equal(invalidSignal.response.status, 400);
+  assert.equal(invalidSignal.body.error.code, 'FIELD_REQUIRED');
+  const spoofedSource = await request('/v1/risk-signals', { method: 'POST', headers: auth(professional), body: JSON.stringify({ studentId: 'student-demo', level: 'attention', source: 'score_rule', reason: '合成来源伪造' }) });
+  assert.equal(spoofedSource.response.status, 400);
+  assert.equal(spoofedSource.body.error.code, 'RISK_SIGNAL_SOURCE_INVALID');
+  const invalidAppointment = await request('/v1/appointments/does-not-matter/state', { method: 'POST', headers: auth(professional), body: JSON.stringify({ state: 'bogus' }) });
+  assert.equal(invalidAppointment.response.status, 400);
+  assert.equal(invalidAppointment.body.error.code, 'APPOINTMENT_STATE_INVALID');
 });

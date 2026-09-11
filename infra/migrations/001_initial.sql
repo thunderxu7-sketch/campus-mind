@@ -245,9 +245,11 @@ create table if not exists follow_ups (
 );
 create table if not exists rights_requests (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null,
-  kind text not null, requester_id uuid not null, status text not null, reason text, created_at timestamptz not null default now(), completed_at timestamptz,
+  kind text not null, requester_id uuid not null, status text not null, reason text, result_ciphertext text, created_at timestamptz not null default now(), completed_at timestamptz,
   foreign key (tenant_id, student_id) references students(tenant_id, id), unique (tenant_id, id)
 );
+-- Keep the reference migration safe to rerun after an earlier draft of the table.
+alter table rights_requests add column if not exists result_ciphertext text;
 create table if not exists deletion_tombstones (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null,
   request_id uuid not null, deleted_at timestamptz not null default now(), retained_categories jsonb not null,
