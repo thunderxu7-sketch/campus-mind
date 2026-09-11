@@ -26,6 +26,12 @@ paths:
       responses: {'200': {description: Session}, '401': {description: Invalid credentials, spent credential or MFA required}, '429': {description: Login rate limit exceeded}}
   /v1/admin/student-credentials:
     post: {summary: Issue a one-time short-lived student terminal credential, responses: {'201': {description: Credential shown once}, '403': {description: Organization permission required}}}
+  /v1/admin/students:
+    get: {summary: List scoped student directory metadata without names or psychological fields, responses: {'200': {description: Student directory}, '403': {description: Organization permission required}}}
+  /v1/admin/campaigns:
+    get: {summary: List scoped campaign metadata and participant counts, responses: {'200': {description: Campaign list}}}
+  /v1/admin/scales:
+    get: {summary: List tenant scale versions and approval metadata, responses: {'200': {description: Scale catalog}}}
   /v1/admin/users/{userId}/sessions/revoke:
     post:
       summary: Revoke all active sessions and unspent terminal credentials for a scoped user
@@ -37,6 +43,10 @@ paths:
     post: {summary: Create a pending guardian relationship for verification, responses: {'201': {description: Pending relationship}}}
   /v1/guardian-links/{linkId}/verify:
     post: {summary: Verify a guardian relationship, parameters: [{$ref: '#/components/parameters/linkId'}], responses: {'200': {description: Verified relationship}}}
+  /v1/me/consents:
+    post: {summary: Record a purpose-bound student, guardian or school legal-basis participation record, responses: {'201': {description: Consent record}, '400': {description: Age, notice or purpose validation failure}}}
+  /v1/me/consents/{consentId}/withdraw:
+    post: {summary: Withdraw a consent record and stop related assessment processing, parameters: [{$ref: '#/components/parameters/consentId'}], responses: {'204': {description: Withdrawn}, '403': {description: Subject or authorized guardian required}}}
   /v1/rights-requests/{requestId}/result:
     get: {summary: Download an approved access or correction result after authorization, parameters: [{$ref: '#/components/parameters/requestId'}], responses: {'200': {description: Rights result}, '403': {description: Not the requester or privacy role}}}
   /v1/me/rights-requests:
@@ -61,6 +71,10 @@ paths:
     get: {summary: Current named user, responses: {'200': {description: User}}}
   /v1/me/tasks:
     get: {summary: Student's own assignments with server-authoritative scale, age and availability checks, responses: {'200': {description: Tasks include available and availabilityReason; revoked or expired scales are not startable}}}
+  /v1/me/scales:
+    get: {summary: List only age-eligible, usable self-screening scale versions, responses: {'200': {description: Available scale catalog}}}
+  /v1/self-screenings:
+    post: {summary: Create a frequency-checked student self-screening task, responses: {'201': {description: Self-screening campaign and assignment}, '400': {description: Consent, age or annual frequency review required}}}
   /v1/me/tasks/{assignmentId}/attempts:
     post: {summary: Start an age/consent/frequency-checked attempt, parameters: [{$ref: '#/components/parameters/assignmentId'}], responses: {'201': {description: Attempt}, '400': {description: Consent, age, frequency or time-window failure}}}
   /v1/attempts/{attemptId}/answers:
@@ -69,6 +83,8 @@ paths:
     get: {summary: Read the authenticated student's server-confirmed draft, parameters: [{$ref: '#/components/parameters/attemptId'}], responses: {'200': {description: Draft}, '401': {description: Unauthorized}, '404': {description: Not found}, '409': {description: Attempt is no longer resumable}}}
   /v1/attempts/{attemptId}/submit:
     post: {summary: Idempotently freeze a submission and enqueue scoring, parameters: [{$ref: '#/components/parameters/attemptId'}], responses: {'202': {description: Scoring pending}, '409': {description: Idempotency conflict}}}
+  /v1/me/profile-responses:
+    post: {summary: Submit an approved custom background survey response, responses: {'201': {description: Stored encrypted response}, '400': {description: Schema or required-field validation failure}}}
   /v1/reports:
     get: {summary: Professional reports or released own reports, responses: {'200': {description: Reports}}}
   /v1/students/{studentId}/archive:
@@ -77,8 +93,22 @@ paths:
     post: {summary: Professional report approval, parameters: [{$ref: '#/components/parameters/reportId'}], responses: {'204': {description: Approved}}}
   /v1/reports/{reportId}/release:
     post: {summary: Release an approved report to its allowed reader, parameters: [{$ref: '#/components/parameters/reportId'}], responses: {'204': {description: Released}}}
+  /v1/reports/{reportId}/revoke:
+    post: {summary: Revoke an approved or released report and invalidate dependent exports, parameters: [{$ref: '#/components/parameters/reportId'}], responses: {'204': {description: Revoked}, '400': {description: Revocation reason required}}}
+  /v1/scales:
+    post: {summary: Create an immutable synthetic or licensed scale-version draft, responses: {'201': {description: Draft scale}, '400': {description: Invalid provenance, age range or item schema}}}
+  /v1/scales/{scaleId}/approve:
+    post: {summary: Professionally approve a scale version after licensing and suitability checks, parameters: [{$ref: '#/components/parameters/scaleId'}], responses: {'200': {description: Approved scale}, '403': {description: Professional approval required}}}
   /v1/scales/{scaleId}/revoke:
     post: {summary: Revoke a scale version for new use without rewriting history, parameters: [{$ref: '#/components/parameters/scaleId'}], responses: {'204': {description: Revoked}}}
+  /v1/campaigns:
+    post: {summary: Create a draft screening or survey campaign with a participant snapshot, responses: {'201': {description: Draft campaign}, '400': {description: Invalid time window or purpose}}}
+  /v1/campaigns/{campaignId}/publish:
+    post: {summary: Publish a campaign after consent, age, licensing and frequency checks, parameters: [{$ref: '#/components/parameters/campaignId'}], responses: {'200': {description: Scheduled or open campaign}, '409': {description: Frequency conflict}}}
+  /v1/campaigns/{campaignId}/state:
+    post: {summary: Advance or pause a campaign through the governed state machine, parameters: [{$ref: '#/components/parameters/campaignId'}], responses: {'200': {description: Updated campaign}, '400': {description: Invalid state transition}}}
+  /v1/campaigns/{campaignId}/progress:
+    get: {summary: Return operational completion counts without scores or risk levels, parameters: [{$ref: '#/components/parameters/campaignId'}], responses: {'200': {description: Campaign progress}}}
   /v1/campaigns/{campaignId}/frequency-exceptions:
     post: {summary: Record an independently approved same-year re-evaluation exception, parameters: [{$ref: '#/components/parameters/campaignId'}], responses: {'201': {description: Exception recorded}, '400': {description: Missing professional approval evidence}}}
   /v1/risk-signals:
@@ -89,6 +119,12 @@ paths:
     post: {summary: Confirm or dismiss a signal with a professional note, parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'200': {description: Reviewed}}}
   /v1/cases/{caseId}/acknowledgements:
     post: {summary: Record human receipt (not just message delivery), parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'201': {description: Acknowledged}}}
+  /v1/cases/{caseId}/assign:
+    post: {summary: Assign a confirmed case to a scoped professional, parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'200': {description: Assigned}, '403': {description: Case assignment permission required}}}
+  /v1/cases/{caseId}/follow-ups:
+    post: {summary: Record an authorized support, referral or follow-up note, parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'201': {description: Follow-up recorded}, '403': {description: Case scope or care permission required}}}
+  /v1/cases/{caseId}/closure-requests:
+    post: {summary: Request case closure with a bounded professional rationale, parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'200': {description: Closure pending independent review}}}
   /v1/cases/{caseId}/closure-approvals:
     post: {summary: Independently approve a closure request, parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'200': {description: Closed}}}
   /v1/imports/preview:
@@ -97,10 +133,16 @@ paths:
     post: {summary: Preview bounded CSV upload, responses: {'201': {description: Preview}}}
   /v1/imports/preview-xlsx:
     post: {summary: Preview a bounded first worksheet without executing formulas/macros, responses: {'201': {description: Preview}}}
+  /v1/imports/{batchId}/commit:
+    post: {summary: Commit an unchanged, validated import preview, parameters: [{$ref: '#/components/parameters/batchId'}], responses: {'200': {description: Committed batch}, '409': {description: Preview hash or batch state conflict}}}
   /v1/admin/overview:
     get: {summary: Suppressed operational overview, responses: {'200': {description: Overview}}}
   /v1/analytics/summary:
     get: {summary: Whitelisted aggregate analytics with suppression, responses: {'200': {description: Aggregate rows}}}
+  /v1/exports:
+    post: {summary: Request a purpose-bound aggregate or approved-report export, responses: {'201': {description: Requested export job}, '400': {description: Scope or purpose required}}}
+  /v1/exports/{jobId}/approve:
+    post: {summary: Independently approve and materialize a short-lived export, parameters: [{$ref: '#/components/parameters/jobId'}], responses: {'200': {description: Ready export metadata}, '403': {description: Independent approval required}, '410': {description: Export request expired}}}
   /v1/exports/{jobId}/download:
     get: {summary: Re-authorize and download an approved export, parameters: [{$ref: '#/components/parameters/jobId'}], responses: {'200': {description: Export payload}, '403': {description: Scope or approval failure}, '410': {description: Expired export or revoked source report; encrypted payload is cleared}}}
   /v1/availability-slots:
@@ -132,6 +174,11 @@ paths:
       summary: Retire a published education item and hide its public media
       parameters: [{$ref: '#/components/parameters/contentId'}]
       responses: {'200': {description: Retired content}, '403': {description: Professional approval permission required}}
+  /v1/content/{contentId}/publish:
+    post:
+      summary: Professionally publish an audited education item
+      parameters: [{$ref: '#/components/parameters/contentId'}]
+      responses: {'200': {description: Published content}, '403': {description: Professional approval permission required}}
   /v1/media-assets:
     post: {summary: Upload a bounded, type-checked education media asset to private storage, responses: {'201': {description: Clean asset metadata}, '413': {description: Asset too large}, '503': {description: Private object storage unavailable}}}
   /v1/content/public/{assetId}/media:
@@ -140,12 +187,18 @@ paths:
       summary: Stream media only when linked to published content
       parameters: [{$ref: '#/components/parameters/assetId'}]
       responses: {'200': {description: Media bytes}, '404': {description: Unpublished or unknown asset}, '503': {description: Private object storage unavailable or integrity check failed}}
+  /v1/admin/regional-analytics:
+    get: {summary: Return approved, suppressed regional aggregates for platform operations, responses: {'200': {description: Regional aggregates}, '403': {description: Regional analytics permission required}}}
+  /v1/admin/worker/drain:
+    post: {summary: Drain a bounded outbox batch for operations, responses: {'200': {description: Worker result}, '403': {description: Operations permission required}}}
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: opaque-session-token}
   parameters:
     assignmentId: {name: assignmentId, in: path, required: true, schema: {type: string}}
     attemptId: {name: attemptId, in: path, required: true, schema: {type: string}}
+    consentId: {name: consentId, in: path, required: true, schema: {type: string}}
+    batchId: {name: batchId, in: path, required: true, schema: {type: string}}
     reportId: {name: reportId, in: path, required: true, schema: {type: string}}
     caseId: {name: caseId, in: path, required: true, schema: {type: string}}
     campaignId: {name: campaignId, in: path, required: true, schema: {type: string}}

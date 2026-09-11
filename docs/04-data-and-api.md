@@ -89,7 +89,7 @@ erDiagram
 | `GET /v1/attempts/{id}` | 恢复草稿 | 仅本人读取服务端已确认的答案与 revision；已提交/关闭答题不可恢复 |
 | `PUT /v1/attempts/{id}/answers` | 保存答案 | `expectedRevision`、题目白名单、服务端持久化确认；每次写入重新检查任务窗口/场次 |
 | `POST /v1/attempts/{id}/submit` | 提交 | 幂等键、内容 hash、事务快照与 outbox，不再修改；提交前再次检查窗口/场次 |
-| `GET /v1/reports/{id}`、`POST /v1/reports/{id}/release` | 查看/发布报告 | 字段权限、专业审核及读者范围；下载单独鉴权 |
+| `GET /v1/reports/{id}`、`POST /v1/reports/{id}/approve`、`POST /v1/reports/{id}/release`、`POST /v1/reports/{id}/revoke` | 查看/发布报告 | 必须先专业审核再发布；字段权限、读者范围和撤回级联在服务端检查；下载单独鉴权 |
 | `GET /v1/students/{id}/archive?purpose=...` | 个案级心理档案 | 仅同租户且在校/个案授权范围内的专业人员；用途必须是批准的 `case_review`、`report_review` 或 `support_follow_up` 并写入审计；班主任/运维拒绝 |
 | `POST /v1/risk-signals` | 主动求助/手工线索 | 合法主体、最小内容、加急独立持久化与通知 |
 | `POST /v1/cases/{id}/reviews`、`POST /v1/cases/{id}/acknowledgements` | 复核与接单 | 授权专业角色、状态版本，接单不等于已处置 |
