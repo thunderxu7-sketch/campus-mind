@@ -318,6 +318,16 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   const selfApproved = await request(`/v1/exports/${selfApproval.body.data.id}/approve`, { method: 'POST', headers: auth(professional), body: '{}' });
   assert.equal(selfApproved.response.status, 403);
   assert.equal(selfApproved.body.error.code, 'SEPARATION_OF_DUTIES_REQUIRED');
+  const expiredApprovalRequest = await request('/v1/exports', { method: 'POST', headers: auth(admin), body: JSON.stringify({ kind: 'aggregate', purpose: 'synthetic_expired_approval' }) });
+  assert.equal(expiredApprovalRequest.response.status, 201);
+  await store.transaction((state) => {
+    const job = state.exportJobs.find((candidate) => candidate.id === expiredApprovalRequest.body.data.id);
+    job.expiresAt = '2020-01-01T00:00:00.000Z';
+  });
+  const expiredApproval = await request(`/v1/exports/${expiredApprovalRequest.body.data.id}/approve`, { method: 'POST', headers: auth(professional), body: '{}' });
+  assert.equal(expiredApproval.response.status, 410);
+  assert.equal(expiredApproval.body.error.code, 'EXPORT_EXPIRED');
+  assert.equal(store.snapshot().exportJobs.find((job) => job.id === expiredApprovalRequest.body.data.id).status, 'expired');
   const slot = await request('/v1/availability-slots', { method: 'POST', headers: auth(professional), body: JSON.stringify({ counselorId: 'user-counselor-demo', startsAt: new Date(Date.now() + 3_600_000).toISOString(), endsAt: new Date(Date.now() + 7_200_000).toISOString(), room: '合成咨询室' }) });
   assert.equal(slot.response.status, 201);
   const roomConflict = await request('/v1/availability-slots', { method: 'POST', headers: auth(professional), body: JSON.stringify({ counselorId: 'user-professional-demo', startsAt: new Date(Date.now() + 4_000_000).toISOString(), endsAt: new Date(Date.now() + 6_000_000).toISOString(), room: '合成咨询室' }) });

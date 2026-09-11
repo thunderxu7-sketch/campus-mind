@@ -1011,27 +1011,58 @@ export async function requestExport(store: Store, auth: AuthenticatedUser, input
 
 export async function approveExport(store: Store, auth: AuthenticatedUser, jobId: string): Promise<PublicExportJob> {
   requirePermission(auth.user, 'export:approve');
-  return store.transaction((state) => {
+  const preflight = await store.read((state) => {
     const job = state.exportJobs.find((candidate) => candidate.id === jobId && candidate.tenantId === auth.user.tenantId);
-    if (!job) throw notFound();
-    if (job.status !== 'requested') throw new DomainError('EXPORT_STATE_INVALID', '导出任务当前不可审批');
-    if (job.requestedBy === auth.user.id) throw new DomainError('SEPARATION_OF_DUTIES_REQUIRED', '导出审批需要独立审批人', 403);
-    if (new Date(job.expiresAt) <= new Date()) { job.status = 'expired'; throw new DomainError('EXPORT_EXPIRED', '导出请求已过期', 410); }
-    let payload: unknown;
-    const issuedAt = now();
-    const watermark = { jobId: job.id, purpose: job.purpose ?? 'legacy', requestedBy: job.requestedBy, approvedBy: auth.user.id, issuedAt };
-    if (job.kind === 'aggregate') payload = { ...aggregatePayload(state, auth.user.tenantId, auth.user.schoolId), watermark };
-    else {
-      if (!job.studentId) throw new DomainError('EXPORT_SCOPE_REQUIRED', '报告导出需要明确学生范围');
-      if (!isProfessional(auth.user) || !professionalCanReadStudent(state, auth, job.studentId)) throw forbidden();
-      const report = state.reports.find((candidate) => candidate.studentId === job.studentId && candidate.tenantId === auth.user.tenantId && candidate.state === 'released');
-      if (!report) throw new DomainError('REPORT_NOT_RELEASED', '只有已发布报告可导出');
-      payload = { reportId: report.id, studentId: report.studentId, title: report.title, summary: decrypt(report.summaryCiphertext), exportedAt: issuedAt, watermark, note: '导出内容来自已发布报告，不包含原始答卷。' };
-    }
-    job.approvedBy = auth.user.id; job.approvedAt = now(); job.status = 'ready'; job.payloadCiphertext = encrypt(payload); audit(state, auth.user, 'export.approved', 'export_job', job.id, { kind: job.kind });
-    const { payloadCiphertext: _payloadCiphertext, ...publicJob } = job;
-    return { ...publicJob, ready: true };
+    return { exists: Boolean(job), expired: Boolean(job && job.status === 'requested' && validDate(job.expiresAt) && new Date(job.expiresAt) <= new Date()) };
   });
+  if (!preflight.exists) throw notFound();
+  if (preflight.expired) {
+    await store.transaction((state) => {
+      const job = state.exportJobs.find((candidate) => candidate.id === jobId && candidate.tenantId === auth.user.tenantId);
+      if (job && job.status === 'requested' && validDate(job.expiresAt) && new Date(job.expiresAt) <= new Date()) {
+        job.status = 'expired';
+        audit(state, auth.user, 'export.expired', 'export_job', job.id, { kind: job.kind });
+      }
+    });
+    throw new DomainError('EXPORT_EXPIRED', '导出请求已过期', 410);
+  }
+  try {
+    return await store.transaction((state) => {
+      const job = state.exportJobs.find((candidate) => candidate.id === jobId && candidate.tenantId === auth.user.tenantId);
+      if (!job) throw notFound();
+      if (job.status !== 'requested') throw new DomainError('EXPORT_STATE_INVALID', '导出任务当前不可审批');
+      if (job.requestedBy === auth.user.id) throw new DomainError('SEPARATION_OF_DUTIES_REQUIRED', '导出审批需要独立审批人', 403);
+      if (new Date(job.expiresAt) <= new Date()) throw new DomainError('EXPORT_EXPIRED', '导出请求已过期', 410);
+      let payload: unknown;
+      const issuedAt = now();
+      const watermark = { jobId: job.id, purpose: job.purpose ?? 'legacy', requestedBy: job.requestedBy, approvedBy: auth.user.id, issuedAt };
+      if (job.kind === 'aggregate') payload = { ...aggregatePayload(state, auth.user.tenantId, auth.user.schoolId), watermark };
+      else {
+        if (!job.studentId) throw new DomainError('EXPORT_SCOPE_REQUIRED', '报告导出需要明确学生范围');
+        if (!isProfessional(auth.user) || !professionalCanReadStudent(state, auth, job.studentId)) throw forbidden();
+        const report = state.reports.find((candidate) => candidate.studentId === job.studentId && candidate.tenantId === auth.user.tenantId && candidate.state === 'released');
+        if (!report) throw new DomainError('REPORT_NOT_RELEASED', '只有已发布报告可导出');
+        payload = { reportId: report.id, studentId: report.studentId, title: report.title, summary: decrypt(report.summaryCiphertext), exportedAt: issuedAt, watermark, note: '导出内容来自已发布报告，不包含原始答卷。' };
+      }
+      job.approvedBy = auth.user.id; job.approvedAt = now(); job.status = 'ready'; job.payloadCiphertext = encrypt(payload); audit(state, auth.user, 'export.approved', 'export_job', job.id, { kind: job.kind });
+      const { payloadCiphertext: _payloadCiphertext, ...publicJob } = job;
+      return { ...publicJob, ready: true };
+    });
+  } catch (error) {
+    // A request can cross its expiry boundary after the read-only preflight.
+    // Persist the terminal state in a separate transaction because the failed
+    // approval transaction is rolled back by both reference and SQL stores.
+    if (error instanceof DomainError && error.code === 'EXPORT_EXPIRED') {
+      await store.transaction((state) => {
+        const job = state.exportJobs.find((candidate) => candidate.id === jobId && candidate.tenantId === auth.user.tenantId);
+        if (job && job.status === 'requested' && validDate(job.expiresAt) && new Date(job.expiresAt) <= new Date()) {
+          job.status = 'expired';
+          audit(state, auth.user, 'export.expired', 'export_job', job.id, { kind: job.kind });
+        }
+      });
+    }
+    throw error;
+  }
 }
 
 export async function downloadExport(store: Store, auth: AuthenticatedUser, jobId: string): Promise<Record<string, unknown>> {
