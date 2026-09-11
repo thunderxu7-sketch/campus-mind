@@ -124,6 +124,8 @@ export interface ScaleVersion {
   reviewEvidenceRef?: string;
   items: ScaleItem[];
   warningRule?: { threshold: number; level: 'attention' | 'urgent'; reason: string };
+  /** Named author retained for author/approver separation. */
+  createdBy?: string;
   approvedBy?: string;
   approvedAt?: string;
 }

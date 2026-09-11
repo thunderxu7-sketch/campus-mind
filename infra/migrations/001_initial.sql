@@ -84,11 +84,19 @@ create table if not exists assessment_plans (
   scoring_version text not null,
   notice_version text not null,
   config_json jsonb not null,
+  created_by uuid,
   approved_by uuid,
   approved_at timestamptz,
+  foreign key (tenant_id, created_by) references users(tenant_id, id),
   unique (tenant_id, code, version),
   unique (tenant_id, id)
 );
+alter table assessment_plans add column if not exists created_by uuid;
+do $$
+begin
+  alter table assessment_plans add constraint assessment_plans_created_by_fk foreign key (tenant_id, created_by) references users(tenant_id, id);
+exception when duplicate_object then null;
+end $$;
 create table if not exists campaigns (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references tenants(id),
@@ -441,6 +449,9 @@ create or replace function enforce_assessment_plan_immutability() returns trigge
 begin
   if old.status = 'revoked' then
     raise exception 'revoked assessment plans cannot change';
+  end if;
+  if old.status = 'approved' and new.status not in ('approved', 'revoked') then
+    raise exception 'approved assessment plans can only be revoked';
   end if;
   if old.status = 'approved' and (
     new.code is distinct from old.code or new.title is distinct from old.title or

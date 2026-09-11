@@ -67,9 +67,12 @@ function purgeStudentData(state: DatabaseState, tenantId: string, studentId: str
     student.active = false;
     student.displayNameCiphertext = encrypt('已删除');
     student.externalRefHash = hashExternal(`${student.id}:deleted`);
+    student.classId = 'deleted';
+    student.age = undefined;
+    student.guardianVerified = false;
   }
   const deletedUser = state.users.find((user) => user.tenantId === tenantId && user.id === studentId && user.role === 'student');
-  if (deletedUser) { deletedUser.active = false; deletedUser.displayName = '已删除'; deletedUser.email = `deleted+${deletedUser.id}@invalid.local`; }
+  if (deletedUser) { deletedUser.active = false; deletedUser.displayName = '已删除'; deletedUser.email = `deleted+${deletedUser.id}@invalid.local`; deletedUser.schoolId = undefined; }
   state.sessions = state.sessions.filter((session) => !(session.tenantId === tenantId && session.userId === studentId));
   state.guardianLinks = state.guardianLinks.filter((link) => !(link.tenantId === tenantId && link.studentId === studentId));
   state.assignments = state.assignments.filter((assignment) => !(assignment.tenantId === tenantId && assignment.studentId === studentId));
@@ -83,12 +86,17 @@ function purgeStudentData(state: DatabaseState, tenantId: string, studentId: str
   state.reports = state.reports.filter((report) => !(report.tenantId === tenantId && report.studentId === studentId));
   state.riskSignals = state.riskSignals.filter((signal) => !(signal.tenantId === tenantId && signal.studentId === studentId));
   state.riskCases = state.riskCases.filter((riskCase) => !(riskCase.tenantId === tenantId && riskCase.studentId === studentId));
+  // Reviews and acknowledgements are sensitive derivatives of the deleted
+  // case.  Keep only the tombstone/audit evidence, never orphaned notes or
+  // staff activity that could re-identify the student.
+  state.riskReviews = state.riskReviews.filter((review) => !(review.tenantId === tenantId && deletedCaseIds.has(review.caseId)));
+  state.acknowledgements = state.acknowledgements.filter((ack) => !(ack.tenantId === tenantId && deletedCaseIds.has(ack.caseId)));
   state.followUps = state.followUps.filter((followUp) => !(followUp.tenantId === tenantId && deletedCaseIds.has(followUp.caseId)));
   state.profileResponses = state.profileResponses.filter((response) => !(response.tenantId === tenantId && response.studentId === studentId));
   state.appointments = state.appointments.filter((appointment) => !(appointment.tenantId === tenantId && appointment.studentId === studentId));
   for (const rights of state.rightsRequests.filter((rights) => rights.tenantId === tenantId && rights.studentId === studentId)) rights.resultCiphertext = undefined;
   for (const job of state.exportJobs.filter((job) => job.tenantId === tenantId && job.studentId === studentId)) { job.status = 'revoked'; job.payloadCiphertext = undefined; }
-  state.outboxEvents = state.outboxEvents.filter((event) => event.tenantId !== tenantId || (!(event.type === 'assessment.submitted' && deletedSubmissionIds.has(String(event.payload.submissionId))) && !(event.type === 'risk.triage' && deletedSubmissionIds.has(String(event.payload.submissionId))) && !(event.type === 'risk.signal_created' && deletedCaseIds.has(event.aggregateId))));
+  state.outboxEvents = state.outboxEvents.filter((event) => event.tenantId !== tenantId || (!(event.type === 'assessment.submitted' && deletedSubmissionIds.has(String(event.payload.submissionId))) && !(event.type === 'risk.triage' && deletedSubmissionIds.has(String(event.payload.submissionId))) && !(['risk.signal_created', 'risk.escalation'].includes(event.type) && deletedCaseIds.has(event.aggregateId))));
   state.deliveryAttempts = state.deliveryAttempts.filter((delivery) => state.outboxEvents.some((event) => event.tenantId === delivery.tenantId && event.id === delivery.outboxEventId));
   return { deletedAttemptIds, deletedSubmissionIds, deletedCaseIds };
 }
@@ -258,7 +266,7 @@ export async function commitImport(store: Store, auth: AuthenticatedUser, batchI
   });
 }
 
-export async function createScale(store: Store, auth: AuthenticatedUser, input: Omit<ScaleVersion, 'id' | 'tenantId' | 'status' | 'approvedBy' | 'approvedAt'>): Promise<ScaleVersion> {
+export async function createScale(store: Store, auth: AuthenticatedUser, input: Omit<ScaleVersion, 'id' | 'tenantId' | 'status' | 'createdBy' | 'approvedBy' | 'approvedAt'>): Promise<ScaleVersion> {
   requirePermission(auth.user, 'scale:write');
   if (!['synthetic_only', 'licensed'].includes(input.provenance)) throw new DomainError('SCALE_INVALID', '量表来源类型无效');
   if (input.provenance === 'licensed' && (typeof input.code !== 'string' || !input.code.trim())) throw new DomainError('LICENSE_UNAVAILABLE', '授权量表需要来源登记');
@@ -273,7 +281,7 @@ export async function createScale(store: Store, auth: AuthenticatedUser, input: 
     if (state.scales.some((candidate) => candidate.tenantId === auth.user.tenantId && candidate.code === input.code && candidate.version === input.version)) {
       throw new DomainError('SCALE_VERSION_EXISTS', '同一量表版本已经存在', 409);
     }
-    const scale: ScaleVersion = { ...input, id: id(), tenantId: auth.user.tenantId, status: 'draft' };
+    const scale: ScaleVersion = { ...input, id: id(), tenantId: auth.user.tenantId, status: 'draft', createdBy: auth.user.id };
     state.scales.push(scale);
     audit(state, auth.user, 'scale.created', 'scale_version', scale.id, { provenance: scale.provenance, version: scale.version });
     return scale;
@@ -285,6 +293,9 @@ export async function approveScale(store: Store, auth: AuthenticatedUser, scaleI
   return store.transaction((state) => {
     const scale = state.scales.find((candidate) => candidate.id === scaleId && sameTenant(candidate, auth.user.tenantId));
     if (!scale) throw notFound();
+    if (scale.status === 'revoked') throw new DomainError('SCALE_REVOKED', '已撤销的量表版本不能重新启用，请创建新版本');
+    if (scale.status === 'approved') throw new DomainError('SCALE_ALREADY_APPROVED', '量表版本已经通过专业审定');
+    if (scale.createdBy && scale.createdBy === auth.user.id) throw new DomainError('SEPARATION_OF_DUTIES_REQUIRED', '量表作者不能审批自己的版本');
     if (scale.provenance === 'licensed' && !scale.reviewEvidenceRef) throw new DomainError('LICENSE_EVIDENCE_REQUIRED', '授权量表需要专业审定证据引用');
     assertUsableScale({ ...scale, status: 'approved' });
     scale.status = 'approved'; scale.approvedBy = auth.user.id; scale.approvedAt = now();
@@ -466,7 +477,7 @@ export async function drainOutbox(store: Store, limit = 50): Promise<{ processed
   let processed = 0; let failed = 0;
   for (let i = 0; i < limit; i += 1) {
     const event = await store.read((state) => state.outboxEvents.filter((candidate) => candidate.status === 'pending' && new Date(candidate.availableAt) <= new Date()).sort((left, right) => {
-      const priority = (value: string) => value === 'risk.triage' || value === 'risk.signal_created' ? 0 : 1;
+      const priority = (value: string) => ['risk.triage', 'risk.signal_created', 'risk.escalation'].includes(value) ? 0 : 1;
       return priority(left.type) - priority(right.type) || left.createdAt.localeCompare(right.createdAt);
     })[0]);
     if (!event) break;
@@ -550,6 +561,7 @@ async function processOutboxEvent(store: Store, eventId: string): Promise<void> 
       }
     }
     if (event.type === 'risk.signal_created' || event.type === 'risk.escalation') {
+      if (event.type === 'risk.escalation' && !state.riskCases.some((riskCase) => riskCase.tenantId === event.tenantId && riskCase.id === event.aggregateId)) throw new Error('ESCALATION_REFERENCE_MISSING');
       const existingDelivery = state.deliveryAttempts.find((attempt) => attempt.tenantId === event.tenantId && attempt.outboxEventId === event.id && attempt.channel === 'in_app');
       if (!existingDelivery) {
         state.deliveryAttempts.push({ id: id(), tenantId: event.tenantId, outboxEventId: event.id, channel: 'in_app', status: 'sent', attemptedAt: now() });
@@ -1023,12 +1035,13 @@ export async function approveProfileSchema(store: Store, auth: AuthenticatedUser
 export async function createAvailabilitySlot(store: Store, auth: AuthenticatedUser, input: { counselorId: string; startsAt: string; endsAt: string; room?: string }): Promise<AvailabilitySlot> {
   requirePermission(auth.user, 'appointment:manage');
   if (input.room !== undefined && typeof input.room !== 'string') throw new DomainError('SLOT_INVALID', '排班备注格式无效');
+  const room = input.room?.trim().slice(0, 100);
   return store.transaction((state) => {
     const counselor = state.users.find((candidate) => candidate.id === input.counselorId && candidate.tenantId === auth.user.tenantId && isProfessional(candidate));
     if (!counselor || (auth.user.schoolId && auth.user.schoolId !== counselor.schoolId) || !validDate(input.startsAt) || !validDate(input.endsAt) || new Date(input.startsAt) >= new Date(input.endsAt)) throw new DomainError('SLOT_INVALID', '排班人员或时间窗无效');
-    const overlap = state.availabilitySlots.some((slot) => slot.tenantId === auth.user.tenantId && slot.counselorId === counselor.id && slot.status !== 'blocked' && new Date(input.startsAt) < new Date(slot.endsAt) && new Date(input.endsAt) > new Date(slot.startsAt));
-    if (overlap) throw new DomainError('SLOT_CONFLICT', '咨询师时间段重叠', 409);
-    const slot: AvailabilitySlot = { id: id(), tenantId: auth.user.tenantId, counselorId: counselor.id, startsAt: input.startsAt, endsAt: input.endsAt, room: input.room?.slice(0, 100), status: 'available' }; state.availabilitySlots.push(slot); audit(state, auth.user, 'availability.created', 'availability_slot', slot.id, {}); return slot;
+    const overlap = state.availabilitySlots.some((slot) => slot.tenantId === auth.user.tenantId && slot.status !== 'blocked' && new Date(input.startsAt) < new Date(slot.endsAt) && new Date(input.endsAt) > new Date(slot.startsAt) && (slot.counselorId === counselor.id || (Boolean(room) && Boolean(slot.room?.trim()) && slot.room?.trim() === room)));
+    if (overlap) throw new DomainError('SLOT_CONFLICT', '咨询师或咨询室时间段重叠', 409);
+    const slot: AvailabilitySlot = { id: id(), tenantId: auth.user.tenantId, counselorId: counselor.id, startsAt: input.startsAt, endsAt: input.endsAt, room, status: 'available' }; state.availabilitySlots.push(slot); audit(state, auth.user, 'availability.created', 'availability_slot', slot.id, {}); return slot;
   });
 }
 

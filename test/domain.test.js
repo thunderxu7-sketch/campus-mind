@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { approveFrequencyException, beginAttempt, createCampaign, createSelfScreening, publishCampaign, revokeScale, saveAnswers, updateCampaignState, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
+import { approveFrequencyException, approveScale, beginAttempt, createCampaign, createScale, createSelfScreening, publishCampaign, revokeScale, saveAnswers, updateCampaignState, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
 import { JsonStore } from '../dist/apps/api/src/domain/store.js';
 import { seedDemoState } from '../dist/apps/api/src/domain/seed.js';
 
@@ -85,6 +85,20 @@ test('revoking a scale blocks new use without changing historical identifiers', 
   await revokeScale(store, professional, 'scale-synthetic-demo-v1', '合成演示撤销');
   assert.equal(store.snapshot().scales.find((scale) => scale.id === 'scale-synthetic-demo-v1').status, 'revoked');
   assert.equal(store.snapshot().campaigns.find((campaign) => campaign.id === 'campaign-demo').scaleVersionId, 'scale-synthetic-demo-v1');
+  await assert.rejects(() => approveScale(store, professional, 'scale-synthetic-demo-v1'), (error) => error.code === 'SCALE_REVOKED');
+});
+
+test('scale author cannot approve their own draft version', async () => {
+  const state = seedDemoState();
+  const reviewerTemplate = state.users.find((user) => user.id === 'user-professional-demo');
+  state.users.push({ ...reviewerTemplate, id: 'user-professional-reviewer', email: 'reviewer@campus-mind.demo', displayName: '合成独立复核者' });
+  const store = new JsonStore({ initial: state });
+  const author = authFor(store.snapshot(), 'user-professional-demo');
+  const reviewer = authFor(store.snapshot(), 'user-professional-reviewer');
+  const scale = await createScale(store, author, { code: 'SYNTH-SEPARATION', title: '合成分离职责方案', version: '1.0.0', provenance: 'synthetic_only', minAge: 12, maxAge: 18, scoringVersion: 'synthetic-separation-v1', noticeVersion: 'notice-demo-v1', items: [{ id: 'q1', prompt: '合成题', min: 0, max: 1, reverse: false, factor: 'factor' }] });
+  await assert.rejects(() => approveScale(store, author, scale.id), (error) => error.code === 'SEPARATION_OF_DUTIES_REQUIRED');
+  const approved = await approveScale(store, reviewer, scale.id);
+  assert.equal(approved.status, 'approved');
 });
 
 test('assessment consent withdrawal stops an in-progress draft and pending processing', async () => {

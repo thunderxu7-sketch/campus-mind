@@ -238,6 +238,9 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   assert.equal(exportDownload.body.data.suppressionThreshold, 10);
   const slot = await request('/v1/availability-slots', { method: 'POST', headers: auth(professional), body: JSON.stringify({ counselorId: 'user-counselor-demo', startsAt: new Date(Date.now() + 3_600_000).toISOString(), endsAt: new Date(Date.now() + 7_200_000).toISOString(), room: '合成咨询室' }) });
   assert.equal(slot.response.status, 201);
+  const roomConflict = await request('/v1/availability-slots', { method: 'POST', headers: auth(professional), body: JSON.stringify({ counselorId: 'user-professional-demo', startsAt: new Date(Date.now() + 4_000_000).toISOString(), endsAt: new Date(Date.now() + 6_000_000).toISOString(), room: '合成咨询室' }) });
+  assert.equal(roomConflict.response.status, 409);
+  assert.equal(roomConflict.body.error.code, 'SLOT_CONFLICT');
   const appointment = await request('/v1/appointments', { method: 'POST', headers: auth(student), body: JSON.stringify({ slotId: slot.body.data.id, note: '合成预约说明' }) });
   assert.equal(appointment.response.status, 201);
   const confirmed = await request(`/v1/appointments/${appointment.body.data.id}/state`, { method: 'POST', headers: auth(professional), body: JSON.stringify({ state: 'confirmed' }) });

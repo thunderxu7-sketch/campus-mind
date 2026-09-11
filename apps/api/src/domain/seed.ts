@@ -56,6 +56,7 @@ export function seedDemoState(): DatabaseState {
       { id: 'q5', prompt: '演示题：我知道学校可以提供哪些支持。', min: 0, max: 1, reverse: false, factor: 'support_access' },
     ],
     warningRule: { threshold: 4, level: 'attention', reason: '合成演示规则命中，仅用于验证人工复核流程；不代表临床阈值。' },
+    createdBy: 'user-professional-demo',
     approvedBy: 'user-professional-demo',
     approvedAt: createdAt,
   };
