@@ -70,7 +70,7 @@ test('field encryption supports bounded key rotation without persisting key mate
   delete process.env.CAMPMIND_PREVIOUS_MASTER_KEYS;
   assert.throws(() => decrypt(legacyEnvelope));
 
-  process.env.NODE_ENV = previousNodeEnv;
-  process.env.CAMPMIND_MASTER_KEY = previousCurrent;
-  process.env.CAMPMIND_PREVIOUS_MASTER_KEYS = previousKeys;
+  if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
+  if (previousCurrent === undefined) delete process.env.CAMPMIND_MASTER_KEY; else process.env.CAMPMIND_MASTER_KEY = previousCurrent;
+  if (previousKeys === undefined) delete process.env.CAMPMIND_PREVIOUS_MASTER_KEYS; else process.env.CAMPMIND_PREVIOUS_MASTER_KEYS = previousKeys;
 });

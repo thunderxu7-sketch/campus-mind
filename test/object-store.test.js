@@ -56,6 +56,39 @@ test('encrypted object store isolates tenants and keeps plaintext out of files',
   }
 });
 
+test('private object re-encryption migrates legacy envelopes to the active key', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousCurrent = process.env.CAMPMIND_MASTER_KEY;
+  const previousKeys = process.env.CAMPMIND_PREVIOUS_MASTER_KEYS;
+  const root = mkdtempSync(join(tmpdir(), 'campus-mind-rotate-'));
+  const oldKey = 'old-object-rotation-key-dedicated-2026-abcdef';
+  const newKey = 'new-object-rotation-key-dedicated-2026-abcdef';
+  try {
+    process.env.NODE_ENV = 'test';
+    process.env.CAMPMIND_MASTER_KEY = oldKey;
+    delete process.env.CAMPMIND_PREVIOUS_MASTER_KEYS;
+    const objectStore = new EncryptedFileObjectStore({ rootDir: root, maxBytes: 1024 });
+    const input = { tenantId: 'tenant-rotate', objectKey: 'media/tenant-rotate/rotation', contentType: 'image/png', bytes: Buffer.from('synthetic rotation bytes') };
+    await objectStore.put(input);
+
+    process.env.CAMPMIND_MASTER_KEY = newKey;
+    process.env.CAMPMIND_PREVIOUS_MASTER_KEYS = oldKey;
+    assert.deepEqual((await objectStore.get(input)).bytes, input.bytes);
+    await objectStore.reencrypt(input);
+    assert.deepEqual((await objectStore.get(input)).bytes, input.bytes);
+
+    delete process.env.CAMPMIND_PREVIOUS_MASTER_KEYS;
+    assert.deepEqual((await objectStore.get(input)).bytes, input.bytes);
+    process.env.CAMPMIND_MASTER_KEY = oldKey;
+    await assert.rejects(() => objectStore.get(input), /OBJECT_CORRUPT/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
+    if (previousCurrent === undefined) delete process.env.CAMPMIND_MASTER_KEY; else process.env.CAMPMIND_MASTER_KEY = previousCurrent;
+    if (previousKeys === undefined) delete process.env.CAMPMIND_PREVIOUS_MASTER_KEYS; else process.env.CAMPMIND_PREVIOUS_MASTER_KEYS = previousKeys;
+  }
+});
+
 test('media workflow stores a private pointer and serves only linked published content', async () => {
   const root = mkdtempSync(join(tmpdir(), 'campus-mind-media-'));
   try {

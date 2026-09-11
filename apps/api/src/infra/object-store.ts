@@ -19,6 +19,8 @@ export interface PrivateObjectStore {
   put(input: { tenantId: string; objectKey: string; contentType: string; bytes: Uint8Array }): Promise<StoredObject>;
   get(input: { tenantId: string; objectKey: string }): Promise<StoredObject>;
   delete(input: { tenantId: string; objectKey: string }): Promise<void>;
+  /** Rewrite an object with the active key after a rotation window. */
+  reencrypt?(input: { tenantId: string; objectKey: string }): Promise<StoredObject>;
 }
 
 function assertPart(value: string, label: string): void {
@@ -146,5 +148,15 @@ export class EncryptedFileObjectStore implements PrivateObjectStore {
     assertObjectKey(input.objectKey);
     const filename = fileFor(this.rootDir, input.tenantId, input.objectKey);
     if (existsSync(filename)) unlinkSync(filename);
+  }
+
+  /**
+   * Read through the bounded active/legacy key ring and atomically write the
+   * same object using the active key.  Callers should run this from a bounded,
+   * observable migration job and remove legacy keys only after verification.
+   */
+  async reencrypt(input: { tenantId: string; objectKey: string }): Promise<StoredObject> {
+    const current = await this.get(input);
+    return this.put({ tenantId: current.tenantId, objectKey: current.objectKey, contentType: current.contentType, bytes: current.bytes });
   }
 }
