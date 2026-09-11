@@ -525,6 +525,12 @@ test('rights requests are auditable and privacy staff can complete non-destructi
   const privacy = await login('privacy@campus-mind.demo');
   const created = await request('/v1/rights-requests', { method: 'POST', headers: auth(student), body: JSON.stringify({ studentId: 'student-demo', kind: 'access', reason: '合成演示查阅申请' }) });
   assert.equal(created.response.status, 201);
+  assert.equal(created.body.data.hasReason, true);
+  assert.equal(Object.hasOwn(created.body.data, 'reason'), false);
+  assert.equal(Object.hasOwn(created.body.data, 'reasonCiphertext'), false);
+  const storedRequest = store.snapshot().rightsRequests.find((request) => request.id === created.body.data.id);
+  assert.ok(storedRequest.reasonCiphertext);
+  assert.equal(Object.hasOwn(storedRequest, 'reason'), false);
   const ownRequests = await request('/v1/me/rights-requests', { headers: auth(student) });
   assert.equal(ownRequests.response.status, 200, JSON.stringify(ownRequests.body));
   assert.equal(ownRequests.body.data.some((item) => item.id === created.body.data.id), true);

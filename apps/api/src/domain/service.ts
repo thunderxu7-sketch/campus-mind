@@ -32,12 +32,12 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 const importPreviewHash = (rows: Array<Record<string, unknown>>): string => createHash('sha256').update(stableJson(rows)).digest('hex');
-type PublicRightsRequest = Omit<RightsRequest, 'resultCiphertext' | 'decisionReasonCiphertext'> & { resultReady: boolean };
+type PublicRightsRequest = Omit<RightsRequest, 'resultCiphertext' | 'decisionReasonCiphertext' | 'reason' | 'reasonCiphertext'> & { resultReady: boolean; hasReason: boolean };
 type PublicExportJob = Omit<ExportJob, 'payloadCiphertext'> & { ready: boolean };
 
 function publicRightsRequest(request: RightsRequest): PublicRightsRequest {
-  const { resultCiphertext: _resultCiphertext, decisionReasonCiphertext: _decisionReasonCiphertext, ...publicRequest } = request;
-  return { ...publicRequest, resultReady: Boolean(_resultCiphertext) };
+  const { resultCiphertext: _resultCiphertext, decisionReasonCiphertext: _decisionReasonCiphertext, reason: _reason, reasonCiphertext: _reasonCiphertext, ...publicRequest } = request;
+  return { ...publicRequest, resultReady: Boolean(_resultCiphertext), hasReason: Boolean(_reason || _reasonCiphertext) };
 }
 
 function audit(state: DatabaseState, actor: User | undefined, action: string, objectType: string, objectId: string, metadata: Record<string, string | number | boolean | null> = {}, purpose?: string, tenantIdOverride?: string): void {
@@ -119,7 +119,7 @@ function purgeStudentData(state: DatabaseState, tenantId: string, studentId: str
   state.followUps = state.followUps.filter((followUp) => !(followUp.tenantId === tenantId && deletedCaseIds.has(followUp.caseId)));
   state.profileResponses = state.profileResponses.filter((response) => !(response.tenantId === tenantId && response.studentId === studentId));
   state.appointments = state.appointments.filter((appointment) => !(appointment.tenantId === tenantId && appointment.studentId === studentId));
-  for (const rights of state.rightsRequests.filter((rights) => rights.tenantId === tenantId && rights.studentId === studentId)) rights.resultCiphertext = undefined;
+  for (const rights of state.rightsRequests.filter((rights) => rights.tenantId === tenantId && rights.studentId === studentId)) { rights.resultCiphertext = undefined; rights.reasonCiphertext = undefined; rights.reason = undefined; }
   for (const job of state.exportJobs.filter((job) => job.tenantId === tenantId && job.studentId === studentId)) { job.status = 'revoked'; job.payloadCiphertext = undefined; }
   state.outboxEvents = state.outboxEvents.filter((event) => event.tenantId !== tenantId || (!(event.type === 'assessment.submitted' && deletedSubmissionIds.has(String(event.payload.submissionId))) && !(event.type === 'risk.triage' && deletedSubmissionIds.has(String(event.payload.submissionId))) && !(['risk.signal_created', 'risk.escalation'].includes(event.type) && deletedCaseIds.has(event.aggregateId))));
   state.deliveryAttempts = state.deliveryAttempts.filter((delivery) => state.outboxEvents.some((event) => event.tenantId === delivery.tenantId && event.id === delivery.outboxEventId));
@@ -881,17 +881,18 @@ export function parseCsv(text: string): Array<Record<string, string>> {
   return rows.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ''])));
 }
 
-export async function createRightsRequest(store: Store, auth: AuthenticatedUser, input: { studentId: string; kind: RightsRequest['kind']; reason?: string }): Promise<RightsRequest> {
+export async function createRightsRequest(store: Store, auth: AuthenticatedUser, input: { studentId: string; kind: RightsRequest['kind']; reason?: string }): Promise<PublicRightsRequest> {
   if (!isStudent(auth.user) && !can(auth.user, 'rights:request')) throw forbidden();
   if (!['access', 'correct', 'delete', 'withdraw'].includes(input.kind)) throw new DomainError('RIGHTS_REQUEST_INVALID', '权利请求类型无效');
-  if (input.reason !== undefined && typeof input.reason !== 'string') throw new DomainError('RIGHTS_REQUEST_INVALID', '权利请求说明格式无效');
+  if (input.reason !== undefined && (typeof input.reason !== 'string' || input.reason.length > 1000 || /[\0\r\n]/.test(input.reason))) throw new DomainError('RIGHTS_REQUEST_INVALID', '权利请求说明格式无效');
   return store.transaction((state) => {
     const student = studentFor(state, auth.user, input.studentId);
     if (auth.user.role === 'guardian' && !state.guardianLinks.some((link) => link.tenantId === auth.user.tenantId && link.studentId === student.id && link.guardianUserId === auth.user.id && link.status === 'verified')) throw forbidden('监护人权利请求需要已核验监护关系');
-    const request: RightsRequest = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, kind: input.kind, requesterId: auth.user.id, status: 'open', reason: input.reason?.slice(0, 1000), createdAt: now() };
+    const reason = input.reason?.trim();
+    const request: RightsRequest = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, kind: input.kind, requesterId: auth.user.id, status: 'open', reasonCiphertext: reason ? encrypt({ reason }) : undefined, createdAt: now() };
     state.rightsRequests.push(request);
     audit(state, auth.user, 'rights.requested', 'rights_request', request.id, { kind: request.kind });
-    return request;
+    return publicRightsRequest(request);
   });
 }
 

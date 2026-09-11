@@ -350,6 +350,8 @@ export interface RightsRequest {
   kind: RightsKind;
   requesterId: string;
   status: 'open' | 'processing' | 'completed' | 'rejected';
+  /** Encrypted requester explanation; legacy records may still have `reason`. */
+  reasonCiphertext?: string;
   reason?: string;
   /** Encrypted rationale recorded by the privacy reviewer for the decision. */
   decisionReasonCiphertext?: string;

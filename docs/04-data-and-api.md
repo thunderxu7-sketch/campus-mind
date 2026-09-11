@@ -12,7 +12,7 @@
 | 身份 | User、Membership、RoleGrant、ScopeGrant、AccessApproval | 用户可有多租户成员关系；授权含用途、到期和授予人，职务不自动获得专业访问权 |
 | 学生 | Student、GuardianLink | 身份资料加密；监护关系含独立监护账号、核验人、生效/撤销时间；年龄未知 fail closed |
 | 采集 | ImportBatch、ImportRowResult、ProfileSchemaVersion、ProfileResponse | 导入幂等；拒绝行可追溯；自定义字段禁止任意扩大敏感采集 |
-| 参与治理 | NoticeVersion、ConsentRecord、ProcessingBasis、RightsRequest | 主体/监护人、目的、版本、方式、时间与撤回；其他合法依据不能由前端随意勾选 |
+| 参与治理 | NoticeVersion、ConsentRecord、ProcessingBasis、RightsRequest | 主体/监护人、目的、版本、方式、时间与撤回；权利申请说明加密保存并只返回 `hasReason` 标记；其他合法依据不能由前端随意勾选 |
 | 量表 | Scale、ScaleVersion、NormVersion、ScoringVersion、ScaleLicense | 适龄/语言/地区/报告人、题目与反向题规则 hash、有效期、专业审批；正文受限存储 |
 | 方案 | AssessmentPlanVersion、WarningRuleVersion、ReportTemplateVersion | 不同版本拆分；草稿可编辑，已发布冻结；不允许运行任意管理员脚本 |
 | 任务 | Campaign、CampaignParticipant、FrequencyReservation、ExceptionApproval | 学年、场次、成员快照、方案版本；学生/学年频次占用受事务约束 |

@@ -490,7 +490,7 @@
     function renderRightsAdmin(requests) {
       $('#rightsAdminList').innerHTML = requests.length ? requests.map((request) => {
         const action = ['open', 'processing'].includes(request.status) ? `<button type="button" data-rights-id="${esc(request.id)}" data-rights-decision="complete">完成</button> <button type="button" class="secondary" data-rights-id="${esc(request.id)}" data-rights-decision="reject">拒绝</button>` : '';
-        return `<article class="task"><b>${esc(rightsKindLabel[request.kind] || request.kind)}</b> · ${esc(rightsStateLabel[request.status] || request.status)} · ${esc(request.id)}<br><span class="muted">提交于 ${esc(formatWhen(request.createdAt))}${request.reason ? ` · 已记录说明` : ''}</span>${request.resultReady ? '<br><span class="muted">结果已准备</span>' : ''}${action ? `<br>${action}` : ''}</article>`;
+        return `<article class="task"><b>${esc(rightsKindLabel[request.kind] || request.kind)}</b> · ${esc(rightsStateLabel[request.status] || request.status)} · ${esc(request.id)}<br><span class="muted">提交于 ${esc(formatWhen(request.createdAt))}${request.hasReason ? ` · 已记录说明` : ''}</span>${request.resultReady ? '<br><span class="muted">结果已准备</span>' : ''}${action ? `<br>${action}` : ''}</article>`;
       }).join('') : '<p class="muted">暂无待处理申请，或当前账号没有权利管理权限。</p>';
       document.querySelectorAll('[data-rights-id]').forEach((button) => { button.onclick = () => updateRights(button.dataset.rightsId, button.dataset.rightsDecision); });
     }
