@@ -67,6 +67,8 @@ npm audit --omit=dev --audit-level=high
 
 演示数据全部由代码生成，密码只用于本地测试；不要把其作为生产凭据。API 默认将本地数据写入被 `.gitignore` 忽略的 `private-data/`。
 
+可复制 `.env.example` 作为本地配置模板。`CAMPMIND_OBJECTS_DIR` 指向加密私有媒体目录；生产配置必须注入 PostgreSQL 与私有对象存储适配器，不能使用示例 JSON/文件适配器。
+
 ## 验证规划
 
 需要 Python 3.11 或更高版本，无第三方依赖：
