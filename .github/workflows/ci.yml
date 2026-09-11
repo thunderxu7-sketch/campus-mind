@@ -64,9 +64,27 @@ jobs:
           do $$
           begin
             begin
-              insert into campaigns (id, tenant_id, school_id, name, purpose, state, academic_year, opens_at, closes_at, plan_id, participant_snapshot, report_visibility, created_by) values ('00000000-0000-0000-0000-0000000000a5', '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000a2', 'cross-tenant should fail', 'screening', 'draft', '2026-2027', now(), now() + interval '1 hour', '00000000-0000-0000-0000-0000000000a4', '{}', 'professional_review', '00000000-0000-0000-0000-0000000000b3');
+              insert into campaigns (id, tenant_id, school_id, name, purpose, state, academic_year, opens_at, closes_at, plan_id, participant_snapshot, report_visibility, created_by) values ('00000000-0000-0000-0000-0000000000a5', '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000a2', 'cross-tenant should fail', 'screening', 'draft', '2026-2027', now(), now() + interval '1 hour', '00000000-0000-0000-0000-0000000000a4', '["synthetic"]', 'professional_review', '00000000-0000-0000-0000-0000000000b3');
               raise exception 'cross-tenant composite foreign key accepted';
             exception when foreign_key_violation then null;
+            end;
+          end $$;
+          do $$
+          begin
+            begin
+              insert into campaigns (id, tenant_id, school_id, name, purpose, state, academic_year, opens_at, closes_at, plan_id, participant_snapshot, report_visibility, created_by) values ('00000000-0000-0000-0000-0000000000a7', '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000a2', 'valid', 'screening', 'draft', '2026/2027', now(), now() + interval '1 hour', '00000000-0000-0000-0000-0000000000a4', '["synthetic"]', 'professional_review', '00000000-0000-0000-0000-0000000000a3');
+              raise exception 'invalid academic year unexpectedly accepted';
+            exception when check_violation then null;
+            end;
+            begin
+              insert into campaigns (id, tenant_id, school_id, name, purpose, state, academic_year, opens_at, closes_at, plan_id, participant_snapshot, report_visibility, created_by) values ('00000000-0000-0000-0000-0000000000a8', '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000a2', 'bad'||chr(10)||'name', 'screening', 'draft', '2026-2027', now(), now() + interval '1 hour', '00000000-0000-0000-0000-0000000000a4', '["synthetic"]', 'professional_review', '00000000-0000-0000-0000-0000000000a3');
+              raise exception 'control character in name unexpectedly accepted';
+            exception when check_violation then null;
+            end;
+            begin
+              insert into campaigns (id, tenant_id, school_id, name, purpose, state, academic_year, opens_at, closes_at, plan_id, participant_snapshot, report_visibility, created_by) values ('00000000-0000-0000-0000-0000000000a9', '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000a2', 'valid', 'screening', 'draft', '2026-2027', now(), now() + interval '1 hour', '00000000-0000-0000-0000-0000000000a4', '{}', 'professional_review', '00000000-0000-0000-0000-0000000000a3');
+              raise exception 'invalid participant snapshot unexpectedly accepted';
+            exception when check_violation then null;
             end;
           end $$;
           rollback;
