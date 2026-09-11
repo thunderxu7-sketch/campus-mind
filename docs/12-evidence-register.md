@@ -18,7 +18,7 @@
 | E-REF-TEST | API、权限、同意、适龄/任务可用性、频次及答题窗口复核、危机闭环、内容草稿权限与密文隔离、媒体、provider-backed 媒体扫描裁决、provider-backed 通知失败重试、会话撤销/过期、审计、字段/对象密钥轮换、登录限流、导出用途/水印、撤回报告后的导出失效、专业结案申请人与审批人分离、权利请求拒绝理由和结果隔离、授权到期阻断、量表目录元数据与适用性筛选、预约排班范围/占用保护/幂等重试、学生反馈与主体权利申请列表和撤回/到期量表不可用性 | `npm test`（52 项 Node 测试） | `verified` |
 | E-REF-SEC | 凭据模式、生产后端/演示 MFA、CSP、请求体和私有对象边界 | `npm run security:check` | `verified` |
 | E-REF-PLAN | 48 项任务、依赖 DAG、生成任务清单同步 | `python3 scripts/check_plan.py` | `verified` |
-| E-PG-MIGRATION | 36 张表、36 个 `FORCE RLS`、36 个策略、关键跨租户外键、应用角色无 `SUPERUSER/BYPASSRLS`，合成双租户串引用被拒绝，审计 UPDATE/DELETE 触发追加写保护 | CI PostgreSQL 16 步骤；本地 `infra/migrations/001_initial.sql` | `verified`（参考迁移） |
+| E-PG-MIGRATION | 36 张表、36 个 `FORCE RLS`、36 个策略、关键跨租户外键、应用角色无 `SUPERUSER/BYPASSRLS`，无租户上下文默认不可见、设置上下文后仅见本租户，合成双租户串引用被拒绝，审计 UPDATE/DELETE 触发追加写保护，权利/频次说明使用 `reason_ciphertext` | CI PostgreSQL 16 步骤；本地 `infra/migrations/001_initial.sql` | `verified`（参考迁移） |
 | E-REF-RECOVERY | 加密 JSON/私有对象复制、恢复和临时文件清理 | `npm run drill:recovery` | `verified`（本地合成） |
 | E-REF-CRISIS | 加急线索投递、未接单升级、provider-backed 通知失败/重试、人工复核/结案、死信隔离与修复 | `npm run drill:crisis`、`npm test` | `verified`（本地合成） |
 | E-REF-KEY-ROTATION | 字段/对象旧密钥读取、当前密钥重加密、旧密钥移除后的拒绝 | `npm run drill:key-rotation` | `verified`（本地合成） |

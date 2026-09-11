@@ -110,6 +110,23 @@ jobs:
           psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --set ON_ERROR_STOP=1 --file infra/roles.sql.example
           test "$(psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --tuples-only --no-align --command "select rolsuper::int || '|' || rolbypassrls::int from pg_roles where rolname = 'campus_mind_app';")" = "0|0"
           test "$(psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --tuples-only --no-align --command "select has_table_privilege('campus_mind_app', 'public.audit_events', 'UPDATE')::int || '|' || has_table_privilege('campus_mind_app', 'public.audit_events', 'DELETE')::int;")" = "0|0"
+          psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --set ON_ERROR_STOP=1 <<'SQL'
+          insert into tenants (id, name) values ('00000000-0000-0000-0000-0000000000d1', 'synthetic-rls-context') on conflict (id) do nothing;
+          begin;
+          set role campus_mind_app;
+          do $$
+          declare visible integer;
+          begin
+            select count(*) into visible from tenants;
+            if visible <> 0 then raise exception 'tenant rows visible without context'; end if;
+            perform set_config('app.tenant_id', '00000000-0000-0000-0000-0000000000d1', true);
+            select count(*) into visible from tenants;
+            if visible <> 1 then raise exception 'tenant context did not scope rows'; end if;
+          end $$;
+          rollback;
+          reset role;
+          delete from tenants where id = '00000000-0000-0000-0000-0000000000d1';
+          SQL
       - run: npm run build
       - run: npm test
       - run: npm run drill:capacity
