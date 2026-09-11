@@ -50,7 +50,7 @@ flowchart TB
 
 官方技术依据：[Vite 指南](https://vite.dev/guide/)、[NestJS 文档](https://docs.nestjs.com/)、[PostgreSQL 行级安全](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)。队列及组件库仅为候选，M1 还需验证锁定版本，未声称已实现集成。
 
-## 3. 建议目录与当前实现
+## 3. 建议目录与当前参考实现
 
 ```text
 apps/
@@ -67,7 +67,7 @@ packages/
 infra/                # 环境模板与运行手册（后续）
 ```
 
-当前仓库已提供 `apps/api`、`apps/admin-web`、`apps/student-web`、`test` 和 `infra/migrations` 的合成数据参考实现；尚未创建空的 `packages/*`，避免产生“生产组件已实现”的误解。`apps/api/src/infra/postgres-context.ts` 提供不绑定驱动的租户事务/连接池生命周期辅助函数，需由真正的 PostgreSQL Store 适配器调用并在目标环境验证。
+当前仓库已提供 `apps/api`、`apps/admin-web`、`apps/student-web`、`test` 和 `infra/migrations` 的合成数据参考实现；管理端/学生端目前是静态 HTML，API/Worker 是轻量 Node 实现，尚未接入 React/Vite/NestJS/Redis，也尚未创建空的 `packages/*`，避免产生“生产组件已实现”的误解。`apps/api/src/infra/postgres-context.ts` 提供不绑定驱动的租户事务/连接池生命周期辅助函数，需由真正的 PostgreSQL Store 适配器调用并在目标环境验证。
 
 ## 4. 租户与授权防线
 
