@@ -110,6 +110,9 @@ paths:
       responses: {'201': {description: Booking receipt without encrypted note}, '409': {description: Slot unavailable or idempotency conflict}}
   /v1/appointments/{appointmentId}/state:
     post: {summary: Cancel own appointment or update a scoped operational state, parameters: [{$ref: '#/components/parameters/appointmentId'}], responses: {'200': {description: Updated appointment}, '403': {description: Scope or role failure}}}
+  /v1/content:
+    get: {summary: List tenant education drafts and review metadata without storage envelopes, responses: {'200': {description: Content management list}, '403': {description: Content workflow permission required}}}
+    post: {summary: Create an education article, announcement or media draft, responses: {'201': {description: Draft content}, '400': {description: Invalid content or accessibility fields}}}
   /v1/content/public:
     get:
       security: []

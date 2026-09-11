@@ -58,7 +58,9 @@ test('health and browser surfaces expose safety headers', async () => {
   assert.match(pageHtml, /预约此时段/);
   const adminPage = await fetch(base + '/admin');
   assert.equal(adminPage.status, 200);
-  assert.match(await adminPage.text(), /咨询排班与预约/);
+  const adminHtml = await adminPage.text();
+  assert.match(adminHtml, /咨询排班与预约/);
+  assert.match(adminHtml, /教育内容管理/);
 });
 
 test('state-changing requests reject an untrusted browser origin', async () => {
@@ -352,6 +354,11 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   assert.equal(confirmed.response.status, 200);
   const content = await request('/v1/content', { method: 'POST', headers: auth(professional), body: JSON.stringify({ title: '如何找到可信任的支持', kind: 'article', body: '合成教育内容：可以向可信任的成人或专业老师表达需要。', ageMin: 12, ageMax: 18, copyrightSource: 'synthetic-only' }) });
   assert.equal(content.response.status, 201);
+  const contentDrafts = await request('/v1/content', { headers: auth(professional) });
+  assert.equal(contentDrafts.response.status, 200, JSON.stringify(contentDrafts.body));
+  const draft = contentDrafts.body.data.find((item) => item.id === content.body.data.id);
+  assert.equal(draft.body, '合成教育内容：可以向可信任的成人或专业老师表达需要。');
+  assert.equal(Object.hasOwn(draft, 'bodyCiphertext'), false);
   const published = await request(`/v1/content/${content.body.data.id}/publish`, { method: 'POST', headers: auth(professional), body: '{}' });
   assert.equal(published.response.status, 200);
   const publicContent = await request('/v1/content/public?age=15');
@@ -451,6 +458,8 @@ test('teacher progress is limited to operational counts', async () => {
   assert.equal(students.response.status, 403, '班主任不可读取完整学生目录');
   const slots = await request('/v1/availability-slots', { headers: auth(teacher) });
   assert.equal(slots.response.status, 403, '班主任不可管理或读取预约排班');
+  const content = await request('/v1/content', { headers: auth(teacher) });
+  assert.equal(content.response.status, 403, '班主任不可读取教育内容草稿');
 });
 
 test('rights requests are auditable and privacy staff can complete non-destructive access requests', async () => {

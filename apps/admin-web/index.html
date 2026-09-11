@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>校园心晴｜工作人员端</title>
-  <style>body{font:16px system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#172033;line-height:1.55}header{display:flex;justify-content:space-between;align-items:center;gap:1rem}section{background:#f5f7fb;padding:1rem;margin:1rem 0;border-radius:12px}button{padding:.6rem 1rem;border:0;border-radius:8px;background:#2854d7;color:#fff;cursor:pointer;font:inherit}button.secondary{background:#57657d}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #f59e0b;outline-offset:2px}input,select{padding:.6rem;margin:.25rem;border:1px solid #ccd3e0;border-radius:6px;font:inherit}.muted{color:#5f6b82}.metric{display:inline-block;min-width:130px;padding:.75rem;background:white;border-radius:8px;margin:.3rem}.status{min-height:1.6em}@media (max-width:600px){header{display:block}input,select,button{width:100%;box-sizing:border-box;margin:.25rem 0}}
+  <style>body{font:16px system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#172033;line-height:1.55}header{display:flex;justify-content:space-between;align-items:center;gap:1rem}section{background:#f5f7fb;padding:1rem;margin:1rem 0;border-radius:12px}button{padding:.6rem 1rem;border:0;border-radius:8px;background:#2854d7;color:#fff;cursor:pointer;font:inherit}button.secondary{background:#57657d}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #f59e0b;outline-offset:2px}input,select,textarea{padding:.6rem;margin:.25rem;border:1px solid #ccd3e0;border-radius:6px;font:inherit}textarea{width:calc(100% - .5rem);box-sizing:border-box}.muted{color:#5f6b82}.metric{display:inline-block;min-width:130px;padding:.75rem;background:white;border-radius:8px;margin:.3rem}.status{min-height:1.6em}@media (max-width:600px){header{display:block}input,select,textarea,button{width:100%;box-sizing:border-box;margin:.25rem 0}}
   </style>
 </head>
 <body>
@@ -51,6 +51,22 @@
     <div id="slotList" aria-live="polite"><p class="muted">暂无未来排班</p></div>
     <h3>预约记录</h3>
     <div id="appointmentList" aria-live="polite"><p class="muted">暂无预约</p></div>
+    <h2>教育内容管理</h2>
+    <p class="muted">先保存草稿，再由具备专业审核权限的人员发布。内容仅用于一般心理教育，不承载个案信息。</p>
+    <form id="contentForm">
+      <label for="content-title">标题</label><input id="content-title" name="title" maxlength="200" required>
+      <label for="content-kind">类型</label><select id="content-kind" name="kind"><option value="article">文章</option><option value="announcement">公告</option><option value="media">媒体</option></select>
+      <label for="content-body">正文或文字稿</label><textarea id="content-body" name="body" rows="5" maxlength="30000" required></textarea>
+      <label for="content-age-min">适用最小年龄</label><input id="content-age-min" name="ageMin" type="number" min="6" max="19" value="12" required>
+      <label for="content-age-max">适用最大年龄</label><input id="content-age-max" name="ageMax" type="number" min="6" max="19" value="18" required>
+      <label for="content-copyright">版权/来源</label><input id="content-copyright" name="copyrightSource" maxlength="500" placeholder="synthetic-only" required>
+      <label for="content-file">媒体文件（媒体类型必填，≤1.5 MB）</label><input id="content-file" name="file" type="file" accept="image/png,image/jpeg,image/webp,audio/mpeg,audio/ogg,audio/wav,video/mp4,video/webm">
+      <label for="content-alt">图片文字替代（图片必填）</label><textarea id="content-alt" name="altText" rows="2" maxlength="2000"></textarea>
+      <label for="content-caption">音视频字幕/文字说明（音视频必填）</label><textarea id="content-caption" name="captionText" rows="2" maxlength="20000"></textarea>
+      <button type="submit">保存教育内容草稿</button>
+    </form>
+    <p id="contentStatus" class="status" role="status" aria-live="polite"></p>
+    <div id="contentList" aria-live="polite"><p class="muted">暂无教育内容</p></div>
     <h2>无手机学生凭证</h2>
     <form id="credentialForm">
       <label for="credential-student">学生编号</label><input id="credential-student" name="studentId" value="student-demo" required>
@@ -92,16 +108,18 @@
         const overview = await fetch('/v1/admin/overview', { headers }).then((response) => response.json());
         if (!overview.data) throw new Error(overview.error?.message || '无权访问');
         $('#metrics').innerHTML = Object.entries(overview.data).filter(([key]) => key !== 'note').map(([key, value]) => `<span class="metric"><b>${esc(key)}</b><br>${esc(value === null ? '已抑制' : value)}</span>`).join('');
-        const [campaigns, scales, slots, appointments] = await Promise.all([
+        const [campaigns, scales, slots, appointments, content] = await Promise.all([
           fetch('/v1/admin/campaigns', { headers }).then((response) => response.json()),
           fetch('/v1/admin/scales', { headers }).then((response) => response.json()),
           fetch('/v1/availability-slots', { headers }).then((response) => response.json()),
           fetch('/v1/appointments', { headers }).then((response) => response.json()),
+          fetch('/v1/content', { headers }).then((response) => response.json()),
         ]);
         $('#campaigns').innerHTML = (campaigns.data || []).map((campaign) => `<p><b>${esc(campaign.name)}</b> · ${esc(campaign.state)} · ${esc(campaign.participantCount)} 人</p>`).join('') || '<p class="muted">暂无任务</p>';
         $('#scale').innerHTML = (scales.data || []).filter((scale) => scale.status === 'approved').map((scale) => `<option value="${esc(scale.id)}">${esc(scale.title)} ${esc(scale.version)}</option>`).join('');
         renderSlots(slots.data || []);
         renderAppointments(appointments.data || []);
+        renderContent(content.data || []);
       } catch (error) { setStatus(error.message); }
     }
 
@@ -140,6 +158,32 @@
       } catch (error) { setStatus(error.message); }
     }
 
+    const contentStateLabel = { draft: '草稿', professional_review: '待专业审核', published: '已发布', retired: '已下架' };
+    function renderContent(items) {
+      $('#contentList').innerHTML = items.length ? items.map((item) => {
+        const action = item.state === 'published' ? `<button type="button" class="secondary" data-content-id="${esc(item.id)}" data-content-action="retire">下架</button>` : ['draft', 'professional_review'].includes(item.state) ? `<button type="button" data-content-id="${esc(item.id)}" data-content-action="publish">提交发布审核</button>` : '';
+        const media = item.media ? `<br>媒体：${esc(item.media.filename)}（${esc(item.media.kind)}）` : '';
+        return `<article class="metric"><b>${esc(item.title)}</b><br>${esc(contentStateLabel[item.state] || item.state)} · ${esc(item.kind)} · ${esc(item.ageMin)}–${esc(item.ageMax)} 岁${media}<br><span class="muted">${esc(item.body || '')}</span>${action ? `<br>${action}` : ''}</article>`;
+      }).join('') : '<p class="muted">暂无教育内容</p>';
+      document.querySelectorAll('[data-content-id]').forEach((button) => { button.onclick = () => updateContent(button.dataset.contentId, button.dataset.contentAction); });
+    }
+    async function updateContent(contentId, action) {
+      if (action === 'retire' && !window.confirm('确认下架这条已发布内容？下架后公众将立即无法访问。')) return;
+      try {
+        const response = await fetch('/v1/content/' + encodeURIComponent(contentId) + '/' + (action === 'publish' ? 'publish' : 'retire'), { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: '{}' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '教育内容操作失败');
+        setStatus(action === 'publish' ? '已提交发布审核' : '内容已下架');
+        await load();
+      } catch (error) { setStatus(error.message); }
+    }
+    function arrayBufferToBase64(buffer) {
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+      return btoa(binary);
+    }
+
     $('#refresh').onclick = load;
     $('#campaignForm').onsubmit = async (event) => {
       event.preventDefault();
@@ -163,6 +207,28 @@
         setStatus('排班已创建');
         await load();
       } catch (error) { setStatus(error.message); }
+    };
+
+    $('#contentForm').onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        const form = Object.fromEntries(new FormData(event.target));
+        const file = $('#content-file').files[0];
+        let mediaAssetId;
+        if (file) {
+          if (file.size > 1_500_000) throw new Error('媒体文件大小不能超过 1.5 MB');
+          const mediaResponse = await fetch('/v1/media-assets', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ filename: file.name, mediaType: file.type, base64: arrayBufferToBase64(await file.arrayBuffer()) }) });
+          const mediaResult = await mediaResponse.json();
+          if (!mediaResponse.ok) throw new Error(mediaResult.error?.message || '媒体上传失败');
+          mediaAssetId = mediaResult.data.id;
+        }
+        const response = await fetch('/v1/content', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ title: form.title, kind: form.kind, body: form.body, ageMin: Number(form.ageMin), ageMax: Number(form.ageMax), copyrightSource: form.copyrightSource, mediaAssetId, altText: form.altText || undefined, captionText: form.captionText || undefined }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '教育内容保存失败');
+        $('#contentStatus').textContent = '教育内容草稿已保存。';
+        event.target.reset();
+        await load();
+      } catch (error) { $('#contentStatus').textContent = error.message || '教育内容保存失败'; }
     };
 
     $('#credentialForm').onsubmit = async (event) => {

@@ -1449,6 +1449,40 @@ export async function retireContent(store: Store, auth: AuthenticatedUser, conte
   });
 }
 
+/** Return content-management metadata to authors and professional reviewers.
+ * The encrypted body is decrypted only for roles that already have the
+ * content workflow permission; storage envelopes and private media bytes are
+ * never exposed by this endpoint. */
+export async function listContent(store: Store, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
+  if (!can(auth.user, 'content:write') && !can(auth.user, 'content:approve')) throw forbidden();
+  return store.transaction((state) => {
+    const items = state.contentItems
+      .filter((item) => item.tenantId === auth.user.tenantId)
+      .map((item) => {
+        const media = item.mediaAssetId ? state.mediaAssets.find((asset) => asset.id === item.mediaAssetId && asset.tenantId === item.tenantId) : undefined;
+        return {
+          id: item.id,
+          title: item.title,
+          kind: item.kind,
+          ageMin: item.ageMin,
+          ageMax: item.ageMax,
+          body: decrypt<{ body: string }>(item.bodyCiphertext).body,
+          state: item.state,
+          copyrightSource: item.copyrightSource,
+          mediaAssetId: item.mediaAssetId,
+          altText: item.altText,
+          captionText: item.captionText,
+          ...(media ? { media: { id: media.id, filename: media.filename, mediaType: media.mediaType, kind: media.kind, byteSize: media.byteSize, sha256: media.sha256 } } : {}),
+          reviewedBy: item.reviewedBy,
+          publishedAt: item.publishedAt,
+          createdAt: item.createdAt,
+        };
+      });
+    audit(state, auth.user, 'content.listed', 'content', 'tenant', { count: items.length }, 'content:read');
+    return items;
+  });
+}
+
 export async function listPublicContent(store: Store, age?: number): Promise<Array<Record<string, unknown>>> {
   if (age !== undefined && (!Number.isInteger(age) || age < 6 || age > 19)) throw new DomainError('CONTENT_AGE_INVALID', '内容筛选年龄必须是 6–19 周岁的整数');
   return store.read((state) => state.contentItems.filter((item) => item.state === 'published' && (age === undefined || (age >= item.ageMin && age <= item.ageMax))).map((item) => ({ id: item.id, title: item.title, kind: item.kind, ageMin: item.ageMin, ageMax: item.ageMax, body: decrypt<{ body: string }>(item.bodyCiphertext).body, altText: item.altText, captionText: item.captionText, media: item.mediaAssetId ? (() => { const media = state.mediaAssets.find((asset) => asset.id === item.mediaAssetId && asset.scanStatus === 'clean'); return media ? { id: media.id, filename: media.filename, mediaType: media.mediaType, kind: media.kind, byteSize: media.byteSize, sha256: media.sha256, url: `/v1/content/public/${media.id}/media` } : undefined; })() : undefined, publishedAt: item.publishedAt })));
