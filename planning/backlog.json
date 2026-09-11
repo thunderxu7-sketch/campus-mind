@@ -134,7 +134,7 @@
       "subsystem": "S01",
       "owner": "产品 + 校方",
       "dependencies": [],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "经责任人确认的范围基线与决策记录",
       "acceptance": [
         "确认初中单校试点或记录替代范围、数据责任主体及初始容量。",
@@ -152,7 +152,7 @@
       "dependencies": [
         "CM-001"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "量表来源/许可/适龄/计分依据登记与真实发布 Gate",
       "acceptance": [
         "记录权利人、数字化使用范围、语言版本、年龄/常模、期限及施测条件；缺项标为未批准。",
@@ -170,7 +170,7 @@
       "dependencies": [
         "CM-001"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "处理活动清单、告知/同意版本与保留政策草案",
       "acceptance": [
         "最小名单导入也有合法依据，字段/用途/保存期/监护核验方式逐项记录。",
@@ -188,7 +188,7 @@
       "dependencies": [
         "CM-001"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "值班/备用/升级/紧急联系/结案与学生告知协议",
       "acceptance": [
         "规定测评开放时段、接单/复核/升级时限及无人值守说明，由实际承接人员确认。",
@@ -208,7 +208,7 @@
         "CM-003",
         "CM-004"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "ADR、数据流图、威胁模型、容量与恢复目标",
       "acceptance": [
         "明确中国大陆数据面、租户边界、运维默认无心理访问权及第三方处理范围。",
@@ -226,7 +226,7 @@
       "dependencies": [
         "CM-005"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "React 管理/学生应用、NestJS API/Worker、共享契约与测试骨架",
       "acceptance": [
         "锁定受支持依赖、锁文件与运行时；新克隆按 README 可构建并运行合成 smoke。",
@@ -244,7 +244,7 @@
       "dependencies": [
         "CM-006"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "学校/学年/年级/班级/成员关系迁移及 RLS",
       "acceptance": [
         "两个合成租户执行相同查询/写入均不串数据，复合外键阻止跨租户引用。",
@@ -262,7 +262,7 @@
       "dependencies": [
         "CM-007"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "登录、职员 MFA、学生独立凭证与会话管理",
       "acceptance": [
         "禁止共享职员账号；学校可为无手机学生签发独立短期凭证，非学号即密码。",
@@ -281,7 +281,7 @@
         "CM-007",
         "CM-008"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "服务端权限策略包、角色矩阵与越权测试",
       "acceptance": [
         "班主任只见完成状态；校务管理员不能看答案；咨询师只见获批个案。",
@@ -299,7 +299,7 @@
       "dependencies": [
         "CM-009"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "审计事件 schema、独立访问控制与系统监控",
       "acceptance": [
         "查看/下载/变更授权/修改规则/审批均记录主体、用途、对象引用与时间。",
@@ -318,7 +318,7 @@
         "CM-006",
         "CM-009"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "加密字段、私有对象存储适配器和轮换配置",
       "acceptance": [
         "敏感正文与密钥分离，应用不在 Git/日志持久化解密材料。",
@@ -340,7 +340,7 @@
         "CM-010",
         "CM-011"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "Excel 模板、映射预览、批次提交和错误行回执",
       "acceptance": [
         "校验重复、缺字段、格式、组织冲突和跨校引用；自动发现的组织需人工确认。",
@@ -360,7 +360,7 @@
         "CM-008",
         "CM-012"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "参与 API、适龄告知页、监护关系与同意证据",
       "acceptance": [
         "年龄未知进入核验；不满14岁须按已批准流程取得监护人同意。",
@@ -380,7 +380,7 @@
         "CM-009",
         "CM-011"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "量表/计分/常模/规则/模板版本 schema 与审批 API",
       "acceptance": [
         "发布校验授权、适龄、期限和专业审批；synthetic_only 在生产不可发布。",
@@ -398,7 +398,7 @@
       "dependencies": [
         "CM-014"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "纯函数计分包与固定精度规则",
       "acceptance": [
         "支持已审计分定义的正向/反向项、因子、缺失处理与常模映射，不臆造算法。",
@@ -417,7 +417,7 @@
         "CM-002",
         "CM-015"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "独立预期值、解释文案与差分验收记录",
       "acceptance": [
         "覆盖反向题、缺失、边界、因子、舍入及异常样例，预期值不是复制当前实现。",
@@ -437,7 +437,7 @@
         "CM-013",
         "CM-014"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "学校/年级/班级/指定人员任务创建、审核与分发",
       "acceptance": [
         "发布冻结成员、学年、版本与展示政策；重发不生成重复 assignment。",
@@ -455,7 +455,7 @@
       "dependencies": [
         "CM-017"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "频次占用约束、例外审批与可解释状态",
       "acceptance": [
         "同一学生双任务并发开始不能绕过批准的学年场次策略。",
@@ -475,7 +475,7 @@
         "CM-017",
         "CM-018"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "响应式任务/告知/答题页面和共享终端退出流程",
       "acceptance": [
         "PC/手机/平板/触屏独立身份可使用，键盘、焦点、字号缩放和非颜色提示可用。",
@@ -494,7 +494,7 @@
         "CM-019",
         "CM-011"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "revision 保存协议、自动保存和恢复 UI",
       "acceptance": [
         "数据库提交前不显示已保存；断网未持久化提示明显，刷新只恢复已确认内容。",
@@ -514,7 +514,7 @@
         "CM-015",
         "CM-010"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "幂等提交接口、快照、摘要与业务事件",
       "acceptance": [
         "相同提交重试只产生一份结果；同幂等键不同内容返回冲突。",
@@ -533,7 +533,7 @@
         "CM-021",
         "CM-015"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "Worker、幂等消费、死信与补偿扫描",
       "acceptance": [
         "重复投递无重复分数/报告；数据库可重新投递丢失队列任务。",
@@ -554,7 +554,7 @@
         "CM-009",
         "CM-011"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "报告草稿、审批、发布、撤回与读者视图",
       "acceptance": [
         "报告包含来源版本和解释局限，学生反馈适龄且非诊断性。",
@@ -575,7 +575,7 @@
         "CM-009",
         "CM-010"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "个人时间轴、分类索引与授权记录",
       "acceptance": [
         "基本资料、历次报告和专业记录分权展示；班主任/运维不能查询心理正文。",
@@ -595,7 +595,7 @@
         "CM-014",
         "CM-022"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "规则审批、原因解释、RiskSignal 与去重",
       "acceptance": [
         "规则由专业人员批准，不写无依据阈值；自动输出是待复核线索非诊断。",
@@ -615,7 +615,7 @@
         "CM-021",
         "CM-025"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "高优先级 outbox、投递回执、死信与补投",
       "acceptance": [
         "明确严重关注项在提交时产生独立事件，不等待普通计分或报告排队。",
@@ -634,7 +634,7 @@
         "CM-025",
         "CM-024"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "待复核列表、误报说明、人工等级、责任人指派",
       "acceptance": [
         "复核必须具名授权并记录证据；不能由学生或普通管理员改风险状态。",
@@ -653,7 +653,7 @@
         "CM-026",
         "CM-027"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "接单状态、值班配置、升级路径与异常看板",
       "acceptance": [
         "发送成功与接单、处置分别记录，无人接单触发批准的备用路径。",
@@ -673,7 +673,7 @@
         "CM-028",
         "CM-024"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "最小接触记录、支持计划、转介回执和随访任务",
       "acceptance": [
         "所有记录属于授权个案，不扩散给一般校务人员；不提供自动治疗方案。",
@@ -691,7 +691,7 @@
       "dependencies": [
         "CM-029"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "结案申请、审批/退回、证据与新线索重开",
       "acceptance": [
         "低分复测、时间经过、自助申请均不自动关闭个案。",
@@ -712,7 +712,7 @@
         "CM-026",
         "CM-027"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "学生人工求助入口、服务时段和紧急帮助说明",
       "acceptance": [
         "没有量表结果、拒绝参与或草稿未提交也能获取人工帮助说明。",
@@ -733,7 +733,7 @@
         "CM-030",
         "CM-031"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "合成风险场景与通知/队列/值班故障演练报告",
       "acceptance": [
         "覆盖误报、低分求助、新线索、家庭侵害情境、失联与夜间。",
@@ -753,7 +753,7 @@
         "CM-023",
         "CM-027"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "指标字典及小数据集人工对账",
       "acceptance": [
         "明确邀请/符合条件/拒绝/未完成/无效/有效分母和时间窗口。",
@@ -772,7 +772,7 @@
         "CM-033",
         "CM-009"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "学校/学年聚合看板及小样本控制",
       "acceptance": [
         "实现已审定的小单元/互补抑制与可用维度白名单，班主任不见班内风险分布。",
@@ -793,7 +793,7 @@
         "CM-010",
         "CM-034"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "名单/批准报告/聚合报表导出及下载代理",
       "acceptance": [
         "导出申请记录目的、字段、范围和审批，原始答案默认不可导出。",
@@ -814,7 +814,7 @@
         "CM-024",
         "CM-035"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "查阅/更正/撤回/删除工单和生命周期执行器",
       "acceptance": [
         "身份核验后及时受理，依法拒绝有理由；不能以报告不可见拒绝所有查阅。",
@@ -837,7 +837,7 @@
         "CM-035",
         "CM-036"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "合成双租户 E2E 证据与终端测试报告",
       "acceptance": [
         "完成导入→参与→任务→答题→报告→复核→支持→结案闭环。",
@@ -857,7 +857,7 @@
         "CM-032",
         "CM-036"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "压测、恢复、回滚与人工接续记录",
       "acceptance": [
         "按批准负载验证保存/提交/计分目标，测量 p95 和错误率，不用静态截图证明。",
@@ -877,7 +877,7 @@
         "CM-038",
         "CM-010"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "安全验证、影响评估、供应商与合规检查结论",
       "acceptance": [
         "验证鉴权、越权、会话、文件、导出、日志、秘密与依赖风险。",
@@ -905,7 +905,7 @@
         "CM-038",
         "CM-039"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "经签署的试点 Gate、范围/窗口与停止条件",
       "acceptance": [
         "所有 CM-001–CM-039 验收，真实许可/同意/专业值班/应急联系人等证据齐全。",
@@ -924,7 +924,7 @@
         "CM-040",
         "CM-009"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "资质展示审批、服务范围、时段和房间管理",
       "acceptance": [
         "资质待审/失效者不可开放预约，服务介绍不超出合法范围。",
@@ -943,7 +943,7 @@
         "CM-041",
         "CM-026"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "学生预约与工作人员日历、回执和提醒",
       "acceptance": [
         "并发预约/改期不占同一咨询师或房间重叠时段；重试不重复预约。",
@@ -962,7 +962,7 @@
         "CM-040",
         "CM-009"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "公告/文章/中心介绍、检索与专业发布流程",
       "acceptance": [
         "支持草稿、专业审核、发布、下架和适龄范围，不让管理员绕审发布。",
@@ -981,7 +981,7 @@
         "CM-043",
         "CM-011"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "媒体管理、可访问播放器和附件检查",
       "acceptance": [
         "媒体有来源、适龄与审核记录；安全类型/大小/恶意文件检查生效。",
@@ -1001,7 +1001,7 @@
         "CM-013",
         "CM-036"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "背景调查字段 schema 版本、审批和选择性统计",
       "acceptance": [
         "每个字段含目的/必要性/选填性/可见范围/保留期，发布前审批。",
@@ -1021,7 +1021,7 @@
         "CM-014",
         "CM-016"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "逐个方案的授权/适龄审定、目录与金标准",
       "acceptance": [
         "新增学习、压力、人际等维度逐项核对许可和适用证据，不自动复用成人/初中常模。",
@@ -1042,7 +1042,7 @@
         "CM-018",
         "CM-031"
       ],
-      "status": "planned",
+      "status": "done",
       "deliverable": "受政策约束的测评目录、参与与支持闭环",
       "acceptance": [
         "自选筛查共用学校频次/适龄/同意/值班门槛，不形成无限次自测。",
@@ -1062,7 +1062,7 @@
         "CM-034",
         "CM-036"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "deliverable": "另行批准的数据共享范围、区域指标和扩校验收",
       "acceptance": [
         "获得新用途/接收方与租户共享依据，不把多校开关变成默认跨校看个体。",

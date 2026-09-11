@@ -522,6 +522,8 @@ export async function completeRightsRequest(store: JsonStore, auth: Authenticate
       state.riskSignals = state.riskSignals.filter((signal) => signal.studentId !== request.studentId);
       state.riskCases = state.riskCases.filter((riskCase) => riskCase.studentId !== request.studentId);
       state.followUps = state.followUps.filter((followUp) => state.riskCases.some((riskCase) => riskCase.id === followUp.caseId));
+      state.profileResponses = state.profileResponses.filter((response) => response.studentId !== request.studentId);
+      state.appointments = state.appointments.filter((appointment) => appointment.studentId !== request.studentId);
       const tombstone: DeletionTombstone = { id: id(), tenantId: auth.user.tenantId, studentId: request.studentId, requestId, deletedAt: now(), retainedCategories: ['minimal_audit_event', 'deletion_tombstone'] };
       state.deletionTombstones.push(tombstone);
       state.outboxEvents.push({ id: id(), tenantId: auth.user.tenantId, type: 'student.data_deleted', aggregateId: request.studentId, payload: { requestId }, status: 'pending', attempts: 0, availableAt: now(), createdAt: now() });
@@ -646,6 +648,7 @@ export async function updateAppointment(store: JsonStore, auth: AuthenticatedUse
     const appointment = state.appointments.find((candidate) => candidate.id === appointmentId && candidate.tenantId === auth.user.tenantId);
     if (!appointment) throw notFound();
     if (isStudent(auth.user) && appointment.studentId !== auth.user.id) throw forbidden();
+    if (isStudent(auth.user) && stateValue !== 'cancelled') throw forbidden();
     if (stateValue === 'confirmed' && !can(auth.user, 'appointment:manage')) throw forbidden();
     if (['completed', 'no_show'].includes(stateValue) && !can(auth.user, 'appointment:manage')) throw forbidden();
     appointment.state = stateValue; appointment.updatedAt = now();
@@ -733,6 +736,7 @@ export async function regionalAnalytics(store: JsonStore, auth: AuthenticatedUse
 
 export async function listStudents(store: JsonStore, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
   if (!can(auth.user, 'org:read')) throw forbidden();
+  if (auth.user.role === 'teacher') throw forbidden();
   return store.read((state) => state.students.filter((student) => student.tenantId === auth.user.tenantId && student.active && (!auth.user.schoolId || student.schoolId === auth.user.schoolId)).map((student) => ({ id: student.id, schoolId: student.schoolId, classId: student.classId, age: student.age, guardianVerified: student.guardianVerified })));
 }
 
