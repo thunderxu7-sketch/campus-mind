@@ -33,6 +33,7 @@ const objectStore = readFileSync(join(root, 'apps/api/src/infra/object-store.ts'
 const scoring = readFileSync(join(root, 'apps/api/src/domain/scoring.ts'), 'utf8');
 const adminWeb = readFileSync(join(root, 'apps/admin-web/index.html'), 'utf8');
 const studentWeb = readFileSync(join(root, 'apps/student-web/index.html'), 'utf8');
+if (/\b(?:localStorage|sessionStorage|indexedDB)\b/i.test(studentWeb)) suspicious.push('student-web must not persist sensitive answer/session data in browser storage');
 const requiredSnippets = [
   [crypto, "NODE_ENV !== 'production'", 'production key guard'],
   [crypto, 'CAMPMIND_MASTER_KEY', 'production key source'],
