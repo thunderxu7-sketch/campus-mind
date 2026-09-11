@@ -155,6 +155,8 @@ test('student assessment lifecycle is durable, revision-safe and idempotent', as
   const tasks = await request('/v1/me/tasks', { headers: auth(token) });
   assert.equal(tasks.response.status, 200);
   assert.equal(tasks.body.data.length, 1);
+  assert.equal(tasks.body.data[0].available, true);
+  assert.equal(tasks.body.data[0].availabilityReason, 'available');
   const assignmentId = tasks.body.data[0].id;
   const started = await request(`/v1/me/tasks/${assignmentId}/attempts`, { method: 'POST', headers: auth(token), body: '{}' });
   assert.equal(started.response.status, 201, JSON.stringify(started.body));

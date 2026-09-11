@@ -134,14 +134,16 @@ export async function listMyTasks(store: Store, auth: AuthenticatedUser): Promis
     const currentTime = new Date();
     const assignments = state.assignments.filter((assignment) => sameTenant(assignment, auth.user.tenantId) && assignment.studentId === auth.user.id);
     return assignments.map((assignment) => {
+      const student = state.students.find((candidate) => candidate.id === auth.user.id && candidate.tenantId === auth.user.tenantId && candidate.active);
       const campaign = state.campaigns.find((candidate) => candidate.id === assignment.campaignId && sameTenant(candidate, auth.user.tenantId));
       const scale = campaign ? state.scales.find((candidate) => candidate.id === campaign.scaleVersionId && sameTenant(candidate, auth.user.tenantId)) : undefined;
       const attempt = state.attempts.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.assignmentId === assignment.id);
       const reservation = assignment.frequencyReservationId ? state.frequencyReservations.find((candidate) => candidate.id === assignment.frequencyReservationId && candidate.tenantId === auth.user.tenantId) : undefined;
       const terminal = ['completed', 'declined', 'expired'].includes(assignment.status) || Boolean(attempt && ['submitted', 'scoring_pending', 'scored', 'scoring_failed', 'invalid', 'withdrawn', 'expired'].includes(attempt.state));
       const inWindow = Boolean(campaign && ['open', 'scheduled'].includes(campaign.state) && validDate(campaign.opensAt) && validDate(campaign.closesAt) && new Date(campaign.opensAt) <= currentTime && new Date(campaign.closesAt) > currentTime);
-      const available = !terminal && ['assigned', 'started'].includes(assignment.status) && inWindow && Boolean(reservation && ['reserved', 'exception'].includes(reservation.status));
-      const availabilityReason = terminal ? 'terminal' : !['assigned', 'started'].includes(assignment.status) ? 'assignment_unavailable' : !inWindow ? 'outside_window' : !reservation || !['reserved', 'exception'].includes(reservation.status) ? 'frequency_review' : 'available';
+      const ageEligible = Boolean(scale && student && ageAllowed(student, scale));
+      const available = !terminal && ['assigned', 'started'].includes(assignment.status) && inWindow && ageEligible && Boolean(reservation && ['reserved', 'exception'].includes(reservation.status));
+      const availabilityReason = terminal ? 'terminal' : !['assigned', 'started'].includes(assignment.status) ? 'assignment_unavailable' : !inWindow ? 'outside_window' : !ageEligible ? 'age_not_allowed' : !reservation || !['reserved', 'exception'].includes(reservation.status) ? 'frequency_review' : 'available';
       return {
         id: assignment.id,
         name: campaign?.name ?? '测评任务',

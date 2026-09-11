@@ -52,7 +52,7 @@ paths:
   /v1/me:
     get: {summary: Current named user, responses: {'200': {description: User}}}
   /v1/me/tasks:
-    get: {summary: Student's own assignments with server-authoritative availability, responses: {'200': {description: Tasks include available and availabilityReason}}}
+    get: {summary: Student's own assignments with server-authoritative age and availability checks, responses: {'200': {description: Tasks include available and availabilityReason}}}
   /v1/me/tasks/{assignmentId}/attempts:
     post: {summary: Start an age/consent/frequency-checked attempt, parameters: [{$ref: '#/components/parameters/assignmentId'}], responses: {'201': {description: Attempt}, '400': {description: Consent, age, frequency or time-window failure}}}
   /v1/attempts/{attemptId}/answers:
