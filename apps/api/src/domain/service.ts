@@ -1153,9 +1153,25 @@ export async function getAnalytics(store: Store, auth: AuthenticatedUser, groupB
   return store.transaction((state) => {
     const tenantStudents = state.students.filter((student) => student.tenantId === auth.user.tenantId && student.active && (!auth.user.schoolId || student.schoolId === auth.user.schoolId));
     const groups = new Map<string, number>();
-    for (const student of tenantStudents) {
-      const key = groupBy === 'school' ? student.schoolId : groupBy === 'age_band' ? (student.age === undefined ? 'unknown' : student.age < 14 ? '6-13' : '14-19') : '2026-2027';
-      groups.set(key, (groups.get(key) ?? 0) + 1);
+    if (groupBy === 'academic_year') {
+      // Academic year is an attribute of a campaign/assignment, not of the
+      // student directory. Count each student once per year so a duplicate
+      // assignment or a re-run cannot inflate the aggregate.
+      const studentIds = new Set(tenantStudents.map((student) => student.id));
+      const byYear = new Map<string, Set<string>>();
+      for (const assignment of state.assignments.filter((candidate) => candidate.tenantId === auth.user.tenantId && studentIds.has(candidate.studentId))) {
+        const campaign = state.campaigns.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.id === assignment.campaignId);
+        if (!campaign) continue;
+        const members = byYear.get(campaign.academicYear) ?? new Set<string>();
+        members.add(assignment.studentId);
+        byYear.set(campaign.academicYear, members);
+      }
+      for (const [year, members] of byYear) groups.set(year, members.size);
+    } else {
+      for (const student of tenantStudents) {
+        const key = groupBy === 'school' ? student.schoolId : (student.age === undefined ? 'unknown' : student.age < 14 ? '6-13' : '14-19');
+        groups.set(key, (groups.get(key) ?? 0) + 1);
+      }
     }
     const rows = [...groups.entries()].map(([key, count]) => ({ key, count: count < 10 ? null : count, suppressed: count < 10 }));
     audit(state, auth.user, 'analytics.viewed', 'analytics', groupBy, { groupCount: rows.length });

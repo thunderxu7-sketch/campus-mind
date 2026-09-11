@@ -292,6 +292,10 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   const analytics = await request('/v1/analytics/summary?groupBy=school', { headers: auth(professional) });
   assert.equal(analytics.response.status, 200);
   assert.equal(analytics.body.data.rows[0].suppressed, true);
+  const academicYearAnalytics = await request('/v1/analytics/summary?groupBy=academic_year', { headers: auth(professional) });
+  assert.equal(academicYearAnalytics.response.status, 200);
+  assert.deepEqual(academicYearAnalytics.body.data.rows.map((row) => row.key), ['2026-2027']);
+  assert.equal(academicYearAnalytics.body.data.rows[0].suppressed, true);
   const exportRequest = await request('/v1/exports', { method: 'POST', headers: auth(admin), body: JSON.stringify({ kind: 'aggregate' }) });
   assert.equal(exportRequest.response.status, 201);
   const exportApprove = await request(`/v1/exports/${exportRequest.body.data.id}/approve`, { method: 'POST', headers: auth(professional), body: '{}' });
