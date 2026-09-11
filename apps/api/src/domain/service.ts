@@ -725,6 +725,7 @@ async function processOutboxEvent(store: Store, eventId: string): Promise<void> 
       const existingDelivery = state.deliveryAttempts.find((attempt) => attempt.tenantId === event.tenantId && attempt.outboxEventId === event.id && attempt.channel === 'in_app' && attempt.status === 'sent');
       if (!existingDelivery) {
         const priority = event.payload.level === 'urgent' || state.riskCases.find((riskCase) => riskCase.tenantId === event.tenantId && riskCase.id === event.aggregateId)?.priority === 'urgent' ? 'urgent' : 'attention';
+        if (process.env.NODE_ENV === 'production' && process.env.CAMPMIND_NOTIFICATION_ADAPTER_READY !== 'true') throw new Error('NOTIFICATION_PROVIDER_NOT_CONFIGURED');
         const dispatcher = store.notificationDispatcher;
         let delivery: { status: 'sent' | 'failed'; provider: string; errorCode?: string };
         try {

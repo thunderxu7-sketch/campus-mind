@@ -28,6 +28,7 @@ for (const file of files) {
 const main = readFileSync(join(root, 'apps/api/src/main.ts'), 'utf8');
 const crypto = readFileSync(join(root, 'apps/api/src/domain/crypto.ts'), 'utf8');
 const store = readFileSync(join(root, 'apps/api/src/domain/store.ts'), 'utf8');
+const service = readFileSync(join(root, 'apps/api/src/domain/service.ts'), 'utf8');
 const objectStore = readFileSync(join(root, 'apps/api/src/infra/object-store.ts'), 'utf8');
 const scoring = readFileSync(join(root, 'apps/api/src/domain/scoring.ts'), 'utf8');
 const adminWeb = readFileSync(join(root, 'apps/admin-web/index.html'), 'utf8');
@@ -42,6 +43,7 @@ const requiredSnippets = [
   [store, 'assertProductionStoreInjection', 'production adapter guard'],
   [store, 'objectStore', 'private object-store boundary'],
   [store, 'notificationDispatcher', 'provider-backed notification boundary'],
+  [service, 'CAMPMIND_NOTIFICATION_ADAPTER_READY', 'runtime notification readiness guard'],
   [objectStore, 'aes-256-gcm', 'encrypted private object store'],
   [objectStore, 'OBJECT_KEY_INVALID', 'object-key traversal guard'],
   [scoring, 'SYNTHETIC_SCALE_BLOCKED', 'synthetic scale production guard'],
