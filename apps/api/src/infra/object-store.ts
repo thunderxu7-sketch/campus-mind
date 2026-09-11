@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { masterKey } from '../domain/crypto.js';
 
@@ -42,6 +42,16 @@ function fileFor(rootDir: string, tenantId: string, objectKey: string): string {
   return join(rootDir, tenantHash.slice(0, 2), `${tenantHash}-${keyHash}.blob`);
 }
 
+function cleanupTempFiles(directory: string): number {
+  let removed = 0;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) removed += cleanupTempFiles(path);
+    else if (entry.isFile() && entry.name.endsWith('.tmp')) { unlinkSync(path); removed += 1; }
+  }
+  return removed;
+}
+
 function associatedData(tenantId: string, objectKey: string, contentType: string, byteSize: number, sha256: string): Buffer {
   return Buffer.from(`${tenantId}\0${objectKey}\0${contentType}\0${byteSize}\0${sha256}`, 'utf8');
 }
@@ -75,6 +85,7 @@ export class EncryptedFileObjectStore implements PrivateObjectStore {
     if (!Number.isInteger(this.maxBytes) || this.maxBytes < 1 || this.maxBytes > 100 * 1024 * 1024) throw new Error('OBJECT_STORE_LIMIT_INVALID');
     mkdirSync(this.rootDir, { recursive: true, mode: 0o700 });
     chmodSync(this.rootDir, 0o700);
+    cleanupTempFiles(this.rootDir);
   }
 
   async put(input: { tenantId: string; objectKey: string; contentType: string; bytes: Uint8Array }): Promise<StoredObject> {

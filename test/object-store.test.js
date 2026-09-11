@@ -30,6 +30,9 @@ test('encrypted object store isolates tenants and keeps plaintext out of files',
   const root = mkdtempSync(join(tmpdir(), 'campus-mind-objects-'));
   try {
     const objectStore = new EncryptedFileObjectStore({ rootDir: root, maxBytes: 1024 });
+    writeFileSync(join(root, 'stale-upload.tmp'), 'synthetic stale temp', { mode: 0o600 });
+    new EncryptedFileObjectStore({ rootDir: root, maxBytes: 1024 });
+    assert.equal(allFiles(root).some((file) => file.endsWith('.tmp')), false);
     const bytes = Buffer.from('synthetic private media bytes');
     const saved = await objectStore.put({ tenantId: 'tenant-a', objectKey: 'media/tenant-a/abc123', contentType: 'image/png', bytes });
     assert.equal(saved.sha256.length, 64);
