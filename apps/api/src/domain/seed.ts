@@ -27,9 +27,11 @@ export function seedDemoState(): DatabaseState {
     user('user-professional-demo', 'professional@campus-mind.demo', '演示心理专业负责人', 'professional_lead', DEMO_IDS.school),
     user('user-counselor-demo', 'counselor@campus-mind.demo', '演示心理咨询师', 'counselor', DEMO_IDS.school),
     user('user-teacher-demo', 'teacher@campus-mind.demo', '演示班主任', 'teacher', DEMO_IDS.school),
+    user('user-guardian-demo', 'guardian@campus-mind.demo', '演示监护人', 'guardian', DEMO_IDS.school),
     user(DEMO_IDS.student, 'student@campus-mind.demo', '演示学生', 'student', DEMO_IDS.school),
   );
   state.students.push({ id: DEMO_IDS.student, tenantId: DEMO_IDS.tenant, schoolId: DEMO_IDS.school, classId: 'class-demo-1', externalRefHash: 'synthetic-demo-ref', displayNameCiphertext: encrypt('演示学生'), age: 15, guardianVerified: true, active: true, createdAt });
+  state.guardianLinks.push({ id: 'guardian-link-demo', tenantId: DEMO_IDS.tenant, studentId: DEMO_IDS.student, guardianUserId: 'user-guardian-demo', status: 'pending', createdAt });
   state.consents.push({ id: 'consent-demo', tenantId: DEMO_IDS.tenant, studentId: DEMO_IDS.student, purpose: 'assessment', noticeVersion: 'notice-demo-v1', actorType: 'guardian', actorId: 'synthetic-guardian', status: 'active', recordedAt: createdAt });
   const scale: ScaleVersion = {
     id: DEMO_IDS.scale,
@@ -43,6 +45,9 @@ export function seedDemoState(): DatabaseState {
     maxAge: 18,
     scoringVersion: 'synthetic-scoring-v1',
     noticeVersion: 'notice-demo-v1',
+    dimensions: ['情绪支持', '压力觉察', '求助资源'],
+    population: 'middle',
+    language: 'zh-CN',
     items: [
       { id: 'q1', prompt: '演示题：我能说出最近需要帮助的事情。', min: 0, max: 1, reverse: false, factor: 'self_awareness' },
       { id: 'q2', prompt: '演示题：我能找到一种让自己平静下来的方法。', min: 0, max: 1, reverse: false, factor: 'emotion_support' },

@@ -1,6 +1,6 @@
 # 技术架构
 
-状态：建议方案，尚未建立应用工程或锁定依赖版本。选型以小团队、可审计、高隐私需求为前提；具体版本在 M1 依据支持周期、兼容矩阵和安全公告锁定。
+状态：建议生产架构 + Node 20 合成数据参考实现。参考实现用于自动化验收，不等于生产依赖已经锁定或上线；正式版本仍需在 M1/M4 完成供应商、性能、专业和隐私证据。
 
 ## 1. 总体设计
 
@@ -50,7 +50,7 @@ flowchart TB
 
 官方技术依据：[Vite 指南](https://vite.dev/guide/)、[NestJS 文档](https://docs.nestjs.com/)、[PostgreSQL 行级安全](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)。队列及组件库仅为候选，M1 还需验证锁定版本，未声称已实现集成。
 
-## 3. 建议目录（未来实现）
+## 3. 建议目录与当前实现
 
 ```text
 apps/
@@ -67,7 +67,7 @@ packages/
 infra/                # 环境模板与运行手册（后续）
 ```
 
-上述目录当前不创建空壳，避免产生“已实现”的误解。现有仓库仅有规划、校验脚本和 GitHub 模板。
+当前仓库已提供 `apps/api`、`apps/admin-web`、`apps/student-web`、`test` 和 `infra/migrations` 的合成数据参考实现；尚未创建空的 `packages/*`，避免产生“生产组件已实现”的误解。
 
 ## 4. 租户与授权防线
 

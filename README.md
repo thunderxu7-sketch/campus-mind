@@ -2,7 +2,7 @@
 
 **心理健康测评云平台（中小学版）**：以学校为服务单位，连接学生、心理教师与校方，形成「知情参与 → 测评 → 专业复核 → 支持与转介 → 随访」闭环。
 
-> **当前状态：开发规划 v0.1，尚未实现产品。** 本仓库不包含真实学生数据、受版权保护的量表题目或生产服务。筛查结果不是医学诊断，系统不能替代专业判断或紧急救助。
+> **当前状态：合成数据参考实现 v0.1（开发/验收用途）。** 本仓库不包含真实学生数据、受版权保护的量表题目或生产服务。筛查结果不是医学诊断，系统不能替代专业判断或紧急救助。
 
 ## 产品范围
 
@@ -48,16 +48,19 @@
 
 上述为项目设计约束，政策依据与适用边界见[来源记录](docs/09-sources-and-decisions.md)。正式运营须经当地校方、专业负责人及法律/隐私负责人评审，不以文档存在证明合规。
 
-## 技术方向（待 M1 落地）
+## 技术方向与当前实现
 
 TypeScript 单仓：React + Vite（管理端 / 学生端）、NestJS API 与 Worker、PostgreSQL、Redis 队列、私有对象存储。核心计分独立纯函数包；从模块化单体起步，不先上微服务、AI 诊断或 Kubernetes。
 
-当前已提供一个**合成数据参考实现**（Node 20+）：加密 JSON 本地适配器、学生/工作人员 API、静态响应式页面、版本化演示计分、人工复核工作流和 PostgreSQL 迁移草案。它不是生产部署，也不能接收真实学生资料。生产环境必须替换存储、密钥、通知和身份接入，并通过 M4 Gate。
+当前已提供一个**合成数据参考实现**（Node 20+）：加密 JSON 本地适配器、学生/工作人员 API、静态响应式页面、版本化演示计分、人工复核工作流、受控导入/导出、预约、教育内容、媒体安全检查和 PostgreSQL 迁移草案。它不是生产部署，也不能接收真实学生资料。生产环境必须替换存储、密钥、通知和身份接入，并通过 M4 Gate。
 
 ```sh
 npm install
 CAMPMIND_DEMO_MFA=true CAMPMIND_MASTER_KEY=local-only-key npm start
 # 管理端 http://localhost:8787/admin；学生端 http://localhost:8787/student
+
+npm run check       # TypeScript、23 项行为测试、安全扫描与规划校验
+npm audit --omit=dev --audit-level=high
 ```
 
 演示数据全部由代码生成，密码只用于本地测试；不要把其作为生产凭据。API 默认将本地数据写入被 `.gitignore` 忽略的 `private-data/`。
@@ -77,4 +80,4 @@ python3 -m unittest discover -s tests -v
 python3 scripts/check_plan.py --write
 ```
 
-不把任务状态标为已开发；GitHub Issue 是规划跟踪，不代表已交付。代码与文档贡献规则见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+任务状态中的 `done` 只表示参考实现与自动化证据完成；`in_progress` 仍可能缺生产/治理证据。GitHub Issue 是规划跟踪，不代表真实试点准入。代码与文档贡献规则见 [CONTRIBUTING.md](CONTRIBUTING.md)。

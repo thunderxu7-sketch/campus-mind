@@ -173,6 +173,19 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   const publicContent = await request('/v1/content/public?age=15');
   assert.equal(publicContent.response.status, 200);
   assert.ok(publicContent.body.data.some((item) => item.id === content.body.data.id));
+  const media = await request('/v1/media-assets', { method: 'POST', headers: auth(professional), body: JSON.stringify({ filename: 'synthetic.png', mediaType: 'image/png', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }) });
+  assert.equal(media.response.status, 201, JSON.stringify(media.body));
+  const mediaContent = await request('/v1/content', { method: 'POST', headers: auth(professional), body: JSON.stringify({ title: '合成图示', kind: 'media', body: '合成教育图示说明。', ageMin: 12, ageMax: 18, copyrightSource: 'synthetic-only', mediaAssetId: media.body.data.id, altText: '合成的安全支持图示' }) });
+  assert.equal(mediaContent.response.status, 201, JSON.stringify(mediaContent.body));
+  const mediaPublished = await request(`/v1/content/${mediaContent.body.data.id}/publish`, { method: 'POST', headers: auth(professional), body: '{}' });
+  assert.equal(mediaPublished.response.status, 200);
+  const mediaPublic = await request('/v1/content/public?age=15');
+  const publicMediaItem = mediaPublic.body.data.find((item) => item.id === mediaContent.body.data.id);
+  assert.equal(publicMediaItem.media.id, media.body.data.id);
+  const mediaBytes = await fetch(`${base}/v1/content/public/${media.body.data.id}/media`);
+  assert.equal(mediaBytes.status, 200);
+  assert.equal(mediaBytes.headers.get('content-type'), 'image/png');
+  assert.equal((await mediaBytes.arrayBuffer()).byteLength > 8, true);
 });
 
 
@@ -199,6 +212,18 @@ test('rights requests are auditable and privacy staff can complete non-destructi
   assert.equal(completed.body.data.status, 'completed');
 });
 
+test('guardian consent requires a verified guardian link and rejects role spoofing', async () => {
+  const admin = await login('admin@campus-mind.demo');
+  const guardian = await login('guardian@campus-mind.demo');
+  const verified = await request('/v1/guardian-links/guardian-link-demo/verify', { method: 'POST', headers: auth(admin), body: '{}' });
+  assert.equal(verified.response.status, 200);
+  const consent = await request('/v1/me/consents', { method: 'POST', headers: auth(guardian), body: JSON.stringify({ studentId: 'student-demo', actorType: 'guardian', noticeVersion: 'notice-support-v1', purpose: 'support' }) });
+  assert.equal(consent.response.status, 201);
+  const student = await login('student@campus-mind.demo');
+  const spoof = await request('/v1/me/consents', { method: 'POST', headers: auth(student), body: JSON.stringify({ studentId: 'student-demo', actorType: 'guardian', noticeVersion: 'notice-spoof-v1', purpose: 'research' }) });
+  assert.equal(spoof.response.status, 403);
+});
+
 test('consent withdrawal blocks future assessment and leaves audit evidence', async () => {
   const admin = await login('admin@campus-mind.demo');
   const student = await login('student@campus-mind.demo');
@@ -218,4 +243,9 @@ test('consent withdrawal blocks future assessment and leaves audit evidence', as
   const ops = await login('ops@campus-mind.demo');
   const drained = await request('/v1/admin/worker/drain', { method: 'POST', headers: auth(ops), body: '{}' });
   assert.equal(drained.response.status, 200);
+  const regional = await request('/v1/admin/regional-analytics', { headers: auth(ops) });
+  assert.equal(regional.response.status, 200);
+  assert.equal(regional.body.data.rows[0].suppressed, true);
+  assert.ok(store.snapshot().auditEvents.some((event) => event.action === 'analytics.viewed'));
+  assert.ok(store.snapshot().auditEvents.some((event) => event.action === 'analytics.regional_viewed'));
 });

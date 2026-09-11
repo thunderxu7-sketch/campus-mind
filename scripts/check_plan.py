@@ -115,7 +115,7 @@ def render(plan: dict) -> str:
         '# 可执行开发任务', '',
         '> 自动生成：只修改 `planning/backlog.json`，然后运行 `python3 scripts/check_plan.py --write`。', '',
         f'规划基线：{plan["updated_at"]}。共 **{len(tasks)} 项**：' + ' / '.join(f'{p} {counts[p]}' for p in ['P0', 'P1', 'P2']) + '。', '',
-        '优先级不等于可跳过里程碑 Gate；当前 `planned` 代表待开发，owner 为责任岗位而非已分配人员。', '',
+        '状态：`done` = 参考实现与自动化证据已完成；`in_progress` = 已有部分实现但仍缺生产/治理证据；`planned` = 尚未开始。状态不等于真实试点准入。owner 为责任岗位而非已分配人员。', '',
         '完整范围与待决策问题见[路线图](06-roadmap.md)，具体测试场景见[验收矩阵](08-verification.md)。', '',
         '## 总览', '',
         '| ID | 任务 | 优先级 | 阶段 | 子系统 | 依赖 |',

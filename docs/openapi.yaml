@@ -26,6 +26,10 @@ paths:
       responses: {'200': {description: Session}, '401': {description: Invalid credentials or MFA required}}
   /v1/auth/logout:
     post: {summary: Revoke current session, responses: {'204': {description: Revoked}}}
+  /v1/guardian-links:
+    post: {summary: Create a pending guardian relationship for verification, responses: {'201': {description: Pending relationship}}}
+  /v1/guardian-links/{linkId}/verify:
+    post: {summary: Verify a guardian relationship, parameters: [{$ref: '#/components/parameters/linkId'}], responses: {'200': {description: Verified relationship}}}
   /v1/me:
     get: {summary: Current named user, responses: {'200': {description: User}}}
   /v1/me/tasks:
@@ -42,6 +46,10 @@ paths:
     post: {summary: Professional report approval, parameters: [{$ref: '#/components/parameters/reportId'}], responses: {'204': {description: Approved}}}
   /v1/reports/{reportId}/release:
     post: {summary: Release an approved report to its allowed reader, parameters: [{$ref: '#/components/parameters/reportId'}], responses: {'204': {description: Released}}}
+  /v1/scales/{scaleId}/revoke:
+    post: {summary: Revoke a scale version for new use without rewriting history, parameters: [{$ref: '#/components/parameters/scaleId'}], responses: {'204': {description: Revoked}}}
+  /v1/campaigns/{campaignId}/frequency-exceptions:
+    post: {summary: Record an independently approved same-year re-evaluation exception, parameters: [{$ref: '#/components/parameters/campaignId'}], responses: {'201': {description: Exception recorded}, '400': {description: Missing professional approval evidence}}}
   /v1/risk-signals:
     post: {summary: Student self-help or professional manual signal, responses: {'201': {description: Human-review case created}}}
   /v1/cases:
@@ -67,6 +75,14 @@ paths:
       security: []
       summary: Published age-filtered education content
       responses: {'200': {description: Public content}}
+  /v1/media-assets:
+    post: {summary: Upload a bounded, type-checked education media asset, responses: {'201': {description: Clean asset metadata}, '413': {description: Asset too large}}}
+  /v1/content/public/{assetId}/media:
+    get:
+      security: []
+      summary: Stream media only when linked to published content
+      parameters: [{$ref: '#/components/parameters/assetId'}]
+      responses: {'200': {description: Media bytes}, '404': {description: Unpublished or unknown asset}}
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: opaque-session-token}
@@ -75,6 +91,10 @@ components:
     attemptId: {name: attemptId, in: path, required: true, schema: {type: string}}
     reportId: {name: reportId, in: path, required: true, schema: {type: string}}
     caseId: {name: caseId, in: path, required: true, schema: {type: string}}
+    campaignId: {name: campaignId, in: path, required: true, schema: {type: string}}
+    scaleId: {name: scaleId, in: path, required: true, schema: {type: string}}
+    assetId: {name: assetId, in: path, required: true, schema: {type: string}}
+    linkId: {name: linkId, in: path, required: true, schema: {type: string}}
   schemas:
     Login:
       type: object

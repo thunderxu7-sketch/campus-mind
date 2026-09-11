@@ -1,6 +1,6 @@
 # 数据模型与 API 草案
 
-这是接口与领域设计，不是已部署 API，也不含可直接执行的 DDL。`/v1` 表示建议的首版 API。
+这是接口与领域设计，并同步描述本仓库的合成参考 API；它不代表已部署生产 API。`/v1` 表示首版 API。
 
 ## 1. 关键实体
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | 组织 | Tenant、School、AcademicYear、Grade、Class、Enrollment | 学生身份与学年班级关系分开；转班留历史，不搬走历史个案授权 |
 | 身份 | User、Membership、RoleGrant、ScopeGrant、AccessApproval | 用户可有多租户成员关系；授权含用途、到期和授予人，职务不自动获得专业访问权 |
-| 学生 | Student、GuardianLink | 身份资料加密；监护关系含核验来源、核验人、生效/撤销时间；年龄未知 fail closed |
+| 学生 | Student、GuardianLink | 身份资料加密；监护关系含独立监护账号、核验人、生效/撤销时间；年龄未知 fail closed |
 | 采集 | ImportBatch、ImportRowResult、ProfileSchemaVersion、ProfileResponse | 导入幂等；拒绝行可追溯；自定义字段禁止任意扩大敏感采集 |
 | 参与治理 | NoticeVersion、ConsentRecord、ProcessingBasis、RightsRequest | 主体/监护人、目的、版本、方式、时间与撤回；其他合法依据不能由前端随意勾选 |
 | 量表 | Scale、ScaleVersion、NormVersion、ScoringVersion、ScaleLicense | 适龄/语言/地区/报告人、题目与反向题规则 hash、有效期、专业审批；正文受限存储 |
@@ -22,7 +22,7 @@
 | 风险 | RiskSignal、RiskCase、RiskReview、CaseAssignment | 信号有来源和版本；活跃个案可关联多个信号；复核和业务等级分开 |
 | 支持 | CarePlan、ContactNote、Referral、FollowUp、ClosureApproval | 最小化接触记录、外部转介状态、随访到期、独立结案审批 |
 | 预约 | CounselorProfile、AvailabilitySlot、Appointment、Room | 资质审定状态；咨询师/房间时间窗不可冲突；不在预约提醒带心理原因 |
-| 内容 | ArticleVersion、MediaAsset、ContentReview | 适龄、版权、审核、有效期；公共教育内容与私有个案附件分开 |
+| 内容 | ArticleVersion、MediaAsset、ContentReview | 适龄、版权、审核、有效期；公共教育内容与私有个案附件分开；媒体限制类型/大小、哈希与安全检查，并要求文字替代或字幕 |
 | 横切 | AuditEvent、OutboxEvent、DeliveryAttempt、ExportJob、RetentionPolicy、DeletionTombstone | 访问行为审计、投递/接单分别记录、下载再鉴权、保留与删除链路 |
 
 ## 2. 主要关系
@@ -69,11 +69,14 @@ erDiagram
 | `POST /v1/imports/preview` | 导入预检 | 文件隔离、限额、不执行公式/宏、字段合法性 |
 | `POST /v1/imports/{id}/commit` | 确认导入 | 审批、幂等、校验预览版本；组织映射人工确认 |
 | `POST /v1/guardian-links/verify` | 监护关系核验 | 经确认渠道、限流，不以学号为验证凭据 |
-| `POST /v1/consents`、`POST /v1/consents/{id}/withdraw` | 同意与撤回 | 目的/版本/主体/年龄验证，撤回触发权限与任务更新 |
+| `POST /v1/guardian-links` | 建立待核验监护关系 | 校务账号只能关联本租户的监护账号与学生；未核验前不能记录监护同意 |
+| `POST /v1/me/consents`、`POST /v1/me/consents/{id}/withdraw` | 同意与撤回 | 目的/版本/主体/年龄验证，撤回触发权限与任务更新 |
 | `POST /v1/rights-requests` | 查阅/更正/删除申请 | 便捷提交、身份核验、时限跟踪、拒绝依据 |
 | `POST /v1/scales/{id}/versions` | 创建量表草稿版本 | 仅专业授权人员，正文不进入普通日志 |
 | `POST /v1/scale-versions/{id}/approve` | 专业审定 | 作者/审批人分离；版权、适龄和金标准记录必填 |
 | `POST /v1/campaigns`、`POST /v1/campaigns/{id}/publish` | 创建/发布任务 | 名单快照、频次、值班、所需审批、不可变版本 |
+| `POST /v1/campaigns/{id}/frequency-exceptions` | 必要复评审批 | 专业负责人记录用途/依据；例外与普通学年场次分开留痕 |
+| `POST /v1/scales/{id}/revoke` | 撤销量表版本 | 只阻断新使用，不改写历史答卷和计分；必须记录原因 |
 | `GET /v1/me/tasks` | 当前学生任务 | 仅自己，返回参与状态与可用操作 |
 | `POST /v1/me/tasks/{id}/attempts` | 开始作答 | 同意/适龄/频次/任务时窗原子验证 |
 | `PUT /v1/attempts/{id}/answers` | 保存答案 | `expectedRevision`、题目白名单、服务端持久化确认 |
@@ -87,6 +90,7 @@ erDiagram
 | `POST /v1/exports`、`GET /v1/exports/{id}/download` | 导出 | 明确目的/字段/审批，到期与授权实时校验 |
 | `POST /v1/appointments` | 咨询预约 | M5；资源排他、幂等、资质与可预约窗口 |
 | `POST /v1/content/{id}/publish` | 教育内容发布 | M5；专业审核、适龄、版权证明 |
+| `POST /v1/media-assets`、`GET /v1/content/public/{assetId}/media` | 媒体上传与公开播放 | 仅允许批准类型/大小；签名、脚本特征和哈希检查；只有已审核内容可公开读取 |
 
 建议错误码：`CONSENT_REQUIRED`、`AGE_REVIEW_REQUIRED`、`FREQUENCY_REVIEW_REQUIRED`、`CAMPAIGN_CLOSED`、`LICENSE_UNAVAILABLE`、`REVISION_CONFLICT`、`IDEMPOTENCY_CONFLICT`、`PROFESSIONAL_REVIEW_REQUIRED`、`SLOT_UNAVAILABLE`、`EXPORT_REVOKED`。敏感权限错误不返回其他学生信息。
 

@@ -34,6 +34,9 @@ export function assertUsableScale(scale: ScaleVersion, now = new Date()): void {
   if (scale.provenance === 'synthetic_only' && process.env.NODE_ENV === 'production') {
     throw new DomainError('SYNTHETIC_SCALE_BLOCKED', '演示量表不能用于生产测评');
   }
+  if (scale.licenseExpiresAt && new Date(scale.licenseExpiresAt) <= now) {
+    throw new DomainError('LICENSE_EXPIRED', '量表授权已到期，不能开始新的测评');
+  }
   if (scale.minAge < 6 || scale.maxAge > 19 || scale.minAge > scale.maxAge) {
     throw new DomainError('SCALE_AGE_INVALID', '测评方案年龄范围无效');
   }

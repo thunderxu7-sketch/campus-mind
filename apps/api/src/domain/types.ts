@@ -16,6 +16,7 @@ export type SignalSource = 'score_rule' | 'self_request' | 'staff_observation' |
 export type RightsKind = 'access' | 'correct' | 'delete' | 'withdraw';
 export type AppointmentState = 'requested' | 'confirmed' | 'completed' | 'cancelled' | 'no_show';
 export type ContentState = 'draft' | 'professional_review' | 'published' | 'retired';
+export type MediaKind = 'image' | 'audio' | 'video' | 'subtitle';
 
 export interface Tenant {
   id: string;
@@ -79,6 +80,17 @@ export interface ConsentRecord {
   withdrawnAt?: string;
 }
 
+export interface GuardianLink {
+  id: string;
+  tenantId: string;
+  studentId: string;
+  guardianUserId: string;
+  status: 'pending' | 'verified' | 'revoked';
+  verifiedBy?: string;
+  verifiedAt?: string;
+  createdAt: string;
+}
+
 export interface ScaleItem {
   id: string;
   prompt: string;
@@ -100,6 +112,12 @@ export interface ScaleVersion {
   maxAge: number;
   scoringVersion: string;
   noticeVersion: string;
+  /** Optional catalog metadata used for age/grade suitability review. */
+  dimensions?: string[];
+  population?: 'primary' | 'middle' | 'high' | 'mixed';
+  language?: string;
+  licenseExpiresAt?: string;
+  reviewEvidenceRef?: string;
   items: ScaleItem[];
   warningRule?: { threshold: number; level: 'attention' | 'urgent'; reason: string };
   approvedBy?: string;
@@ -380,8 +398,25 @@ export interface ContentItem {
   state: ContentState;
   copyrightSource: string;
   createdBy: string;
+  mediaAssetId?: string;
+  altText?: string;
+  captionText?: string;
   reviewedBy?: string;
   publishedAt?: string;
+  createdAt: string;
+}
+
+export interface MediaAsset {
+  id: string;
+  tenantId: string;
+  filename: string;
+  mediaType: string;
+  kind: MediaKind;
+  byteSize: number;
+  sha256: string;
+  contentCiphertext: string;
+  scanStatus: 'clean' | 'rejected';
+  createdBy: string;
   createdAt: string;
 }
 
@@ -421,6 +456,7 @@ export interface DatabaseState {
   users: User[];
   sessions: Session[];
   students: Student[];
+  guardianLinks: GuardianLink[];
   consents: ConsentRecord[];
   scales: ScaleVersion[];
   campaigns: Campaign[];
@@ -447,6 +483,7 @@ export interface DatabaseState {
   availabilitySlots: AvailabilitySlot[];
   appointments: Appointment[];
   contentItems: ContentItem[];
+  mediaAssets: MediaAsset[];
   profileSchemas: ProfileSchemaVersion[];
   profileResponses: ProfileResponse[];
 }

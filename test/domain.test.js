@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { createCampaign, createSelfScreening, publishCampaign } from '../dist/apps/api/src/domain/service.js';
+import { approveFrequencyException, createCampaign, createSelfScreening, publishCampaign, revokeScale } from '../dist/apps/api/src/domain/service.js';
 import { JsonStore } from '../dist/apps/api/src/domain/store.js';
 import { seedDemoState } from '../dist/apps/api/src/domain/seed.js';
 
@@ -51,4 +51,24 @@ test('self screening uses the same consent and academic-year frequency guard', a
   const first = await createSelfScreening(store, auth, 'scale-synthetic-demo-v1');
   assert.equal(first.campaign.purpose, 'screening');
   await assert.rejects(() => createSelfScreening(store, auth, 'scale-synthetic-demo-v1'), (error) => error.code === 'FREQUENCY_REVIEW_REQUIRED');
+});
+
+test('professional frequency exceptions are explicit and scoped to one draft campaign', async () => {
+  const store = new JsonStore({ initial: seedDemoState() });
+  const snapshot = store.snapshot();
+  const admin = authFor(snapshot, 'user-admin-demo');
+  const professional = authFor(snapshot, 'user-professional-demo');
+  const campaign = await createCampaign(store, admin, { schoolId: 'school-demo', name: '合成复评例外任务', purpose: 'screening', academicYear: '2026-2027', opensAt: new Date(Date.now() - 1_000).toISOString(), closesAt: new Date(Date.now() + 3_600_000).toISOString(), scaleVersionId: 'scale-synthetic-demo-v1', participantStudentIds: ['student-demo'] });
+  const reservation = await approveFrequencyException(store, professional, campaign.id, { studentId: 'student-demo', reason: '合成演示：专业人员记录必要复评用途' });
+  assert.equal(reservation.status, 'exception');
+  await publishCampaign(store, admin, campaign.id);
+  assert.equal(store.snapshot().assignments.filter((assignment) => assignment.campaignId === campaign.id).length, 1);
+});
+
+test('revoking a scale blocks new use without changing historical identifiers', async () => {
+  const store = new JsonStore({ initial: seedDemoState() });
+  const professional = authFor(store.snapshot(), 'user-professional-demo');
+  await revokeScale(store, professional, 'scale-synthetic-demo-v1', '合成演示撤销');
+  assert.equal(store.snapshot().scales.find((scale) => scale.id === 'scale-synthetic-demo-v1').status, 'revoked');
+  assert.equal(store.snapshot().campaigns.find((campaign) => campaign.id === 'campaign-demo').scaleVersionId, 'scale-synthetic-demo-v1');
 });

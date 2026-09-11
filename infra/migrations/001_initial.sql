@@ -26,6 +26,7 @@ create table if not exists users (
   mfa_enabled boolean not null default false,
   created_at timestamptz not null default now(),
   unique (tenant_id, email),
+  unique (tenant_id, id),
   foreign key (tenant_id, school_id) references schools(tenant_id, id)
 );
 create table if not exists students (
@@ -40,7 +41,14 @@ create table if not exists students (
   active boolean not null default true,
   created_at timestamptz not null default now(),
   unique (tenant_id, external_ref_hash),
+  unique (tenant_id, id),
   foreign key (tenant_id, school_id) references schools(tenant_id, id)
+);
+create table if not exists guardian_links (
+  id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null, guardian_user_id uuid not null,
+  status text not null check (status in ('pending','verified','revoked')), verified_by uuid, verified_at timestamptz, created_at timestamptz not null default now(),
+  unique (tenant_id, id), unique (tenant_id, student_id, guardian_user_id),
+  foreign key (tenant_id, student_id) references students(tenant_id, id), foreign key (tenant_id, guardian_user_id) references users(tenant_id, id)
 );
 create table if not exists consents (
   id uuid primary key default gen_random_uuid(),
@@ -72,7 +80,8 @@ create table if not exists assessment_plans (
   config_json jsonb not null,
   approved_by uuid,
   approved_at timestamptz,
-  unique (tenant_id, code, version)
+  unique (tenant_id, code, version),
+  unique (tenant_id, id)
 );
 create table if not exists campaigns (
   id uuid primary key default gen_random_uuid(),
@@ -91,7 +100,8 @@ create table if not exists campaigns (
   created_at timestamptz not null default now(),
   published_at timestamptz,
   foreign key (tenant_id, school_id) references schools(tenant_id, id),
-  foreign key (tenant_id, plan_id) references assessment_plans(tenant_id, id)
+  foreign key (tenant_id, plan_id) references assessment_plans(tenant_id, id),
+  unique (tenant_id, id)
 );
 create table if not exists frequency_reservations (
   id uuid primary key default gen_random_uuid(),
@@ -104,10 +114,15 @@ create table if not exists frequency_reservations (
   approved_by uuid,
   reason text,
   created_at timestamptz not null default now(),
-  unique (tenant_id, student_id, academic_year) deferrable initially immediate,
+  unique (tenant_id, id),
   foreign key (tenant_id, student_id) references students(tenant_id, id),
   foreign key (tenant_id, campaign_id) references campaigns(tenant_id, id)
 );
+-- A reviewed exception may coexist with the ordinary annual reservation. Normal
+-- reservations remain unique while an exception row is kept as an audit marker.
+alter table frequency_reservations drop constraint if exists frequency_reservations_tenant_id_student_id_academic_year_key;
+create unique index if not exists active_frequency_reservation on frequency_reservations(tenant_id, student_id, academic_year) where status in ('reserved','consumed');
+create unique index if not exists exception_frequency_reservation on frequency_reservations(tenant_id, student_id, academic_year, campaign_id) where status = 'exception';
 
 create table if not exists audit_events (
   id uuid primary key default gen_random_uuid(),
@@ -118,7 +133,8 @@ create table if not exists audit_events (
   object_id text not null,
   purpose text,
   metadata jsonb not null default '{}',
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  unique (tenant_id, id)
 );
 create table if not exists outbox_events (
   id uuid primary key default gen_random_uuid(),
@@ -129,7 +145,8 @@ create table if not exists outbox_events (
   status text not null check (status in ('pending','published','dead_letter')),
   attempts integer not null default 0,
   available_at timestamptz not null default now(),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  unique (tenant_id, id)
 );
 
 -- Every tenant-owned table must have a policy in the production migration set.
@@ -138,6 +155,7 @@ alter table tenants enable row level security;
 alter table schools enable row level security;
 alter table users enable row level security;
 alter table students enable row level security;
+alter table guardian_links enable row level security;
 alter table consents enable row level security;
 alter table assessment_plans enable row level security;
 alter table campaigns enable row level security;
@@ -151,6 +169,7 @@ begin
   execute 'create policy schools_isolation on schools using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
   execute 'create policy users_isolation on users using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
   execute 'create policy students_isolation on students using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
+  execute 'create policy guardian_links_isolation on guardian_links using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
   execute 'create policy consents_isolation on consents using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
   execute 'create policy plans_isolation on assessment_plans using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
   execute 'create policy campaigns_isolation on campaigns using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
@@ -168,30 +187,30 @@ create table if not exists assignments (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), campaign_id uuid not null,
   student_id uuid not null, frequency_reservation_id uuid not null, status text not null, created_at timestamptz not null default now(),
   foreign key (tenant_id, campaign_id) references campaigns(tenant_id, id), foreign key (tenant_id, student_id) references students(tenant_id, id),
-  foreign key (tenant_id, frequency_reservation_id) references frequency_reservations(tenant_id, id), unique (tenant_id, campaign_id, student_id)
+  foreign key (tenant_id, frequency_reservation_id) references frequency_reservations(tenant_id, id), unique (tenant_id, campaign_id, student_id), unique (tenant_id, id)
 );
 create table if not exists attempts (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), assignment_id uuid not null,
   student_id uuid not null, plan_id uuid not null, state text not null, current_revision integer not null default 0,
   started_at timestamptz not null default now(), submitted_at timestamptz, submission_id uuid,
   foreign key (tenant_id, assignment_id) references assignments(tenant_id, id), foreign key (tenant_id, student_id) references students(tenant_id, id),
-  foreign key (tenant_id, plan_id) references assessment_plans(tenant_id, id), unique (tenant_id, assignment_id)
+  foreign key (tenant_id, plan_id) references assessment_plans(tenant_id, id), unique (tenant_id, assignment_id), unique (tenant_id, id)
 );
 create table if not exists answer_revisions (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), attempt_id uuid not null,
   revision integer not null, answers_ciphertext text not null, saved_at timestamptz not null default now(), actor_id uuid not null,
-  foreign key (tenant_id, attempt_id) references attempts(tenant_id, id), unique (tenant_id, attempt_id, revision)
+  foreign key (tenant_id, attempt_id) references attempts(tenant_id, id), unique (tenant_id, attempt_id, revision), unique (tenant_id, id)
 );
 create table if not exists submissions (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), attempt_id uuid not null,
   answer_revision_id uuid not null, idempotency_key text not null, content_hash text not null, submitted_at timestamptz not null default now(),
   foreign key (tenant_id, attempt_id) references attempts(tenant_id, id), foreign key (tenant_id, answer_revision_id) references answer_revisions(tenant_id, id),
-  unique (tenant_id, attempt_id), unique (tenant_id, idempotency_key)
+  unique (tenant_id, attempt_id), unique (tenant_id, idempotency_key), unique (tenant_id, id)
 );
 create table if not exists score_runs (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), submission_id uuid not null,
   scoring_version text not null, status text not null, factor_scores jsonb not null, total numeric not null, validity text not null,
-  completed_at timestamptz, error_code text, foreign key (tenant_id, submission_id) references submissions(tenant_id, id), unique (tenant_id, submission_id)
+  completed_at timestamptz, error_code text, foreign key (tenant_id, submission_id) references submissions(tenant_id, id), unique (tenant_id, submission_id), unique (tenant_id, id)
 );
 create table if not exists reports (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null, score_run_id uuid not null,
@@ -203,17 +222,17 @@ create table if not exists risk_signals (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null,
   source text not null, score_run_id uuid, rule_version text, level text not null, reason_ciphertext text not null,
   status text not null, created_at timestamptz not null default now(), foreign key (tenant_id, student_id) references students(tenant_id, id),
-  foreign key (tenant_id, score_run_id) references score_runs(tenant_id, id)
+  foreign key (tenant_id, score_run_id) references score_runs(tenant_id, id), unique (tenant_id, id)
 );
 create table if not exists risk_cases (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null,
   state text not null, priority text not null, signal_ids jsonb not null, assigned_to uuid, created_at timestamptz not null default now(), updated_at timestamptz not null default now(), closure_reason_ciphertext text,
-  foreign key (tenant_id, student_id) references students(tenant_id, id)
+  foreign key (tenant_id, student_id) references students(tenant_id, id), unique (tenant_id, id)
 );
 create table if not exists risk_reviews (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), case_id uuid not null,
   reviewer_id uuid not null, decision text not null, note_ciphertext text not null, created_at timestamptz not null default now(),
-  foreign key (tenant_id, case_id) references risk_cases(tenant_id, id)
+  foreign key (tenant_id, case_id) references risk_cases(tenant_id, id), unique (tenant_id, id)
 );
 create table if not exists case_acknowledgements (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), case_id uuid not null,
@@ -222,32 +241,32 @@ create table if not exists case_acknowledgements (
 create table if not exists follow_ups (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), case_id uuid not null,
   author_id uuid not null, kind text not null, note_ciphertext text not null, due_at timestamptz, created_at timestamptz not null default now(),
-  foreign key (tenant_id, case_id) references risk_cases(tenant_id, id)
+  foreign key (tenant_id, case_id) references risk_cases(tenant_id, id), unique (tenant_id, id)
 );
 create table if not exists rights_requests (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null,
   kind text not null, requester_id uuid not null, status text not null, reason text, created_at timestamptz not null default now(), completed_at timestamptz,
-  foreign key (tenant_id, student_id) references students(tenant_id, id)
+  foreign key (tenant_id, student_id) references students(tenant_id, id), unique (tenant_id, id)
 );
 create table if not exists deletion_tombstones (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null,
   request_id uuid not null, deleted_at timestamptz not null default now(), retained_categories jsonb not null,
-  foreign key (tenant_id, student_id) references students(tenant_id, id), foreign key (tenant_id, request_id) references rights_requests(tenant_id, id)
+  foreign key (tenant_id, student_id) references students(tenant_id, id), foreign key (tenant_id, request_id) references rights_requests(tenant_id, id), unique (tenant_id, id)
 );
 create table if not exists export_jobs (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), requested_by uuid not null, approved_by uuid,
   kind text not null, student_id uuid, status text not null, expires_at timestamptz not null, payload_ciphertext text, created_at timestamptz not null default now(), approved_at timestamptz,
-  foreign key (tenant_id, student_id) references students(tenant_id, id)
+  foreign key (tenant_id, student_id) references students(tenant_id, id), unique (tenant_id, id)
 );
 create table if not exists delivery_attempts (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), outbox_event_id uuid not null,
   channel text not null, status text not null, attempted_at timestamptz not null default now(), error_code text,
-  foreign key (tenant_id, outbox_event_id) references outbox_events(tenant_id, id)
+  foreign key (tenant_id, outbox_event_id) references outbox_events(tenant_id, id), unique (tenant_id, id)
 );
 create table if not exists availability_slots (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), counselor_id uuid not null,
   starts_at timestamptz not null, ends_at timestamptz not null, room text, status text not null,
-  check (starts_at < ends_at)
+  check (starts_at < ends_at), unique (tenant_id, id)
 );
 create table if not exists appointments (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null,
@@ -255,21 +274,28 @@ create table if not exists appointments (
   foreign key (tenant_id, student_id) references students(tenant_id, id), foreign key (tenant_id, slot_id) references availability_slots(tenant_id, id)
 );
 create unique index if not exists active_appointment_slot on appointments(tenant_id, slot_id) where state in ('requested','confirmed');
+create table if not exists media_assets (
+  id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), filename text not null,
+  media_type text not null, kind text not null check (kind in ('image','audio','video','subtitle')), byte_size integer not null check (byte_size > 0 and byte_size <= 1500000),
+  sha256 text not null, content_ciphertext text not null, scan_status text not null check (scan_status in ('clean','rejected')),
+  created_by uuid not null, created_at timestamptz not null default now(), unique (tenant_id, id), unique (tenant_id, sha256)
+);
 create table if not exists content_items (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), title text not null, kind text not null,
   age_min smallint not null, age_max smallint not null, body_ciphertext text not null, state text not null, copyright_source text not null,
-  created_by uuid not null, reviewed_by uuid, published_at timestamptz, created_at timestamptz not null default now(), check (age_min between 6 and 19 and age_max between age_min and 19)
+  created_by uuid not null, media_asset_id uuid, alt_text text, caption_text text, reviewed_by uuid, published_at timestamptz, created_at timestamptz not null default now(), unique (tenant_id, id),
+  foreign key (tenant_id, media_asset_id) references media_assets(tenant_id, id), check (kind in ('article','announcement','media')), check (age_min between 6 and 19 and age_max between age_min and 19)
 );
 create table if not exists profile_schemas (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), version text not null, fields jsonb not null,
-  state text not null, approved_by uuid, created_at timestamptz not null default now(), unique (tenant_id, version)
+  state text not null, approved_by uuid, created_at timestamptz not null default now(), unique (tenant_id, version), unique (tenant_id, id)
 );
 
 -- Enable RLS for every tenant-owned relation declared above. Policies are intentionally explicit.
 do $$
 declare t text;
 begin
-  foreach t in array array['assignments','attempts','answer_revisions','submissions','score_runs','reports','risk_signals','risk_cases','risk_reviews','case_acknowledgements','follow_ups','rights_requests','deletion_tombstones','export_jobs','delivery_attempts','availability_slots','appointments','content_items','profile_schemas'] loop
+  foreach t in array array['assignments','attempts','answer_revisions','submissions','score_runs','reports','risk_signals','risk_cases','risk_reviews','case_acknowledgements','follow_ups','rights_requests','deletion_tombstones','export_jobs','delivery_attempts','availability_slots','appointments','media_assets','content_items','profile_schemas'] loop
     execute format('alter table %I enable row level security', t);
     begin
       execute format('create policy %I on %I using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))', t || '_isolation', t);
@@ -286,4 +312,13 @@ alter table profile_responses enable row level security;
 do $$ begin
   execute 'create policy profile_responses_isolation on profile_responses using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
 exception when duplicate_object then null;
+end $$;
+
+-- FORCE prevents a table owner from accidentally bypassing policies in a test or maintenance session.
+do $$
+declare t text;
+begin
+  foreach t in array array['tenants','schools','users','students','guardian_links','consents','assessment_plans','campaigns','frequency_reservations','audit_events','outbox_events','assignments','attempts','answer_revisions','submissions','score_runs','reports','risk_signals','risk_cases','risk_reviews','case_acknowledgements','follow_ups','rights_requests','deletion_tombstones','export_jobs','delivery_attempts','availability_slots','appointments','media_assets','content_items','profile_schemas','profile_responses'] loop
+    execute format('alter table %I force row level security', t);
+  end loop;
 end $$;

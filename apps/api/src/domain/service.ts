@@ -6,7 +6,7 @@ import { assertUsableScale, score } from './scoring.js';
 import { JsonStore } from './store.js';
 import type {
   Appointment, AppointmentState, Assignment, Attempt, AuthenticatedUser, AvailabilitySlot, Campaign, CaseAcknowledgement, CaseState, ConsentRecord,
-  ContentItem, DatabaseState, DeletionTombstone, ExportJob, FollowUp, ImportBatch, ImportRowResult, ProfileSchemaVersion, RightsRequest, RiskCase, RiskReview, RiskSignal, Role,
+  ContentItem, DatabaseState, DeletionTombstone, ExportJob, FollowUp, FrequencyReservation, GuardianLink, ImportBatch, ImportRowResult, MediaAsset, MediaKind, ProfileSchemaVersion, RightsRequest, RiskCase, RiskReview, RiskSignal, Role,
   ScaleVersion, Student, User,
 } from './types.js';
 
@@ -47,7 +47,7 @@ export async function listMyTasks(store: JsonStore, auth: AuthenticatedUser): Pr
     const assignments = state.assignments.filter((assignment) => sameTenant(assignment, auth.user.tenantId) && assignment.studentId === auth.user.id);
     return assignments.map((assignment) => {
       const campaign = state.campaigns.find((candidate) => candidate.id === assignment.campaignId && sameTenant(candidate, auth.user.tenantId));
-      const scale = campaign ? state.scales.find((candidate) => candidate.id === campaign.scaleVersionId) : undefined;
+      const scale = campaign ? state.scales.find((candidate) => candidate.id === campaign.scaleVersionId && sameTenant(candidate, auth.user.tenantId)) : undefined;
       const attempt = state.attempts.find((candidate) => candidate.assignmentId === assignment.id);
       return {
         id: assignment.id,
@@ -64,11 +64,43 @@ export async function listMyTasks(store: JsonStore, auth: AuthenticatedUser): Pr
   });
 }
 
+export async function createGuardianLink(store: JsonStore, auth: AuthenticatedUser, studentId: string, guardianUserId: string): Promise<GuardianLink> {
+  requirePermission(auth.user, 'org:manage');
+  return store.transaction((state) => {
+    const student = state.students.find((candidate) => candidate.id === studentId && candidate.tenantId === auth.user.tenantId && candidate.active);
+    const guardian = state.users.find((candidate) => candidate.id === guardianUserId && candidate.tenantId === auth.user.tenantId && candidate.role === 'guardian' && candidate.active);
+    if (!student || !guardian) throw notFound();
+    const existing = state.guardianLinks.find((link) => link.studentId === student.id && link.guardianUserId === guardian.id && link.status !== 'revoked');
+    if (existing) return existing;
+    const link: GuardianLink = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, guardianUserId: guardian.id, status: 'pending', createdAt: now() };
+    state.guardianLinks.push(link);
+    audit(state, auth.user, 'guardian_link.created', 'guardian_link', link.id, { studentId, guardianUserId });
+    return link;
+  });
+}
+
+export async function verifyGuardianLink(store: JsonStore, auth: AuthenticatedUser, linkId: string): Promise<GuardianLink> {
+  requirePermission(auth.user, 'org:manage');
+  return store.transaction((state) => {
+    const link = state.guardianLinks.find((candidate) => candidate.id === linkId && candidate.tenantId === auth.user.tenantId);
+    if (!link) throw notFound();
+    if (link.status === 'revoked') throw new DomainError('GUARDIAN_LINK_REVOKED', '监护关系已撤销');
+    link.status = 'verified'; link.verifiedBy = auth.user.id; link.verifiedAt = now();
+    const student = state.students.find((candidate) => candidate.id === link.studentId && candidate.tenantId === auth.user.tenantId);
+    if (student) student.guardianVerified = true;
+    audit(state, auth.user, 'guardian_link.verified', 'guardian_link', link.id, { studentId: link.studentId, guardianUserId: link.guardianUserId });
+    return link;
+  });
+}
+
 export async function createConsent(store: JsonStore, auth: AuthenticatedUser, input: { studentId: string; actorType: ConsentRecord['actorType']; noticeVersion: string; purpose?: ConsentRecord['purpose'] }): Promise<ConsentRecord> {
   if (!isStudent(auth.user) && !can(auth.user, 'org:manage') && !can(auth.user, 'rights:request')) throw forbidden();
   const purpose = input.purpose ?? 'assessment';
   return store.transaction((state) => {
     const student = studentFor(state, auth.user, input.studentId);
+    if (input.actorType === 'student' && (!isStudent(auth.user) || auth.user.id !== student.id)) throw forbidden('学生参与记录必须由本人提交');
+    if (input.actorType === 'guardian' && (auth.user.role !== 'guardian' || !state.guardianLinks.some((link) => link.tenantId === auth.user.tenantId && link.studentId === student.id && link.guardianUserId === auth.user.id && link.status === 'verified'))) throw forbidden('监护人参与记录必须由已核验监护账号提交');
+    if (input.actorType === 'school_legal_basis' && !can(auth.user, 'org:manage')) throw forbidden('学校合法依据记录需要校务授权');
     if (student.age !== undefined && student.age < 14 && input.actorType !== 'guardian') {
       throw new DomainError('GUARDIAN_CONSENT_REQUIRED', '不满 14 周岁需要监护人同意');
     }
@@ -149,10 +181,19 @@ export async function commitImport(store: JsonStore, auth: AuthenticatedUser, ba
 
 export async function createScale(store: JsonStore, auth: AuthenticatedUser, input: Omit<ScaleVersion, 'id' | 'tenantId' | 'status' | 'approvedBy' | 'approvedAt'>): Promise<ScaleVersion> {
   requirePermission(auth.user, 'scale:write');
+  if (!['synthetic_only', 'licensed'].includes(input.provenance)) throw new DomainError('SCALE_INVALID', '量表来源类型无效');
   if (input.provenance === 'licensed' && !input.code) throw new DomainError('LICENSE_UNAVAILABLE', '授权量表需要来源登记');
   if (!input.code || !input.title || !input.version || !input.scoringVersion || !input.noticeVersion || !Number.isInteger(input.minAge) || !Number.isInteger(input.maxAge) || input.minAge < 6 || input.maxAge > 19 || input.minAge > input.maxAge) throw new DomainError('SCALE_INVALID', '量表版本或适龄范围无效');
-  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 200 || input.items.some((item) => !item || typeof item.id !== 'string' || !item.id || typeof item.prompt !== 'string' || !item.prompt || !Number.isInteger(item.min) || !Number.isInteger(item.max) || item.min > item.max || typeof item.reverse !== 'boolean' || typeof item.factor !== 'string' || !item.factor)) throw new DomainError('SCALE_INVALID', '量表题目结构无效');
+  if (input.population !== undefined && !['primary', 'middle', 'high', 'mixed'].includes(input.population)) throw new DomainError('SCALE_INVALID', '量表适用学段无效');
+  if (input.language !== undefined && (!input.language.trim() || input.language.length > 32)) throw new DomainError('SCALE_INVALID', '量表语言标识无效');
+  if (input.dimensions !== undefined && (!Array.isArray(input.dimensions) || input.dimensions.length > 20 || input.dimensions.some((dimension) => typeof dimension !== 'string' || !dimension.trim()))) throw new DomainError('SCALE_INVALID', '量表维度目录无效');
+  if (input.licenseExpiresAt !== undefined && Number.isNaN(new Date(input.licenseExpiresAt).getTime())) throw new DomainError('SCALE_INVALID', '量表授权到期时间无效');
+  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 200 || new Set(input.items.map((item) => item?.id)).size !== input.items.length || input.items.some((item) => !item || typeof item.id !== 'string' || !item.id || typeof item.prompt !== 'string' || !item.prompt || !Number.isInteger(item.min) || !Number.isInteger(item.max) || item.min > item.max || typeof item.reverse !== 'boolean' || typeof item.factor !== 'string' || !item.factor)) throw new DomainError('SCALE_INVALID', '量表题目结构无效');
+  if (input.warningRule && (!Number.isInteger(input.warningRule.threshold) || input.warningRule.threshold < 0 || !['attention', 'urgent'].includes(input.warningRule.level) || !input.warningRule.reason?.trim())) throw new DomainError('SCALE_INVALID', '预警规则结构无效');
   return store.transaction((state) => {
+    if (state.scales.some((candidate) => candidate.tenantId === auth.user.tenantId && candidate.code === input.code && candidate.version === input.version)) {
+      throw new DomainError('SCALE_VERSION_EXISTS', '同一量表版本已经存在', 409);
+    }
     const scale: ScaleVersion = { ...input, id: id(), tenantId: auth.user.tenantId, status: 'draft' };
     state.scales.push(scale);
     audit(state, auth.user, 'scale.created', 'scale_version', scale.id, { provenance: scale.provenance, version: scale.version });
@@ -165,6 +206,7 @@ export async function approveScale(store: JsonStore, auth: AuthenticatedUser, sc
   return store.transaction((state) => {
     const scale = state.scales.find((candidate) => candidate.id === scaleId && sameTenant(candidate, auth.user.tenantId));
     if (!scale) throw notFound();
+    if (scale.provenance === 'licensed' && !scale.reviewEvidenceRef) throw new DomainError('LICENSE_EVIDENCE_REQUIRED', '授权量表需要专业审定证据引用');
     assertUsableScale({ ...scale, status: 'approved' });
     scale.status = 'approved'; scale.approvedBy = auth.user.id; scale.approvedAt = now();
     audit(state, auth.user, 'scale.approved', 'scale_version', scale.id, { version: scale.version });
@@ -191,16 +233,21 @@ export async function publishCampaign(store: JsonStore, auth: AuthenticatedUser,
   return store.transaction((state) => {
     const campaign = state.campaigns.find((candidate) => candidate.id === campaignId && sameTenant(candidate, auth.user.tenantId));
     if (!campaign) throw notFound();
-    const scale = state.scales.find((candidate) => candidate.id === campaign.scaleVersionId);
+    const scale = state.scales.find((candidate) => candidate.id === campaign.scaleVersionId && sameTenant(candidate, auth.user.tenantId));
     if (!scale) throw notFound();
     assertUsableScale(scale);
     if (campaign.state !== 'draft' && campaign.state !== 'approved') throw new DomainError('CAMPAIGN_STATE_INVALID', '任务当前状态不能发布');
-    const studentList = campaign.participantStudentIds.map((studentId) => state.students.find((student) => student.id === studentId)).filter((student): student is Student => Boolean(student));
+    const studentList = campaign.participantStudentIds.map((studentId) => state.students.find((student) => student.id === studentId && sameTenant(student, auth.user.tenantId))).filter((student): student is Student => Boolean(student));
     if (studentList.some((student) => !ageAllowed(student, scale))) throw new DomainError('AGE_REVIEW_REQUIRED', '名单中有不适龄或年龄未知的学生');
     if (studentList.some((student) => !activeConsent(state, student.id, 'assessment'))) throw new DomainError('CONSENT_REQUIRED', '名单中有学生缺少有效测评参与记录');
     const existing = new Set(state.assignments.filter((a) => a.campaignId === campaign.id).map((a) => a.studentId));
     for (const student of studentList) {
       if (existing.has(student.id)) continue;
+      const exception = state.frequencyReservations.find((reservation) => reservation.studentId === student.id && reservation.academicYear === campaign.academicYear && reservation.campaignId === campaign.id && reservation.status === 'exception');
+      if (exception) {
+        state.assignments.push({ id: id(), tenantId: auth.user.tenantId, campaignId: campaign.id, studentId: student.id, frequencyReservationId: exception.id, status: 'assigned', createdAt: now() });
+        continue;
+      }
       const frequencyKey = `${student.id}:${campaign.academicYear}`;
       const used = state.frequencyReservations.find((r) => `${r.studentId}:${r.academicYear}` === frequencyKey && r.status !== 'released');
       if (used) throw new DomainError('FREQUENCY_REVIEW_REQUIRED', `学生 ${student.id} 已有本学年测评场次`);
@@ -214,15 +261,41 @@ export async function publishCampaign(store: JsonStore, auth: AuthenticatedUser,
   });
 }
 
+/** Record an approved same-year re-evaluation exception before a campaign is published. */
+export async function approveFrequencyException(store: JsonStore, auth: AuthenticatedUser, campaignId: string, input: { studentId: string; reason: string }): Promise<FrequencyReservation> {
+  requirePermission(auth.user, 'frequency:approve');
+  if (!input.reason.trim()) throw new DomainError('FREQUENCY_EXCEPTION_REASON_REQUIRED', '复评例外需要记录用途和依据');
+  return store.transaction((state) => {
+    const campaign = state.campaigns.find((candidate) => candidate.id === campaignId && candidate.tenantId === auth.user.tenantId);
+    const student = state.students.find((candidate) => candidate.id === input.studentId && candidate.tenantId === auth.user.tenantId && candidate.active);
+    const scale = campaign ? state.scales.find((candidate) => candidate.id === campaign.scaleVersionId && candidate.tenantId === auth.user.tenantId) : undefined;
+    if (!campaign || !student || !scale) throw notFound();
+    if (campaign.state !== 'draft' && campaign.state !== 'approved') throw new DomainError('CAMPAIGN_STATE_INVALID', '只能为尚未发布的任务申请复评例外');
+    if (student.schoolId !== campaign.schoolId || !ageAllowed(student, scale)) throw new DomainError('AGE_REVIEW_REQUIRED', '学生不属于任务学校或不在量表适龄范围');
+    if (!activeConsent(state, student.id, 'assessment')) throw new DomainError('CONSENT_REQUIRED', '复评前需要有效的测评参与记录');
+    const existingException = state.frequencyReservations.find((reservation) => reservation.tenantId === auth.user.tenantId && reservation.studentId === student.id && reservation.academicYear === campaign.academicYear && reservation.campaignId === campaign.id && reservation.status === 'exception');
+    if (existingException) {
+      existingException.approvedBy = auth.user.id;
+      existingException.reason = input.reason.trim().slice(0, 1000);
+      audit(state, auth.user, 'frequency.exception_updated', 'frequency_reservation', existingException.id, { campaignId, studentId: student.id });
+      return existingException;
+    }
+    const reservation: FrequencyReservation = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, academicYear: campaign.academicYear, purpose: 'assessment', status: 'exception', campaignId: campaign.id, approvedBy: auth.user.id, reason: input.reason.trim().slice(0, 1000), createdAt: now() };
+    state.frequencyReservations.push(reservation);
+    audit(state, auth.user, 'frequency.exception_approved', 'frequency_reservation', reservation.id, { campaignId, studentId: student.id });
+    return reservation;
+  });
+}
+
 export async function beginAttempt(store: JsonStore, auth: AuthenticatedUser, assignmentId: string): Promise<{ attempt: Attempt; scale: ScaleVersion }> {
   requirePermission(auth.user, 'self:assessment');
   if (!isStudent(auth.user)) throw forbidden();
   return store.transaction((state) => {
     const assignment = state.assignments.find((candidate) => candidate.id === assignmentId && sameTenant(candidate, auth.user.tenantId) && candidate.studentId === auth.user.id);
     if (!assignment) throw notFound();
-    const campaign = state.campaigns.find((candidate) => candidate.id === assignment.campaignId);
-    const student = state.students.find((candidate) => candidate.id === auth.user.id);
-    const scale = campaign ? state.scales.find((candidate) => candidate.id === campaign.scaleVersionId) : undefined;
+    const campaign = state.campaigns.find((candidate) => candidate.id === assignment.campaignId && sameTenant(candidate, auth.user.tenantId));
+    const student = state.students.find((candidate) => candidate.id === auth.user.id && sameTenant(candidate, auth.user.tenantId));
+    const scale = campaign ? state.scales.find((candidate) => candidate.id === campaign.scaleVersionId && sameTenant(candidate, auth.user.tenantId)) : undefined;
     if (!campaign || !student || !scale) throw notFound();
     if (!['open', 'scheduled'].includes(campaign.state) || new Date(campaign.opensAt) > new Date() || new Date(campaign.closesAt) <= new Date()) throw new DomainError('CAMPAIGN_CLOSED', '任务当前不在开放时间');
     assertUsableScale(scale);
@@ -248,7 +321,7 @@ export async function saveAnswers(store: JsonStore, auth: AuthenticatedUser, att
     const attempt = state.attempts.find((candidate) => candidate.id === attemptId && sameTenant(candidate, auth.user.tenantId) && candidate.studentId === auth.user.id);
     if (!attempt || attempt.state !== 'in_progress') throw notFound();
     if (attempt.currentRevision !== input.expectedRevision) throw new DomainError('REVISION_CONFLICT', '答题内容已在其他窗口更新', 409, { currentRevision: attempt.currentRevision });
-    const scale = state.scales.find((candidate) => candidate.id === attempt.scaleVersionId);
+    const scale = state.scales.find((candidate) => candidate.id === attempt.scaleVersionId && sameTenant(candidate, auth.user.tenantId));
     if (!scale) throw notFound();
     const allowed = new Set(scale.items.map((item) => item.id));
     if (Object.keys(input.answers).some((key) => !allowed.has(key))) throw new DomainError('ANSWER_ITEM_INVALID', '答题项不属于当前方案');
@@ -305,9 +378,9 @@ async function processOutboxEvent(store: JsonStore, eventId: string): Promise<vo
     const event = state.outboxEvents.find((candidate) => candidate.id === eventId && candidate.status === 'pending');
     if (!event) return;
     if (event.type === 'assessment.submitted') {
-      const submission = state.submissions.find((candidate) => candidate.id === String(event.payload.submissionId));
-      const attempt = submission ? state.attempts.find((candidate) => candidate.id === submission.attemptId) : undefined;
-      const scale = attempt ? state.scales.find((candidate) => candidate.id === attempt.scaleVersionId) : undefined;
+      const submission = state.submissions.find((candidate) => candidate.id === String(event.payload.submissionId) && sameTenant(candidate, event.tenantId));
+      const attempt = submission ? state.attempts.find((candidate) => candidate.id === submission.attemptId && sameTenant(candidate, event.tenantId)) : undefined;
+      const scale = attempt ? state.scales.find((candidate) => candidate.id === attempt.scaleVersionId && sameTenant(candidate, event.tenantId)) : undefined;
       if (!submission || !attempt || !scale) throw new Error('SCORING_REFERENCE_MISSING');
       const answers = answersFrom(state, attempt);
       const output = score(scale, answers);
@@ -318,7 +391,9 @@ async function processOutboxEvent(store: JsonStore, eventId: string): Promise<vo
       const assignment = state.assignments.find((candidate) => candidate.id === attempt.assignmentId);
       if (assignment) assignment.status = 'completed';
       const reservation = assignment ? state.frequencyReservations.find((candidate) => candidate.id === assignment.frequencyReservationId) : undefined;
-      if (reservation) reservation.status = 'consumed';
+      // An exception reservation remains an auditable exception marker; the original
+      // annual reservation stays authoritative for the frequency guard.
+      if (reservation && reservation.status !== 'exception') reservation.status = 'consumed';
       if (output.validity === 'invalid') {
         state.outboxEvents.push({ id: id(), tenantId: event.tenantId, type: 'score.failed', aggregateId: scoreRun.id, payload: { submissionId: submission.id, reason: output.invalidReason ?? 'INVALID_ANSWERS' }, status: 'pending', attempts: 0, availableAt: now(), createdAt: now() });
         audit(state, undefined, 'score.failed', 'score_run', scoreRun.id, { validity: output.validity }, undefined, event.tenantId);
@@ -350,9 +425,11 @@ async function processOutboxEvent(store: JsonStore, eventId: string): Promise<vo
 
 export async function listReports(store: JsonStore, auth: AuthenticatedUser, studentId?: string): Promise<Array<Record<string, unknown>>> {
   if (!isProfessional(auth.user) && !isStudent(auth.user)) throw forbidden();
-  return store.read((state) => {
+  return store.transaction((state) => {
     const reports = state.reports.filter((report) => sameTenant(report, auth.user.tenantId) && (!studentId || report.studentId === studentId));
-    return reports.filter((report) => isStudent(auth.user) ? report.studentId === auth.user.id && report.state === 'released' : true).map((report) => ({ id: report.id, studentId: report.studentId, title: report.title, state: report.state, scoreRunId: report.scoreRunId, createdAt: report.createdAt, releasedAt: report.releasedAt, summary: report.state === 'released' || isProfessional(auth.user) ? decrypt(report.summaryCiphertext) : undefined }));
+    const visible = reports.filter((report) => isStudent(auth.user) ? report.studentId === auth.user.id && report.state === 'released' : true);
+    audit(state, auth.user, 'report.listed', 'report', studentId ?? 'self', { count: visible.length }, 'report:read');
+    return visible.map((report) => ({ id: report.id, studentId: report.studentId, title: report.title, state: report.state, scoreRunId: report.scoreRunId, createdAt: report.createdAt, releasedAt: report.releasedAt, summary: report.state === 'released' || isProfessional(auth.user) ? decrypt(report.summaryCiphertext) : undefined }));
   });
 }
 
@@ -383,7 +460,11 @@ export async function createRiskSignal(store: JsonStore, auth: AuthenticatedUser
 
 export async function listCases(store: JsonStore, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
   if (!isProfessional(auth.user)) throw forbidden();
-  return store.read((state) => state.riskCases.filter((candidate) => sameTenant(candidate, auth.user.tenantId)).map((riskCase) => ({ id: riskCase.id, studentId: riskCase.studentId, state: riskCase.state, priority: riskCase.priority, assignedTo: riskCase.assignedTo, signalCount: riskCase.signalIds.length, createdAt: riskCase.createdAt, updatedAt: riskCase.updatedAt })));
+  return store.transaction((state) => {
+    const cases = state.riskCases.filter((candidate) => sameTenant(candidate, auth.user.tenantId));
+    audit(state, auth.user, 'risk.case_listed', 'risk_case', 'tenant', { count: cases.length }, 'case:read');
+    return cases.map((riskCase) => ({ id: riskCase.id, studentId: riskCase.studentId, state: riskCase.state, priority: riskCase.priority, assignedTo: riskCase.assignedTo, signalCount: riskCase.signalIds.length, createdAt: riskCase.createdAt, updatedAt: riskCase.updatedAt }));
+  });
 }
 
 function caseFor(state: DatabaseState, auth: AuthenticatedUser, caseId: string): RiskCase {
@@ -474,12 +555,44 @@ export async function adminOverview(store: JsonStore, auth: AuthenticatedUser): 
 }
 
 export function parseCsv(text: string): Array<Record<string, string>> {
-  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((line) => line.trim());
-  if (lines.length < 2) throw new DomainError('IMPORT_INVALID', 'CSV 至少需要表头和一行数据');
-  const parse = (line: string) => line.split(',').map((cell) => cell.trim().replace(/^"|"$/g, ''));
-  const headers = parse(lines[0]!);
-  if (headers.length === 0 || headers.some((header) => !header)) throw new DomainError('IMPORT_INVALID', 'CSV 表头无效');
-  return lines.slice(1).map((line) => Object.fromEntries(parse(line).map((value, index) => [headers[index] ?? `column_${index}`, value])));
+  const source = text.replace(/^\uFEFF/, '');
+  if (Buffer.byteLength(source, 'utf8') > 2_000_000) throw new DomainError('IMPORT_INVALID', 'CSV 文件大小超出限制');
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index]!;
+    if (quoted) {
+      if (char === '"') {
+        if (source[index + 1] === '"') { cell += '"'; index += 1; }
+        else quoted = false;
+      } else cell += char;
+      if (cell.length > 20_000) throw new DomainError('IMPORT_INVALID', 'CSV 单元格过大');
+      continue;
+    }
+    if (char === '"' && cell.length === 0) { quoted = true; continue; }
+    if (char === ',') { row.push(cell.trim()); cell = ''; continue; }
+    if (char === '\n' || char === '\r') {
+      if (char === '\r' && source[index + 1] === '\n') index += 1;
+      row.push(cell.trim()); cell = '';
+      if (row.some((value) => value !== '')) rows.push(row);
+      if (rows.length > 10_001) throw new DomainError('IMPORT_INVALID', 'CSV 行数超出限制');
+      row = [];
+      continue;
+    }
+    cell += char;
+    if (cell.length > 20_000) throw new DomainError('IMPORT_INVALID', 'CSV 单元格过大');
+  }
+  if (quoted) throw new DomainError('IMPORT_INVALID', 'CSV 引号未闭合');
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell.trim());
+    if (row.some((value) => value !== '')) rows.push(row);
+  }
+  if (rows.length < 2) throw new DomainError('IMPORT_INVALID', 'CSV 至少需要表头和一行数据');
+  const headers = rows[0]!.map((header) => header.trim());
+  if (headers.length === 0 || headers.length > 100 || headers.some((header) => !header) || new Set(headers).size !== headers.length || rows.slice(1).some((values) => values.length > headers.length)) throw new DomainError('IMPORT_INVALID', 'CSV 表头无效或数据列超出范围');
+  return rows.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ''])));
 }
 
 export async function createRightsRequest(store: JsonStore, auth: AuthenticatedUser, input: { studentId: string; kind: RightsRequest['kind']; reason?: string }): Promise<RightsRequest> {
@@ -495,7 +608,11 @@ export async function createRightsRequest(store: JsonStore, auth: AuthenticatedU
 
 export async function listRightsRequests(store: JsonStore, auth: AuthenticatedUser): Promise<RightsRequest[]> {
   requirePermission(auth.user, 'rights:read');
-  return store.read((state) => state.rightsRequests.filter((request) => request.tenantId === auth.user.tenantId).map((request) => ({ ...request })));
+  return store.transaction((state) => {
+    const requests = state.rightsRequests.filter((request) => request.tenantId === auth.user.tenantId).map((request) => ({ ...request }));
+    audit(state, auth.user, 'rights.listed', 'rights_request', 'tenant', { count: requests.length }, 'rights:read');
+    return requests;
+  });
 }
 
 export async function completeRightsRequest(store: JsonStore, auth: AuthenticatedUser, requestId: string, decision: 'complete' | 'reject'): Promise<RightsRequest> {
@@ -507,6 +624,9 @@ export async function completeRightsRequest(store: JsonStore, auth: Authenticate
     request.status = decision === 'complete' ? 'completed' : 'rejected'; request.completedAt = now();
     if (decision === 'complete' && request.kind === 'delete') {
       const student = state.students.find((candidate) => candidate.id === request.studentId && candidate.tenantId === auth.user.tenantId);
+      const deletedAttemptIds = new Set(state.attempts.filter((attempt) => attempt.studentId === request.studentId).map((attempt) => attempt.id));
+      const deletedSubmissionIds = new Set(state.submissions.filter((submission) => deletedAttemptIds.has(submission.attemptId)).map((submission) => submission.id));
+      const deletedCaseIds = new Set(state.riskCases.filter((riskCase) => riskCase.studentId === request.studentId).map((riskCase) => riskCase.id));
       if (student) {
         student.active = false;
         student.displayNameCiphertext = encrypt('已删除');
@@ -524,6 +644,8 @@ export async function completeRightsRequest(store: JsonStore, auth: Authenticate
       state.followUps = state.followUps.filter((followUp) => state.riskCases.some((riskCase) => riskCase.id === followUp.caseId));
       state.profileResponses = state.profileResponses.filter((response) => response.studentId !== request.studentId);
       state.appointments = state.appointments.filter((appointment) => appointment.studentId !== request.studentId);
+      state.outboxEvents = state.outboxEvents.filter((event) => !(event.type === 'assessment.submitted' && deletedSubmissionIds.has(String(event.payload.submissionId))) && !(event.type === 'risk.signal_created' && deletedCaseIds.has(event.aggregateId)));
+      state.deliveryAttempts = state.deliveryAttempts.filter((delivery) => state.outboxEvents.some((event) => event.id === delivery.outboxEventId));
       const tombstone: DeletionTombstone = { id: id(), tenantId: auth.user.tenantId, studentId: request.studentId, requestId, deletedAt: now(), retainedCategories: ['minimal_audit_event', 'deletion_tombstone'] };
       state.deletionTombstones.push(tombstone);
       state.outboxEvents.push({ id: id(), tenantId: auth.user.tenantId, type: 'student.data_deleted', aggregateId: request.studentId, payload: { requestId }, status: 'pending', attempts: 0, availableAt: now(), createdAt: now() });
@@ -588,7 +710,7 @@ export async function getAnalytics(store: JsonStore, auth: AuthenticatedUser, gr
   requirePermission(auth.user, 'analytics:read');
   const allowed = new Set(['school', 'age_band', 'academic_year']);
   if (!allowed.has(groupBy)) throw new DomainError('ANALYTICS_DIMENSION_INVALID', '该统计维度未获批准');
-  return store.read((state) => {
+  return store.transaction((state) => {
     const tenantStudents = state.students.filter((student) => student.tenantId === auth.user.tenantId && student.active);
     const groups = new Map<string, number>();
     for (const student of tenantStudents) {
@@ -659,19 +781,74 @@ export async function updateAppointment(store: JsonStore, auth: AuthenticatedUse
   });
 }
 
-export async function createContent(store: JsonStore, auth: AuthenticatedUser, input: { title: string; kind: ContentItem['kind']; body: string; ageMin: number; ageMax: number; copyrightSource: string }): Promise<ContentItem> {
+const MAX_MEDIA_BYTES = 1_500_000;
+const MEDIA_POLICIES: Record<string, { kind: MediaKind; signature: (buffer: Buffer) => boolean }> = {
+  'image/png': { kind: 'image', signature: (buffer) => buffer.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')) },
+  'image/jpeg': { kind: 'image', signature: (buffer) => buffer.subarray(0, 3).equals(Buffer.from('ffd8ff', 'hex')) },
+  'image/webp': { kind: 'image', signature: (buffer) => buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP' },
+  'audio/mpeg': { kind: 'audio', signature: (buffer) => buffer.subarray(0, 3).toString('ascii') === 'ID3' || (buffer[0] === 0xff && (buffer[1]! & 0xe0) === 0xe0) },
+  'audio/ogg': { kind: 'audio', signature: (buffer) => buffer.subarray(0, 4).toString('ascii') === 'OggS' },
+  'audio/wav': { kind: 'audio', signature: (buffer) => buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WAVE' },
+  'video/mp4': { kind: 'video', signature: (buffer) => buffer.subarray(4, 8).toString('ascii') === 'ftyp' },
+  'video/webm': { kind: 'video', signature: (buffer) => buffer.subarray(0, 4).equals(Buffer.from('1a45dfa3', 'hex')) },
+  'text/vtt': { kind: 'subtitle', signature: (buffer) => buffer.toString('utf8', 0, Math.min(buffer.length, 64)).trimStart().startsWith('WEBVTT') },
+};
+
+function decodeMedia(encoded: string): Buffer {
+  if (!encoded || encoded.length > Math.ceil(MAX_MEDIA_BYTES * 4 / 3) + 8 || !/^[A-Za-z0-9+/_-]+={0,2}$/.test(encoded) || encoded.replace(/=+$/, '').length % 4 === 1) throw new DomainError('MEDIA_INVALID', '媒体内容编码无效');
+  const normalized = encoded.replace(/-/g, '+').replace(/_/g, '/');
+  const buffer = Buffer.from(normalized, 'base64');
+  if (!buffer.length || buffer.length > MAX_MEDIA_BYTES) throw new DomainError('MEDIA_TOO_LARGE', '媒体文件大小超出限制', 413);
+  return buffer;
+}
+
+export async function createMediaAsset(store: JsonStore, auth: AuthenticatedUser, input: { filename: string; mediaType: string; base64: string }): Promise<MediaAsset> {
+  requirePermission(auth.user, 'content:write');
+  const policy = MEDIA_POLICIES[input.mediaType];
+  if (!policy) throw new DomainError('MEDIA_TYPE_NOT_ALLOWED', '媒体类型未获批准');
+  const filename = input.filename.trim().replace(/[\\/\0\r\n"]/g, '_').slice(0, 200);
+  if (!filename) throw new DomainError('MEDIA_INVALID', '媒体文件名无效');
+  const buffer = decodeMedia(input.base64);
+  const textPrefix = buffer.subarray(0, Math.min(buffer.length, 1_000_000)).toString('utf8');
+  if (buffer.subarray(0, 2).toString('ascii') === 'MZ' || /<\s*(script|iframe|object)\b/i.test(textPrefix)) throw new DomainError('MEDIA_SCAN_REJECTED', '媒体安全检查未通过');
+  if (!policy.signature(buffer)) throw new DomainError('MEDIA_SIGNATURE_MISMATCH', '媒体类型与文件内容不匹配');
+  return store.transaction((state) => {
+    const asset: MediaAsset = { id: id(), tenantId: auth.user.tenantId, filename, mediaType: input.mediaType, kind: policy.kind, byteSize: buffer.length, sha256: createHash('sha256').update(buffer).digest('hex'), contentCiphertext: encrypt(buffer.toString('base64')), scanStatus: 'clean', createdBy: auth.user.id, createdAt: now() };
+    state.mediaAssets.push(asset);
+    audit(state, auth.user, 'media.created', 'media_asset', asset.id, { mediaType: asset.mediaType, byteSize: asset.byteSize });
+    return asset;
+  });
+}
+
+export async function readPublicMedia(store: JsonStore, assetId: string): Promise<{ mediaType: string; filename: string; bytes: Buffer }> {
+  return store.read((state) => {
+    const asset = state.mediaAssets.find((candidate) => candidate.id === assetId && candidate.scanStatus === 'clean');
+    const linked = asset && state.contentItems.some((item) => item.mediaAssetId === asset.id && item.tenantId === asset.tenantId && item.state === 'published');
+    if (!asset || !linked) throw notFound();
+    return { mediaType: asset.mediaType, filename: asset.filename, bytes: Buffer.from(decrypt<string>(asset.contentCiphertext), 'base64') };
+  });
+}
+
+export async function createContent(store: JsonStore, auth: AuthenticatedUser, input: { title: string; kind: ContentItem['kind']; body: string; ageMin: number; ageMax: number; copyrightSource: string; mediaAssetId?: string; altText?: string; captionText?: string }): Promise<ContentItem> {
   requirePermission(auth.user, 'content:write');
   if (!input.title.trim() || !input.body.trim() || !input.copyrightSource.trim() || input.ageMin < 6 || input.ageMax > 19 || input.ageMin > input.ageMax) throw new DomainError('CONTENT_INVALID', '内容、版权或适龄范围无效');
-  return store.transaction((state) => { const item: ContentItem = { id: id(), tenantId: auth.user.tenantId, title: input.title.trim().slice(0, 200), kind: input.kind, ageMin: input.ageMin, ageMax: input.ageMax, bodyCiphertext: encrypt({ body: input.body.slice(0, 30_000) }), state: 'draft', copyrightSource: input.copyrightSource.slice(0, 500), createdBy: auth.user.id, createdAt: now() }; state.contentItems.push(item); audit(state, auth.user, 'content.created', 'content', item.id, { kind: item.kind }); return item; });
+  if (input.kind === 'media' && !input.mediaAssetId) throw new DomainError('MEDIA_REQUIRED', '媒体内容需要绑定已检查的媒体资源');
+  if (input.kind !== 'media' && input.mediaAssetId) throw new DomainError('CONTENT_INVALID', '非媒体内容不能绑定媒体资源');
+  if (input.kind === 'media' && input.altText === undefined && input.captionText === undefined) throw new DomainError('ACCESSIBILITY_TEXT_REQUIRED', '媒体内容需要文字替代或字幕说明');
+  return store.transaction((state) => {
+    const media = input.mediaAssetId ? state.mediaAssets.find((asset) => asset.id === input.mediaAssetId && asset.tenantId === auth.user.tenantId && asset.scanStatus === 'clean') : undefined;
+    if (input.mediaAssetId && !media) throw notFound();
+    const item: ContentItem = { id: id(), tenantId: auth.user.tenantId, title: input.title.trim().slice(0, 200), kind: input.kind, ageMin: input.ageMin, ageMax: input.ageMax, bodyCiphertext: encrypt({ body: input.body.slice(0, 30_000) }), state: 'draft', copyrightSource: input.copyrightSource.slice(0, 500), createdBy: auth.user.id, mediaAssetId: media?.id, altText: input.altText?.trim().slice(0, 2000), captionText: input.captionText?.trim().slice(0, 20_000), createdAt: now() }; state.contentItems.push(item); audit(state, auth.user, 'content.created', 'content', item.id, { kind: item.kind, mediaAssetId: media?.id ?? null }); return item;
+  });
 }
 
 export async function approveContent(store: JsonStore, auth: AuthenticatedUser, contentId: string): Promise<ContentItem> {
   requirePermission(auth.user, 'content:approve');
-  return store.transaction((state) => { const item = state.contentItems.find((candidate) => candidate.id === contentId && candidate.tenantId === auth.user.tenantId); if (!item) throw notFound(); if (item.state !== 'draft' && item.state !== 'professional_review') throw new DomainError('CONTENT_STATE_INVALID', '内容当前不可审核'); item.state = 'published'; item.reviewedBy = auth.user.id; item.publishedAt = now(); audit(state, auth.user, 'content.published', 'content', item.id, {}); return item; });
+  return store.transaction((state) => { const item = state.contentItems.find((candidate) => candidate.id === contentId && candidate.tenantId === auth.user.tenantId); if (!item) throw notFound(); if (item.state !== 'draft' && item.state !== 'professional_review') throw new DomainError('CONTENT_STATE_INVALID', '内容当前不可审核'); if (item.kind === 'media') { const media = item.mediaAssetId ? state.mediaAssets.find((asset) => asset.id === item.mediaAssetId && asset.tenantId === item.tenantId && asset.scanStatus === 'clean') : undefined; if (!media) throw new DomainError('MEDIA_NOT_READY', '媒体资源尚未通过安全检查'); if ((media.kind === 'audio' || media.kind === 'video') && !item.captionText?.trim()) throw new DomainError('CAPTION_REQUIRED', '音视频发布需要字幕或文字稿'); if (media.kind === 'image' && !item.altText?.trim()) throw new DomainError('ALT_TEXT_REQUIRED', '图片发布需要文字替代'); } item.state = 'published'; item.reviewedBy = auth.user.id; item.publishedAt = now(); audit(state, auth.user, 'content.published', 'content', item.id, {}); return item; });
 }
 
 export async function listPublicContent(store: JsonStore, age?: number): Promise<Array<Record<string, unknown>>> {
-  return store.read((state) => state.contentItems.filter((item) => item.state === 'published' && (age === undefined || (age >= item.ageMin && age <= item.ageMax))).map((item) => ({ id: item.id, title: item.title, kind: item.kind, ageMin: item.ageMin, ageMax: item.ageMax, body: decrypt<{ body: string }>(item.bodyCiphertext).body, publishedAt: item.publishedAt })));
+  return store.read((state) => state.contentItems.filter((item) => item.state === 'published' && (age === undefined || (age >= item.ageMin && age <= item.ageMax))).map((item) => ({ id: item.id, title: item.title, kind: item.kind, ageMin: item.ageMin, ageMax: item.ageMax, body: decrypt<{ body: string }>(item.bodyCiphertext).body, altText: item.altText, captionText: item.captionText, media: item.mediaAssetId ? (() => { const media = state.mediaAssets.find((asset) => asset.id === item.mediaAssetId && asset.scanStatus === 'clean'); return media ? { id: media.id, filename: media.filename, mediaType: media.mediaType, kind: media.kind, byteSize: media.byteSize, sha256: media.sha256 } : undefined; })() : undefined, publishedAt: item.publishedAt })));
 }
 
 export async function submitProfileResponse(store: JsonStore, auth: AuthenticatedUser, input: { schemaId: string; values: Record<string, unknown> }): Promise<{ id: string; submittedAt: string }> {
@@ -690,7 +867,7 @@ export async function submitProfileResponse(store: JsonStore, auth: Authenticate
 
 export async function campaignProgress(store: JsonStore, auth: AuthenticatedUser, campaignId: string): Promise<Record<string, unknown>> {
   requirePermission(auth.user, 'campaign:progress');
-  return store.read((state) => {
+  return store.transaction((state) => {
     const campaign = state.campaigns.find((candidate) => candidate.id === campaignId && candidate.tenantId === auth.user.tenantId);
     if (!campaign) throw notFound();
     if (auth.user.schoolId && campaign.schoolId !== auth.user.schoolId) throw forbidden();
@@ -721,7 +898,7 @@ export async function createSelfScreening(store: JsonStore, auth: AuthenticatedU
 
 export async function regionalAnalytics(store: JsonStore, auth: AuthenticatedUser): Promise<Record<string, unknown>> {
   requirePermission(auth.user, 'analytics:regional');
-  return store.read((state) => {
+  return store.transaction((state) => {
     const regions = new Map<string, { tenants: number; students: number; openCases: number }>();
     for (const tenant of state.tenants) {
       const region = tenant.region ?? 'unassigned';
@@ -737,7 +914,11 @@ export async function regionalAnalytics(store: JsonStore, auth: AuthenticatedUse
 export async function listStudents(store: JsonStore, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
   if (!can(auth.user, 'org:read')) throw forbidden();
   if (auth.user.role === 'teacher') throw forbidden();
-  return store.read((state) => state.students.filter((student) => student.tenantId === auth.user.tenantId && student.active && (!auth.user.schoolId || student.schoolId === auth.user.schoolId)).map((student) => ({ id: student.id, schoolId: student.schoolId, classId: student.classId, age: student.age, guardianVerified: student.guardianVerified })));
+  return store.transaction((state) => {
+    const students = state.students.filter((student) => student.tenantId === auth.user.tenantId && student.active && (!auth.user.schoolId || student.schoolId === auth.user.schoolId)).map((student) => ({ id: student.id, schoolId: student.schoolId, classId: student.classId, age: student.age, guardianVerified: student.guardianVerified }));
+    audit(state, auth.user, 'student.directory_listed', 'student', 'tenant', { count: students.length }, 'org:read');
+    return students;
+  });
 }
 
 export async function listCampaigns(store: JsonStore, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
@@ -747,7 +928,22 @@ export async function listCampaigns(store: JsonStore, auth: AuthenticatedUser): 
 
 export async function listScaleCatalog(store: JsonStore, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
   if (!isProfessional(auth.user) && !can(auth.user, 'campaign:read')) throw forbidden();
-  return store.read((state) => state.scales.filter((scale) => scale.tenantId === auth.user.tenantId).map((scale) => ({ id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, status: scale.status, minAge: scale.minAge, maxAge: scale.maxAge, scoringVersion: scale.scoringVersion })));
+  return store.transaction((state) => {
+    const scales = state.scales.filter((scale) => scale.tenantId === auth.user.tenantId).map((scale) => ({ id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, status: scale.status, minAge: scale.minAge, maxAge: scale.maxAge, scoringVersion: scale.scoringVersion, dimensions: scale.dimensions ?? [], population: scale.population ?? 'mixed', language: scale.language ?? 'zh-CN', licenseExpiresAt: scale.licenseExpiresAt }));
+    audit(state, auth.user, 'scale.catalog_listed', 'scale_version', 'tenant', { count: scales.length }, 'scale:read');
+    return scales;
+  });
+}
+
+export async function listAvailableScales(store: JsonStore, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
+  requirePermission(auth.user, 'self:assessment');
+  if (!isStudent(auth.user)) throw forbidden();
+  return store.transaction((state) => {
+    const student = state.students.find((candidate) => candidate.id === auth.user.id && candidate.tenantId === auth.user.tenantId && candidate.active);
+    const scales = state.scales.filter((scale) => scale.tenantId === auth.user.tenantId && scale.status === 'approved' && student && ageAllowed(student, scale)).map((scale) => ({ id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, minAge: scale.minAge, maxAge: scale.maxAge, noticeVersion: scale.noticeVersion, dimensions: scale.dimensions ?? [], population: scale.population ?? 'mixed', language: scale.language ?? 'zh-CN', items: scale.items.map((item) => ({ id: item.id, prompt: item.prompt, min: item.min, max: item.max, factor: item.factor })) }));
+    audit(state, auth.user, 'scale.available_listed', 'scale_version', 'self', { count: scales.length }, 'self:assessment');
+    return scales;
+  });
 }
 
 export async function updateCampaignState(store: JsonStore, auth: AuthenticatedUser, campaignId: string, nextState: Campaign['state']): Promise<Campaign> {
@@ -762,7 +958,7 @@ export async function updateCampaignState(store: JsonStore, auth: AuthenticatedU
     campaign.state = nextState;
     if (['closed', 'cancelled', 'archived'].includes(nextState)) {
       for (const assignment of state.assignments.filter((candidate) => candidate.campaignId === campaign.id && candidate.status === 'assigned')) assignment.status = 'expired';
-      if (nextState !== 'closed') for (const reservation of state.frequencyReservations.filter((candidate) => candidate.campaignId === campaign.id && candidate.status === 'reserved')) reservation.status = 'released';
+      if (nextState !== 'closed') for (const reservation of state.frequencyReservations.filter((candidate) => candidate.campaignId === campaign.id && ['reserved', 'exception'].includes(candidate.status))) reservation.status = 'released';
     }
     audit(state, auth.user, `campaign.${nextState}`, 'campaign', campaign.id, {}); return campaign;
   });
@@ -774,5 +970,16 @@ export async function revokeReport(store: JsonStore, auth: AuthenticatedUser, re
     const report = state.reports.find((candidate) => candidate.id === reportId && candidate.tenantId === auth.user.tenantId);
     if (!report || !['approved', 'released'].includes(report.state)) throw notFound();
     report.state = 'revoked'; report.revokedAt = now(); audit(state, auth.user, 'report.revoked', 'report', report.id, { reason: reason.slice(0, 200) });
+  });
+}
+
+/** Revoke a scale version without mutating any historical attempt or score. */
+export async function revokeScale(store: JsonStore, auth: AuthenticatedUser, scaleId: string, reason: string): Promise<void> {
+  requirePermission(auth.user, 'scale:approve');
+  return store.transaction((state) => {
+    const scale = state.scales.find((candidate) => candidate.id === scaleId && candidate.tenantId === auth.user.tenantId);
+    if (!scale || scale.status === 'revoked') throw notFound();
+    scale.status = 'revoked';
+    audit(state, auth.user, 'scale.revoked', 'scale_version', scale.id, { reason: reason.slice(0, 200), version: scale.version });
   });
 }

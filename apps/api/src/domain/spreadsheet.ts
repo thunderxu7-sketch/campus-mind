@@ -13,14 +13,20 @@ function entryMap(buffer: Buffer): Map<string, Buffer> {
   const directoryOffset = u32(buffer, eocd + 16);
   if (directoryOffset + directorySize > buffer.length) throw new DomainError('IMPORT_INVALID', 'XLSX 目录超出文件范围');
   const entries = new Map<string, Buffer>();
+  let totalUncompressed = 0;
+  let entryCount = 0;
   let offset = directoryOffset;
   const end = directoryOffset + directorySize;
   while (offset < end) {
+    entryCount += 1;
+    if (entryCount > 200) throw new DomainError('IMPORT_INVALID', 'XLSX 文件项数量超出限制');
     if (u32(buffer, offset) !== 0x02014b50) throw new DomainError('IMPORT_INVALID', 'XLSX 文件项无效');
     const compression = u16(buffer, offset + 10);
     const compressedSize = u32(buffer, offset + 20);
     const uncompressedSize = u32(buffer, offset + 24);
     if (uncompressedSize > 20_000_000) throw new DomainError('IMPORT_INVALID', 'XLSX 解压后文件过大');
+    totalUncompressed += uncompressedSize;
+    if (totalUncompressed > 50_000_000) throw new DomainError('IMPORT_INVALID', 'XLSX 总解压大小超出限制');
     const nameLength = u16(buffer, offset + 28);
     const extraLength = u16(buffer, offset + 30);
     const commentLength = u16(buffer, offset + 32);
@@ -53,20 +59,28 @@ function columnIndex(reference: string): number {
 /** Parse the first worksheet of a bounded XLSX upload without executing formulas or macros. */
 export function parseXlsxBase64(encoded: string, maxBytes = 2_000_000): Array<Record<string, string>> {
   let buffer: Buffer;
-  try { buffer = Buffer.from(encoded, 'base64'); } catch { throw new DomainError('IMPORT_INVALID', 'XLSX 编码无效'); }
+  if (!encoded || !/^[A-Za-z0-9+/_-]+={0,2}$/.test(encoded) || encoded.replace(/=+$/, '').length % 4 === 1) throw new DomainError('IMPORT_INVALID', 'XLSX 编码无效');
+  try { buffer = Buffer.from(encoded.replace(/-/g, '+').replace(/_/g, '/'), 'base64'); } catch { throw new DomainError('IMPORT_INVALID', 'XLSX 编码无效'); }
   if (!buffer.length || buffer.length > maxBytes) throw new DomainError('IMPORT_INVALID', 'XLSX 文件大小超出限制');
-  const entries = entryMap(buffer);
+  let entries: Map<string, Buffer>;
+  try { entries = entryMap(buffer); } catch (error) {
+    if (error instanceof DomainError) throw error;
+    throw new DomainError('IMPORT_INVALID', 'XLSX 文件结构无效');
+  }
   const sheet = entries.get('xl/worksheets/sheet1.xml');
   if (!sheet) throw new DomainError('IMPORT_INVALID', 'XLSX 缺少首个工作表');
   const sharedXml = entries.get('xl/sharedStrings.xml')?.toString('utf8') ?? '';
   const shared = [...sharedXml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((match) => { const body = match[1] ?? ''; return xmlDecode([...body.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((m) => m[1] ?? '').join('')); });
   const rows: string[][] = [];
   for (const rowMatch of sheet.toString('utf8').matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+    if (rows.length >= 10_001) throw new DomainError('IMPORT_INVALID', 'XLSX 行数超出限制');
     const cells: string[] = [];
     for (const cellMatch of (rowMatch[1] ?? '').matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)) {
+      if (cells.length >= 100) throw new DomainError('IMPORT_INVALID', 'XLSX 列数超出限制');
       const attrs = cellMatch[1] ?? '';
       const ref = attrs.match(/\br="([A-Z]+\d+)"/)?.[1] ?? '';
       const index = columnIndex(ref);
+      if (index >= 100) throw new DomainError('IMPORT_INVALID', 'XLSX 列数超出限制');
       const type = attrs.match(/\bt="([^"]+)"/)?.[1];
       while (cells.length <= index) cells.push('');
       cells[index] = cellValue(cellMatch[2] ?? '', type, shared);

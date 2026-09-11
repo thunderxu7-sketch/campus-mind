@@ -4,7 +4,7 @@ import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseXlsxBase64 } from './domain/spreadsheet.js';
-import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, campaignProgress, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createProfileSchema, createRiskSignal, createScale, createSelfScreening, currentUser, regionalAnalytics, submitProfileResponse, drainOutbox, downloadExport, getAnalytics, listCases, listCampaigns, listMyTasks, listPublicContent, listReports, listScaleCatalog, listStudents, listRightsRequests, parseCsv, previewImport, publishCampaign, requestAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, updateCampaignState, revokeReport, withdrawConsent, completeRightsRequest, createRightsRequest } from './domain/service.js';
+import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveFrequencyException, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, campaignProgress, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createGuardianLink, createMediaAsset, createProfileSchema, createRiskSignal, createScale, createSelfScreening, currentUser, listAvailableScales, regionalAnalytics, submitProfileResponse, drainOutbox, downloadExport, getAnalytics, listCases, listCampaigns, listMyTasks, listPublicContent, listReports, listScaleCatalog, listStudents, listRightsRequests, parseCsv, previewImport, publishCampaign, readPublicMedia, requestAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, updateCampaignState, revokeReport, revokeScale, verifyGuardianLink, withdrawConsent, completeRightsRequest, createRightsRequest } from './domain/service.js';
 import { authenticate, login as loginUser, logout, requirePermission } from './domain/auth.js';
 import { DomainError, unauthorized } from './domain/errors.js';
 import { JsonStore } from './domain/store.js';
@@ -45,7 +45,8 @@ function sendError(res: ServerResponse, error: unknown): void {
     json(res, error.status, { error: { code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}) } });
     return;
   }
-  console.error(error);
+  // Keep unexpected errors out of logs when they may include decrypted input or request data.
+  console.error('internal error', error instanceof Error ? error.name : 'unknown');
   json(res, 500, { error: { code: 'INTERNAL_ERROR', message: '服务暂时不可用，请联系学校支持人员。' } });
 }
 
@@ -79,7 +80,7 @@ function arrayField(input: Record<string, unknown>, key: string): unknown[] {
 }
 
 function publicScale(scale: DatabaseState['scales'][number]): Record<string, unknown> {
-  return { id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, minAge: scale.minAge, maxAge: scale.maxAge, noticeVersion: scale.noticeVersion, items: scale.items.map((item) => ({ id: item.id, prompt: item.prompt, min: item.min, max: item.max, factor: item.factor })) };
+  return { id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, minAge: scale.minAge, maxAge: scale.maxAge, noticeVersion: scale.noticeVersion, dimensions: scale.dimensions ?? [], population: scale.population ?? 'mixed', language: scale.language ?? 'zh-CN', items: scale.items.map((item) => ({ id: item.id, prompt: item.prompt, min: item.min, max: item.max, factor: item.factor })) };
 }
 
 export interface AppOptions { store?: JsonStore; }
@@ -122,6 +123,10 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   const segments = path.split('/').filter(Boolean);
   const input = method !== 'GET' && method !== 'DELETE' ? await body(req) : {};
   if (method === 'GET' && path === '/v1/content/public') { json(res, 200, { data: await listPublicContent(store, url.searchParams.has('age') ? Number(url.searchParams.get('age')) : undefined) }); return; }
+  if (method === 'GET' && segments[1] === 'content' && segments[2] === 'public' && segments[4] === 'media') {
+    const media = await readPublicMedia(store, segments[3]!);
+    res.statusCode = 200; res.setHeader('Content-Type', media.mediaType); res.setHeader('Content-Length', media.bytes.byteLength); res.setHeader('Cache-Control', 'public, max-age=300'); res.setHeader('Content-Disposition', `inline; filename="${media.filename.replace(/"/g, '')}"`); res.end(media.bytes); return;
+  }
   if (method === 'POST' && path === '/v1/auth/login') {
     const result = await loginUser(store, stringField(input, 'email'), stringField(input, 'password'));
     json(res, 200, { data: result }); return;
@@ -139,6 +144,8 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
     const result = await createConsent(store, auth, { studentId: stringField(input, 'studentId'), actorType: (input.actorType as 'student' | 'guardian' | 'school_legal_basis') ?? 'student', noticeVersion: stringField(input, 'noticeVersion'), purpose: (input.purpose as 'assessment' | 'support' | 'research') ?? 'assessment' });
     json(res, 201, { data: result }); return;
   }
+  if (method === 'POST' && path === '/v1/guardian-links') { const result = await createGuardianLink(store, auth, stringField(input, 'studentId'), stringField(input, 'guardianUserId')); json(res, 201, { data: result }); return; }
+  if (method === 'POST' && segments[1] === 'guardian-links' && segments[3] === 'verify') { const result = await verifyGuardianLink(store, auth, segments[2]!); json(res, 200, { data: result }); return; }
   if (method === 'POST' && segments[1] === 'me' && segments[2] === 'consents' && segments[4] === 'withdraw') { await withdrawConsent(store, auth, segments[3]!); json(res, 204, {}); return; }
   if (method === 'POST' && path === '/v1/imports/preview-csv') {
     const csv = stringField(input, 'csv');
@@ -159,18 +166,21 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
     const result = await commitImport(store, auth, segments[2]!, rows); json(res, 200, { data: result }); return;
   }
   if (method === 'POST' && path === '/v1/scales') {
-    const scale = await createScale(store, auth, { code: stringField(input, 'code'), title: stringField(input, 'title'), version: stringField(input, 'version'), provenance: (input.provenance as 'synthetic_only' | 'licensed') ?? 'synthetic_only', minAge: Number(input.minAge), maxAge: Number(input.maxAge), scoringVersion: stringField(input, 'scoringVersion'), noticeVersion: stringField(input, 'noticeVersion'), items: arrayField(input, 'items') as never, warningRule: input.warningRule as never }); json(res, 201, { data: publicScale(scale) }); return;
+    const dimensions = Array.isArray(input.dimensions) ? input.dimensions.filter((value): value is string => typeof value === 'string').map((value) => value.trim()).filter(Boolean).slice(0, 20) : undefined;
+    const scale = await createScale(store, auth, { code: stringField(input, 'code'), title: stringField(input, 'title'), version: stringField(input, 'version'), provenance: (input.provenance as 'synthetic_only' | 'licensed') ?? 'synthetic_only', minAge: Number(input.minAge), maxAge: Number(input.maxAge), scoringVersion: stringField(input, 'scoringVersion'), noticeVersion: stringField(input, 'noticeVersion'), dimensions, population: input.population as 'primary' | 'middle' | 'high' | 'mixed' | undefined, language: typeof input.language === 'string' ? input.language.trim() : undefined, licenseExpiresAt: typeof input.licenseExpiresAt === 'string' ? input.licenseExpiresAt : undefined, reviewEvidenceRef: typeof input.reviewEvidenceRef === 'string' ? input.reviewEvidenceRef.trim() : undefined, items: arrayField(input, 'items') as never, warningRule: input.warningRule as never }); json(res, 201, { data: publicScale(scale) }); return;
   }
   if (method === 'POST' && segments[1] === 'scales' && segments[3] === 'approve') { const scale = await approveScale(store, auth, segments[2]!); json(res, 200, { data: publicScale(scale) }); return; }
+  if (method === 'POST' && segments[1] === 'scales' && segments[3] === 'revoke') { await revokeScale(store, auth, segments[2]!, stringField(input, 'reason')); json(res, 204, {}); return; }
   if (method === 'POST' && path === '/v1/campaigns') {
     const ids = arrayField(input, 'participantStudentIds').map((value) => String(value));
     const campaign = await createCampaign(store, auth, { schoolId: stringField(input, 'schoolId'), name: stringField(input, 'name'), purpose: (input.purpose as 'screening' | 'survey') ?? 'screening', academicYear: stringField(input, 'academicYear'), opensAt: stringField(input, 'opensAt'), closesAt: stringField(input, 'closesAt'), scaleVersionId: stringField(input, 'scaleVersionId'), participantStudentIds: ids }); json(res, 201, { data: campaign }); return;
   }
   if (method === 'POST' && segments[1] === 'campaigns' && segments[3] === 'publish') { const campaign = await publishCampaign(store, auth, segments[2]!); json(res, 200, { data: campaign }); return; }
+  if (method === 'POST' && segments[1] === 'campaigns' && segments[3] === 'frequency-exceptions') { const reservation = await approveFrequencyException(store, auth, segments[2]!, { studentId: stringField(input, 'studentId'), reason: stringField(input, 'reason') }); json(res, 201, { data: reservation }); return; }
   if (method === 'GET' && segments[1] === 'campaigns' && segments[3] === 'progress') { const progress = await campaignProgress(store, auth, segments[2]!); json(res, 200, { data: progress }); return; }
   if (method === 'POST' && segments[1] === 'campaigns' && segments[3] === 'state') { const campaign = await updateCampaignState(store, auth, segments[2]!, (input.state as 'draft' | 'approved' | 'scheduled' | 'open' | 'paused' | 'closed' | 'cancelled' | 'archived') ?? 'paused'); json(res, 200, { data: campaign }); return; }
   if (method === 'GET' && path === '/v1/me/scales') {
-    requirePermission(auth.user, 'self:assessment'); const scales = await store.read((state) => state.scales.filter((scale) => scale.tenantId === auth.user.tenantId).map(publicScale)); json(res, 200, { data: scales }); return;
+    const scales = await listAvailableScales(store, auth); json(res, 200, { data: scales }); return;
   }
   if (method === 'POST' && segments[1] === 'me' && segments[2] === 'tasks' && segments[4] === 'attempts') { const result = await beginAttempt(store, auth, segments[3]!); json(res, 201, { data: { attempt: result.attempt, scale: publicScale(result.scale) } }); return; }
   if (method === 'POST' && path === '/v1/me/profile-responses') { const result = await submitProfileResponse(store, auth, { schemaId: stringField(input, 'schemaId'), values: (input.values as Record<string, unknown>) ?? {} }); json(res, 201, { data: result }); return; }
@@ -200,14 +210,15 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   if (method === 'POST' && segments[1] === 'admin' && segments[2] === 'rights-requests' && segments[4] === 'complete') { const result = await completeRightsRequest(store, auth, segments[3]!, input.decision === 'reject' ? 'reject' : 'complete'); json(res, 200, { data: result }); return; }
   if (method === 'POST' && path === '/v1/exports') { const result = await requestExport(store, auth, { kind: input.kind === 'report' ? 'report' : 'aggregate', studentId: typeof input.studentId === 'string' ? input.studentId : undefined }); json(res, 201, { data: result }); return; }
   if (method === 'POST' && segments[1] === 'exports' && segments[3] === 'approve') { const result = await approveExport(store, auth, segments[2]!); json(res, 200, { data: result }); return; }
-  if (method === 'GET' && segments[1] === 'exports' && segments.length === 3) { const result = await downloadExport(store, auth, segments[2]!); json(res, 200, { data: result }); return; }
+  if (method === 'GET' && segments[1] === 'exports' && (segments.length === 3 || (segments.length === 4 && segments[3] === 'download'))) { const result = await downloadExport(store, auth, segments[2]!); json(res, 200, { data: result }); return; }
   if (method === 'GET' && path === '/v1/analytics/summary') { json(res, 200, { data: await getAnalytics(store, auth, url.searchParams.get('groupBy') ?? 'school') }); return; }
   if (method === 'POST' && path === '/v1/profile-schemas') { const result = await createProfileSchema(store, auth, { version: stringField(input, 'version'), fields: arrayField(input, 'fields') as never }); json(res, 201, { data: result }); return; }
   if (method === 'POST' && segments[1] === 'profile-schemas' && segments[3] === 'approve') { const result = await approveProfileSchema(store, auth, segments[2]!); json(res, 200, { data: result }); return; }
   if (method === 'POST' && path === '/v1/availability-slots') { const result = await createAvailabilitySlot(store, auth, { counselorId: stringField(input, 'counselorId'), startsAt: stringField(input, 'startsAt'), endsAt: stringField(input, 'endsAt'), room: typeof input.room === 'string' ? input.room : undefined }); json(res, 201, { data: result }); return; }
   if (method === 'POST' && path === '/v1/appointments') { const result = await requestAppointment(store, auth, { slotId: stringField(input, 'slotId'), note: typeof input.note === 'string' ? input.note : undefined }); json(res, 201, { data: result }); return; }
   if (method === 'POST' && segments[1] === 'appointments' && segments[3] === 'state') { const result = await updateAppointment(store, auth, segments[2]!, (input.state as 'requested' | 'confirmed' | 'completed' | 'cancelled' | 'no_show') ?? 'cancelled'); json(res, 200, { data: result }); return; }
-  if (method === 'POST' && path === '/v1/content') { const result = await createContent(store, auth, { title: stringField(input, 'title'), kind: (input.kind as 'article' | 'announcement' | 'media') ?? 'article', body: stringField(input, 'body'), ageMin: Number(input.ageMin), ageMax: Number(input.ageMax), copyrightSource: stringField(input, 'copyrightSource') }); json(res, 201, { data: { ...result, bodyCiphertext: undefined } }); return; }
+  if (method === 'POST' && path === '/v1/content') { const result = await createContent(store, auth, { title: stringField(input, 'title'), kind: (input.kind as 'article' | 'announcement' | 'media') ?? 'article', body: stringField(input, 'body'), ageMin: Number(input.ageMin), ageMax: Number(input.ageMax), copyrightSource: stringField(input, 'copyrightSource'), mediaAssetId: typeof input.mediaAssetId === 'string' ? input.mediaAssetId : undefined, altText: typeof input.altText === 'string' ? input.altText : undefined, captionText: typeof input.captionText === 'string' ? input.captionText : undefined }); json(res, 201, { data: { ...result, bodyCiphertext: undefined } }); return; }
+  if (method === 'POST' && path === '/v1/media-assets') { const result = await createMediaAsset(store, auth, { filename: stringField(input, 'filename'), mediaType: stringField(input, 'mediaType'), base64: stringField(input, 'base64') }); json(res, 201, { data: { id: result.id, filename: result.filename, mediaType: result.mediaType, kind: result.kind, byteSize: result.byteSize, sha256: result.sha256, scanStatus: result.scanStatus, createdAt: result.createdAt } }); return; }
   if (method === 'POST' && segments[1] === 'content' && segments[3] === 'publish') { const result = await approveContent(store, auth, segments[2]!); json(res, 200, { data: { id: result.id, state: result.state, publishedAt: result.publishedAt } }); return; }
   if (method === 'GET' && path === '/v1/admin/regional-analytics') { json(res, 200, { data: await regionalAnalytics(store, auth) }); return; }
   if (method === 'GET' && path === '/v1/admin/overview') { json(res, 200, { data: await adminOverview(store, auth) }); return; }
