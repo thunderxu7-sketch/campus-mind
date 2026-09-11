@@ -21,11 +21,11 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 const importPreviewHash = (rows: Array<Record<string, unknown>>): string => createHash('sha256').update(stableJson(rows)).digest('hex');
-type PublicRightsRequest = Omit<RightsRequest, 'resultCiphertext'> & { resultReady: boolean };
+type PublicRightsRequest = Omit<RightsRequest, 'resultCiphertext' | 'decisionReasonCiphertext'> & { resultReady: boolean };
 type PublicExportJob = Omit<ExportJob, 'payloadCiphertext'> & { ready: boolean };
 
 function publicRightsRequest(request: RightsRequest): PublicRightsRequest {
-  const { resultCiphertext: _resultCiphertext, ...publicRequest } = request;
+  const { resultCiphertext: _resultCiphertext, decisionReasonCiphertext: _decisionReasonCiphertext, ...publicRequest } = request;
   return { ...publicRequest, resultReady: Boolean(_resultCiphertext) };
 }
 
@@ -886,9 +886,11 @@ function rightsAccessPackage(state: DatabaseState, request: RightsRequest): Reco
   return { requestId: request.id, studentId: request.studentId, basic: student ? { schoolId: student.schoolId, classId: student.classId, age: student.age } : undefined, reports, note: '这是经身份核验的查阅副本，不包含原始答卷或未发布专业记录。' };
 }
 
-export async function completeRightsRequest(store: Store, auth: AuthenticatedUser, requestId: string, decision: 'complete' | 'reject'): Promise<PublicRightsRequest> {
+export async function completeRightsRequest(store: Store, auth: AuthenticatedUser, requestId: string, decision: 'complete' | 'reject', decisionReason?: string): Promise<PublicRightsRequest> {
   requirePermission(auth.user, 'rights:manage');
   if (!['complete', 'reject'].includes(decision)) throw new DomainError('RIGHTS_DECISION_INVALID', '权利请求决定无效');
+  if (decisionReason !== undefined && (typeof decisionReason !== 'string' || !decisionReason.trim() || decisionReason.length > 2000 || /[\0\r\n]/.test(decisionReason))) throw new DomainError('RIGHTS_DECISION_REASON_INVALID', '处理说明格式无效');
+  if (decision === 'reject' && !decisionReason?.trim()) throw new DomainError('RIGHTS_DECISION_REASON_REQUIRED', '拒绝权利请求需要记录理由');
   return store.transaction((state) => {
     const request = state.rightsRequests.find((candidate) => candidate.id === requestId && candidate.tenantId === auth.user.tenantId);
     if (!request) throw notFound();
@@ -896,19 +898,22 @@ export async function completeRightsRequest(store: Store, auth: AuthenticatedUse
     if (auth.user.schoolId && (!requestStudent || requestStudent.schoolId !== auth.user.schoolId)) throw notFound();
     if (!['open', 'processing'].includes(request.status)) throw new DomainError('RIGHTS_REQUEST_STATE_INVALID', '权利请求已处理');
     request.status = decision === 'complete' ? 'completed' : 'rejected'; request.completedAt = now();
-    if (decision === 'reject') request.resultCiphertext = undefined;
+    request.decisionReasonCiphertext = decisionReason?.trim() ? encrypt({ reason: decisionReason.trim().slice(0, 2000) }) : undefined;
+    if (decision === 'reject') request.resultCiphertext = encrypt({ requestId: request.id, status: 'rejected', note: '该权利请求未获批准。', reason: decisionReason!.trim().slice(0, 2000) });
     if (decision === 'complete' && request.kind === 'access') request.resultCiphertext = encrypt(rightsAccessPackage(state, request));
-    if (decision === 'complete' && request.kind === 'correct') request.resultCiphertext = encrypt({ requestId: request.id, note: '更正申请已记录，请由校方隐私负责人完成身份和来源核验后更新。' });
+    if (decision === 'complete' && request.kind === 'correct') request.resultCiphertext = encrypt({ requestId: request.id, status: 'completed', note: '更正申请已记录，请由校方隐私负责人完成身份和来源核验后更新。' });
     if (decision === 'complete' && request.kind === 'delete') {
       purgeStudentData(state, request.tenantId, request.studentId);
       const tombstone: DeletionTombstone = { id: id(), tenantId: auth.user.tenantId, studentId: request.studentId, requestId, deletedAt: now(), retainedCategories: ['minimal_audit_event', 'deletion_tombstone'] };
       state.deletionTombstones.push(tombstone);
       state.outboxEvents.push({ id: id(), tenantId: auth.user.tenantId, type: 'student.data_deleted', aggregateId: request.studentId, payload: { requestId }, status: 'pending', attempts: 0, availableAt: now(), createdAt: now() });
+      request.resultCiphertext = encrypt({ requestId: request.id, status: 'completed', note: '删除申请已按核验流程处理。' });
     }
     if (decision === 'complete' && request.kind === 'withdraw') {
       for (const consent of state.consents.filter((candidate) => candidate.tenantId === auth.user.tenantId && candidate.studentId === request.studentId && candidate.purpose === 'assessment' && candidate.status === 'active')) { consent.status = 'withdrawn'; consent.withdrawnAt = now(); }
       revokeStudentAssessmentProcessing(state, auth.user.tenantId, request.studentId);
       audit(state, auth.user, 'rights.withdraw_applied', 'student', request.studentId, {});
+      request.resultCiphertext = encrypt({ requestId: request.id, status: 'completed', note: '测评参与撤回已处理，后续测评处理已停止。' });
     }
     audit(state, auth.user, 'rights.completed', 'rights_request', request.id, { kind: request.kind, decision });
     return publicRightsRequest(request);
@@ -919,7 +924,7 @@ export async function downloadRightsResult(store: Store, auth: AuthenticatedUser
   return store.transaction((state) => {
     const request = state.rightsRequests.find((candidate) => candidate.id === requestId && candidate.tenantId === auth.user.tenantId);
     const requestStudent = request ? state.students.find((candidate) => candidate.id === request.studentId && candidate.tenantId === request.tenantId) : undefined;
-    if (!request || request.status !== 'completed' || !request.resultCiphertext || (auth.user.schoolId && (!requestStudent || requestStudent.schoolId !== auth.user.schoolId)) || (request.requesterId !== auth.user.id && !can(auth.user, 'rights:read'))) throw forbidden();
+    if (!request || !['completed', 'rejected'].includes(request.status) || !request.resultCiphertext || (auth.user.schoolId && (!requestStudent || requestStudent.schoolId !== auth.user.schoolId)) || (request.requesterId !== auth.user.id && !can(auth.user, 'rights:read'))) throw forbidden();
     audit(state, auth.user, 'rights.result_downloaded', 'rights_request', request.id, { kind: request.kind }, 'rights:read');
     return decrypt<Record<string, unknown>>(request.resultCiphertext);
   });

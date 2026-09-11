@@ -56,7 +56,13 @@ paths:
   /v1/admin/rights-requests:
     get: {summary: List scoped rights requests for privacy staff, responses: {'200': {description: Request queue without encrypted result bodies}, '403': {description: Privacy permission required}}}
   /v1/admin/rights-requests/{requestId}/complete:
-    post: {summary: Complete or reject a rights request, parameters: [{$ref: '#/components/parameters/requestId'}], responses: {'200': {description: Updated request metadata}, '403': {description: Rights management permission required}}}
+    post:
+      summary: Complete or reject a rights request with a reviewer rationale
+      parameters: [{$ref: '#/components/parameters/requestId'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [decision], properties: {decision: {type: string, enum: [complete, reject]}, decisionReason: {type: string, maxLength: 2000, description: Required when rejecting; stored encrypted and returned only through an authorized result request}}}}}
+      responses: {'200': {description: Updated request metadata}, '400': {description: Rejection rationale required}, '403': {description: Rights management permission required}}
   /v1/admin/operations/status:
     get: {summary: Read redacted outbox and delivery counters, responses: {'200': {description: Operational status}, '403': {description: Operations permission required}}}
   /v1/admin/operations/requeue-dead-letters:

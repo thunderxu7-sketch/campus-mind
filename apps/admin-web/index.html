@@ -94,6 +94,7 @@
     <pre id="archiveView" hidden style="white-space:pre-wrap;background:#fff;padding:.75rem;border-radius:8px;max-height:24rem;overflow:auto"></pre>
     <h2>隐私权利处理队列</h2>
     <p class="muted">仅隐私/权利管理角色可处理申请；结果正文不会出现在队列或审计列表中。</p>
+    <label for="rights-decision-reason">处理说明（拒绝时必填）</label><textarea id="rights-decision-reason" rows="2" maxlength="2000" placeholder="记录身份、范围或法律依据核验结论"></textarea>
     <div id="rightsAdminList" aria-live="polite"><p class="muted">暂无待处理申请，或当前账号没有权利管理权限。</p></div>
     <h2>运行接续与保留任务</h2>
     <p class="muted">仅运维角色可查看队列计数、补投死信、执行超时升级和保留重放；这些操作不会显示学生心理正文。</p>
@@ -308,8 +309,10 @@
     }
     async function updateRights(requestId, decision) {
       if (decision === 'complete' && !window.confirm('确认完成该权利请求？请确保已完成身份、范围和保留依据核验。')) return;
+      const decisionReason = $('#rights-decision-reason').value.trim();
+      if (decision === 'reject' && !decisionReason) { setStatus('拒绝权利请求前请填写处理理由'); return; }
       try {
-        const response = await fetch('/v1/admin/rights-requests/' + encodeURIComponent(requestId) + '/complete', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ decision }) });
+        const response = await fetch('/v1/admin/rights-requests/' + encodeURIComponent(requestId) + '/complete', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ decision, decisionReason: decisionReason || undefined }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '权利请求操作失败');
         setStatus(decision === 'complete' ? '权利请求已完成' : '权利请求已拒绝');

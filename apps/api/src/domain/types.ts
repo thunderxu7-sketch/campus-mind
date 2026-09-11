@@ -351,6 +351,8 @@ export interface RightsRequest {
   requesterId: string;
   status: 'open' | 'processing' | 'completed' | 'rejected';
   reason?: string;
+  /** Encrypted rationale recorded by the privacy reviewer for the decision. */
+  decisionReasonCiphertext?: string;
   resultCiphertext?: string;
   createdAt: string;
   completedAt?: string;

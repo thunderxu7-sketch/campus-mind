@@ -66,6 +66,7 @@ test('health and browser surfaces expose safety headers', async () => {
   assert.match(adminHtml, /危机线索工作台/);
   assert.match(adminHtml, /专业报告与心理档案/);
   assert.match(adminHtml, /隐私权利处理队列/);
+  assert.match(adminHtml, /处理说明（拒绝时必填）/);
   assert.match(adminHtml, /运行接续与保留任务/);
   assert.match(adminHtml, /隐私保护统计/);
 });
@@ -503,6 +504,17 @@ test('rights requests are auditable and privacy staff can complete non-destructi
   const after = await request('/v1/me/rights-requests', { headers: auth(student) });
   assert.equal(after.response.status, 200);
   assert.equal(after.body.data.find((item) => item.id === created.body.data.id).resultReady, true);
+  const rejectedRequest = await request('/v1/rights-requests', { method: 'POST', headers: auth(student), body: JSON.stringify({ studentId: 'student-demo', kind: 'correct', reason: '合成演示更正申请' }) });
+  assert.equal(rejectedRequest.response.status, 201);
+  const missingDecisionReason = await request(`/v1/admin/rights-requests/${rejectedRequest.body.data.id}/complete`, { method: 'POST', headers: auth(privacy), body: JSON.stringify({ decision: 'reject' }) });
+  assert.equal(missingDecisionReason.response.status, 400);
+  assert.equal(missingDecisionReason.body.error.code, 'RIGHTS_DECISION_REASON_REQUIRED');
+  const rejected = await request(`/v1/admin/rights-requests/${rejectedRequest.body.data.id}/complete`, { method: 'POST', headers: auth(privacy), body: JSON.stringify({ decision: 'reject', decisionReason: '合成演示：无法核验申请范围' }) });
+  assert.equal(rejected.response.status, 200);
+  assert.equal(rejected.body.data.resultReady, true);
+  const rejectionResult = await request(`/v1/rights-requests/${rejectedRequest.body.data.id}/result`, { headers: auth(student) });
+  assert.equal(rejectionResult.response.status, 200);
+  assert.match(rejectionResult.body.data.reason, /无法核验/);
   const audit = await request('/v1/admin/audit?limit=20', { headers: auth(privacy) });
   assert.equal(audit.response.status, 200, JSON.stringify(audit.body));
   assert.ok(audit.body.data.some((event) => event.action === 'rights.completed'));
