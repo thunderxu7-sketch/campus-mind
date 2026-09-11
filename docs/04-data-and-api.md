@@ -96,7 +96,7 @@ erDiagram
 | `POST /v1/exports`、`GET /v1/exports/{id}/download` | 导出 | 明确目的/字段/审批，到期与授权实时校验 |
 | `POST /v1/appointments` | 咨询预约 | M5；资源排他、幂等、资质与可预约窗口 |
 | `POST /v1/content/{id}/publish` | 教育内容发布 | M5；专业审核、适龄、版权证明 |
-| `POST /v1/media-assets`、`GET /v1/content/public/{assetId}/media` | 媒体上传与公开播放 | 仅允许批准类型/大小；签名、脚本特征和哈希检查；只有已审核内容可公开读取 |
+| `POST /v1/media-assets`、`GET /v1/content/public/{assetId}/media` | 媒体上传与公开播放 | 仅允许批准类型/大小；签名、脚本特征和哈希检查；媒体正文写入私有对象存储并只在已审核内容关联时公开读取；生产适配器必须隔离租户与 KMS 密钥 |
 
 建议错误码：`CONSENT_REQUIRED`、`AGE_REVIEW_REQUIRED`、`FREQUENCY_REVIEW_REQUIRED`、`CAMPAIGN_CLOSED`、`LICENSE_UNAVAILABLE`、`REVISION_CONFLICT`、`IDEMPOTENCY_CONFLICT`、`PROFESSIONAL_REVIEW_REQUIRED`、`SLOT_UNAVAILABLE`、`EXPORT_REVOKED`。敏感权限错误不返回其他学生信息。
 

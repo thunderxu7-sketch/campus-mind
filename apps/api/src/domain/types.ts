@@ -425,6 +425,8 @@ export interface MediaAsset {
   byteSize: number;
   sha256: string;
   contentCiphertext: string;
+  /** Optional private object-store pointer. Legacy reference records keep encrypted inline content. */
+  objectKey?: string;
   scanStatus: 'clean' | 'rejected';
   createdBy: string;
   createdAt: string;

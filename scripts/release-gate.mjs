@@ -23,7 +23,7 @@ const productionEvidence = [
   ['CAMPMIND_PILOT_APPROVED', '校方受控试点批准'],
 ].map(([env, label]) => ({ id: env.replace(/^CAMPMIND_/, '').toLowerCase(), label, pass: process.env[env] === 'true' }));
 
-if (mode === 'production') checks.push(...productionEvidence, { id: 'postgres-backend', label: '生产使用 PostgreSQL 适配器', pass: process.env.CAMPMIND_DATA_BACKEND === 'postgres' && process.env.CAMPMIND_POSTGRES_ADAPTER_READY === 'true' }, { id: 'demo-mfa-disabled', label: '生产未启用演示 MFA 绕过', pass: process.env.CAMPMIND_DEMO_MFA !== 'true' });
+if (mode === 'production') checks.push(...productionEvidence, { id: 'postgres-backend', label: '生产使用 PostgreSQL 适配器', pass: process.env.CAMPMIND_DATA_BACKEND === 'postgres' && process.env.CAMPMIND_POSTGRES_ADAPTER_READY === 'true' }, { id: 'object-store-adapter', label: '生产使用私有对象存储适配器', pass: process.env.CAMPMIND_OBJECT_STORE_ADAPTER_READY === 'true' }, { id: 'demo-mfa-disabled', label: '生产未启用演示 MFA 绕过', pass: process.env.CAMPMIND_DEMO_MFA !== 'true' });
 const failed = checks.filter((check) => !check.pass);
 const result = { mode, status: failed.length === 0 ? 'pass' : 'blocked', checks, note: mode === 'reference' ? '参考模式只验证仓库边界；不代表真实试点获准。' : '生产模式必须由责任人提供所有外部签署证据。' };
 console.log(JSON.stringify(result));

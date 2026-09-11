@@ -2,9 +2,9 @@
 
 ## 1. 当前仓库已经验证与尚未验证的边界
 
-仓库包含合成数据参考实现。当前 CI/本地已验证：TypeScript 构建、37 项 Node 行为/安全测试、12 项规划校验器测试、依赖审计、敏感资料扫描，以及 PostgreSQL 参考迁移的本地重复执行（34 张表启用并强制 RLS）。**这些证据不等于生产性能、临床有效性、法律合规或真实值班能力。**
+仓库包含合成数据参考实现。当前 CI/本地已验证：TypeScript 构建、39 项 Node 行为/安全测试（含加密私有对象存储与媒体指针）、12 项规划校验器测试、依赖审计、敏感资料扫描，以及 PostgreSQL 参考迁移的本地重复执行（34 张表启用并强制 RLS）。**这些证据不等于生产性能、临床有效性、法律合规或真实值班能力。**
 
-`npm run check` 会运行构建、行为测试、安全扫描和规划校验；`npm audit --omit=dev --audit-level=high` 单独检查依赖。`npm run drill:recovery` 仅验证本地合成快照恢复，`npm run drill:capacity` 生成有并发、p50/p95、错误率的本地基线；`npm run release:check` 在参考模式检查仓库边界，生产模式会因缺少外部签署证据而阻断；`POST /v1/admin/retention/run` 可在恢复后重放删除台账并使过期导出失效。迁移仍需在目标数据平面由独立迁移身份执行并完成双租户/运行角色验证。
+`npm run check` 会运行构建、行为测试、安全扫描和规划校验；`npm audit --omit=dev --audit-level=high` 单独检查依赖。对象存储测试验证租户派生加密、哈希寻址、路径穿越拒绝、大小上限、0600 文件和媒体发布指针。`npm run drill:recovery` 仅验证本地合成快照恢复，`npm run drill:capacity` 生成有并发、p50/p95、错误率的本地基线；`npm run release:check` 在参考模式检查仓库边界，生产模式会因缺少外部签署证据而阻断；`POST /v1/admin/retention/run` 可在恢复后重放删除台账并使过期导出失效。迁移仍需在目标数据平面由独立迁移身份执行并完成双租户/运行角色验证。
 
 生产入口若未注入 PostgreSQL-backed store 会直接拒绝启动；`CAMPMIND_POSTGRES_ADAPTER_READY=true` 只应在真实适配器、连接池租户上下文和 RLS 演练完成后设置。
 

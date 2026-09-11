@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync, chmodSy
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseState } from './types.js';
+import type { PrivateObjectStore } from '../infra/object-store.js';
 
 export function emptyState(): DatabaseState {
   return {
@@ -13,7 +14,7 @@ export function emptyState(): DatabaseState {
   };
 }
 
-export interface StoreOptions { filePath?: string; initial?: DatabaseState; }
+export interface StoreOptions { filePath?: string; initial?: DatabaseState; objectStore?: PrivateObjectStore; }
 
 /**
  * Persistence contract consumed by the domain layer.  `JsonStore` is only a
@@ -23,6 +24,8 @@ export interface StoreOptions { filePath?: string; initial?: DatabaseState; }
 export interface Store {
   transaction<T>(fn: (state: DatabaseState) => T | Promise<T>): Promise<T>;
   read<T>(fn: (state: DatabaseState) => T | Promise<T>): Promise<T>;
+  /** Private media/object storage boundary. Production must inject a managed private adapter. */
+  readonly objectStore?: PrivateObjectStore;
 }
 
 /** The local adapter is deliberately unavailable to a production entrypoint.
@@ -30,7 +33,7 @@ export interface Store {
  * silently writing psychological records to a JSON file is not an acceptable
  * fallback. */
 export function assertProductionStoreInjection(store?: Store): void {
-  if (process.env.NODE_ENV === 'production' && (!store || store instanceof JsonStore)) throw new Error('Production requires an injected PostgreSQL-backed store; JsonStore is reference-only');
+  if (process.env.NODE_ENV === 'production' && (!store || store instanceof JsonStore || !store.objectStore)) throw new Error('Production requires an injected PostgreSQL-backed store and private object-store adapter; JsonStore is reference-only');
 }
 
 /**
@@ -41,9 +44,11 @@ export class JsonStore implements Store {
   private state: DatabaseState;
   private lock: Promise<void> = Promise.resolve();
   private readonly filePath?: string;
+  readonly objectStore?: PrivateObjectStore;
 
   constructor(options: StoreOptions = {}) {
     this.filePath = options.filePath;
+    this.objectStore = options.objectStore;
     if (options.initial) {
       this.state = { ...emptyState(), ...structuredClone(options.initial) };
       this.persist();

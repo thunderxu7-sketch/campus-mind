@@ -332,6 +332,7 @@ create table if not exists media_assets (
   sha256 text not null, content_ciphertext text not null, scan_status text not null check (scan_status in ('clean','rejected')),
   created_by uuid not null, created_at timestamptz not null default now(), unique (tenant_id, id), unique (tenant_id, sha256)
 );
+alter table media_assets add column if not exists object_key text;
 create table if not exists content_items (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), title text not null, kind text not null,
   age_min smallint not null, age_max smallint not null, body_ciphertext text not null, state text not null, copyright_source text not null,

@@ -8,6 +8,6 @@
 - 可参考 `roles.sql.example` 建立独立的应用角色；示例密码只是占位符，必须由 Secret Manager 注入并在部署时轮换。
 - 每个请求在事务内设置 `app.tenant_id`，连接池回收时清理；没有上下文默认拒绝。
 - 复评例外使用单独的 `exception` 频次记录，不覆盖原始年度场次；正常 `reserved/consumed` 记录仍由部分唯一索引保护。
-- 媒体资源只允许经应用类型/签名/大小检查的内容，且必须通过已审核教育内容关联后才可公开读取。
+- 媒体资源只允许经应用类型/签名/大小检查的内容，正文通过 `PrivateObjectStore` 写入私有对象存储，且必须通过已审核教育内容关联后才可公开读取。默认入口的 `EncryptedFileObjectStore` 只用于合成开发，目录由 `CAMPMIND_OBJECTS_DIR` 指定并被 `.gitignore` 忽略；生产需设置 `CAMPMIND_OBJECT_STORE_ADAPTER_READY=true` 并注入私有桶/KMS 适配器。
 - 补齐其它业务表的同租户外键、RLS、字段权限、备份删除重放和恢复演练。
 - 仅使用合成数据验收迁移；不要把示例密码或本地 master key 带入生产。

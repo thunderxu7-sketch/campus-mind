@@ -110,4 +110,4 @@ TLS、HttpOnly/Secure 会话 Cookie、CSRF 防护、短会话与撤销、管理�
 
 仓库当前实现了一个 Node 20+ 合成数据参考服务：`JsonStore` 以加密 JSON 演示事务与恢复行为，领域服务依赖抽象 `Store` 合约，API 使用 bearer session，静态页面验证学生/工作人员路径，Worker 处理 outbox。它用于开发和验收业务不变量，不是可直接上线的数据库/身份/通知基础设施。
 
-生产替换至少包括：PostgreSQL 迁移 + 真实事务与 RLS 验证、校方 SSO/MFA、KMS 管理密钥、私有对象存储、获批准的国内通知通道、备份/删除重放和外部合规/专业评审。参考服务在 `NODE_ENV=production` 下要求专用 `CAMPMIND_MASTER_KEY`、`CAMPMIND_DATA_BACKEND=postgres`，并拒绝 `CAMPMIND_DEMO_MFA=true`；默认入口还会拒绝未注入的 `JsonStore`，防止把本地文件误作生产数据库。演示密码与 `synthetic_only` 量表只允许本地/CI，部署流水线必须继续拒绝这些配置。
+生产替换至少包括：PostgreSQL 迁移 + 真实事务与 RLS 验证、校方 SSO/MFA、KMS 管理密钥、私有对象存储、获批准的国内通知通道、备份/删除重放和外部合规/专业评审。参考服务提供 `PrivateObjectStore` 合约及 `EncryptedFileObjectStore` 合成适配器：对象按租户派生密钥加密、哈希寻址、限额和 0600 临时文件；它不能替代生产私有桶/KMS。生产入口在 `NODE_ENV=production` 下要求专用 `CAMPMIND_MASTER_KEY`、`CAMPMIND_DATA_BACKEND=postgres`，注入的 Store 还必须携带私有对象存储适配器，并拒绝 `CAMPMIND_DEMO_MFA=true`；默认入口还会拒绝未注入的 `JsonStore`，防止把本地文件误作生产数据库。演示密码与 `synthetic_only` 量表只允许本地/CI，部署流水线必须继续拒绝这些配置。

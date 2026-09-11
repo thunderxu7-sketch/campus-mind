@@ -12,19 +12,22 @@ import { assertProductionStoreInjection, JsonStore } from './domain/store.js';
 import type { Store } from './domain/store.js';
 import { seedDemoState } from './domain/seed.js';
 import type { AuthenticatedUser, DatabaseState } from './domain/types.js';
+import { EncryptedFileObjectStore } from './infra/object-store.js';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const DATA_FILE = process.env.CAMPMIND_DATA_FILE ?? resolve(process.cwd(), 'private-data/demo-store.json');
+const OBJECTS_DIR = process.env.CAMPMIND_OBJECTS_DIR ?? resolve(process.cwd(), 'private-data/objects');
 const MAX_BODY_BYTES = 3_000_000;
 const loginRate = new Map<string, { count: number; resetAt: number }>();
 
 function loadStore(): JsonStore {
   assertProductionStoreInjection();
+  const objectStore = new EncryptedFileObjectStore({ rootDir: OBJECTS_DIR });
   if (!existsSync(DATA_FILE) && process.env.NODE_ENV !== 'production') {
     mkdirSync(resolve(DATA_FILE, '..'), { recursive: true, mode: 0o700 });
-    return new JsonStore({ filePath: DATA_FILE, initial: seedDemoState() });
+    return new JsonStore({ filePath: DATA_FILE, initial: seedDemoState(), objectStore });
   }
-  return new JsonStore({ filePath: DATA_FILE });
+  return new JsonStore({ filePath: DATA_FILE, objectStore });
 }
 
 function json(res: ServerResponse, status: number, value: unknown): void {

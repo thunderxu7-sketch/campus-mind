@@ -6,7 +6,7 @@
 
 - [ ] 确认代码、数据库迁移、量表/计分/报告/风险规则版本与专业审批记录一一对应。
 - [ ] 在中国大陆数据平面建立独立数据库、对象存储、KMS、通知和日志账号；应用角色不拥有表，不具备 `BYPASSRLS`。
-- [ ] 设置专用 `CAMPMIND_MASTER_KEY`、`CAMPMIND_DATA_BACKEND=postgres`、`CAMPMIND_POSTGRES_ADAPTER_READY=true`、正式身份提供商、MFA、会话撤销和通知凭据；禁用 `CAMPMIND_DEMO_MFA`，拒绝 `synthetic_only` 量表。参考入口不会把 `JsonStore` 静默当成生产数据库。
+- [ ] 设置专用 `CAMPMIND_MASTER_KEY`、`CAMPMIND_DATA_BACKEND=postgres`、`CAMPMIND_POSTGRES_ADAPTER_READY=true`、`CAMPMIND_OBJECT_STORE_ADAPTER_READY=true`、正式身份提供商、MFA、会话撤销和通知凭据；禁用 `CAMPMIND_DEMO_MFA`，拒绝 `synthetic_only` 量表。参考入口不会把 `JsonStore` 或本地文件对象存储静默当成生产基础设施。
 - [ ] 由迁移身份执行 SQL；每次连接在事务中设置/清理 `app.tenant_id`，无上下文拒绝。使用两个租户合成样本验证 RLS、复合外键、Worker、导出和文件访问。
 - [ ] 执行依赖、密钥、容器、权限、文件上传、日志和网络边界检查；不把普通 `npm audit` 当成完整安全评估。
 - [ ] 完成个人信息保护影响评估、数据流/委托协议、保留与删除策略、权利处理、适用备案/等保/审计核查；法律结论由责任人签署。
@@ -19,7 +19,7 @@
 1. 暂停新增任务和导出，记录服务版本与待处理 outbox。
 2. 创建加密备份并验证恢复到隔离环境；恢复身份与网络边界不应获得生产写权限。
 3. 重放删除、撤回、权限撤销和已过期导出的最小台账；确认恢复后不存在被撤销访问。
-   参考服务可由运维账号调用 `POST /v1/admin/retention/run`，该操作会清除过期导出载荷、24 小时以上未提交的导入预检元数据，并幂等重放删除 tombstone；仍需在目标数据库、对象存储和缓存中完成同等验证。
+   参考服务可由运维账号调用 `POST /v1/admin/retention/run`，该操作会清除过期导出载荷、24 小时以上未提交的导入预检元数据，并幂等重放删除 tombstone；仍需在目标数据库、对象存储和缓存中完成同等验证。参考服务的 `EncryptedFileObjectStore` 只用于合成开发，生产必须替换为私有桶/KMS 适配器，并验证租户密钥、路径隔离、临时文件清理和删除重放。
 4. 补投 outbox，检查评分/报告/风险信号幂等，禁止重复个案与重复通知。
 5. 记录 RPO、RTO、丢失/重放事件、人工支持接续与用户告知；不满足目标即阻断发布。
 6. 清理临时恢复数据并记录删除证据，不把恢复副本或真实测试资料放入 GitHub。

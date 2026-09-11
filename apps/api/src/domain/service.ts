@@ -1113,23 +1113,47 @@ export async function createMediaAsset(store: Store, auth: AuthenticatedUser, in
   const textPrefix = buffer.subarray(0, Math.min(buffer.length, 1_000_000)).toString('utf8');
   if (buffer.subarray(0, 2).toString('ascii') === 'MZ' || /<\s*(script|iframe|object)\b/i.test(textPrefix)) throw new DomainError('MEDIA_SCAN_REJECTED', '媒体安全检查未通过');
   if (!policy.signature(buffer)) throw new DomainError('MEDIA_SIGNATURE_MISMATCH', '媒体类型与文件内容不匹配');
-  return store.transaction((state) => {
-    const sha256 = createHash('sha256').update(buffer).digest('hex');
-    if (state.mediaAssets.some((asset) => asset.tenantId === auth.user.tenantId && asset.sha256 === sha256)) throw new DomainError('MEDIA_DUPLICATE', '相同媒体资源已经存在', 409);
-    const asset: MediaAsset = { id: id(), tenantId: auth.user.tenantId, filename, mediaType: input.mediaType, kind: policy.kind, byteSize: buffer.length, sha256, contentCiphertext: encrypt(buffer.toString('base64')), scanStatus: 'clean', createdBy: auth.user.id, createdAt: now() };
-    state.mediaAssets.push(asset);
-    audit(state, auth.user, 'media.created', 'media_asset', asset.id, { mediaType: asset.mediaType, byteSize: asset.byteSize });
-    return asset;
-  });
+  const sha256 = createHash('sha256').update(buffer).digest('hex');
+  const objectKey = store.objectStore ? `media/${auth.user.tenantId}/${sha256}` : undefined;
+  let objectStored = false;
+  try {
+    return await store.transaction(async (state) => {
+      if (state.mediaAssets.some((asset) => asset.tenantId === auth.user.tenantId && asset.sha256 === sha256)) throw new DomainError('MEDIA_DUPLICATE', '相同媒体资源已经存在', 409);
+      if (objectKey) {
+        await store.objectStore!.put({ tenantId: auth.user.tenantId, objectKey, contentType: input.mediaType, bytes: buffer });
+        objectStored = true;
+      }
+      const asset: MediaAsset = { id: id(), tenantId: auth.user.tenantId, filename, mediaType: input.mediaType, kind: policy.kind, byteSize: buffer.length, sha256, contentCiphertext: objectKey ? encrypt({ objectKey }) : encrypt(buffer.toString('base64')), ...(objectKey ? { objectKey } : {}), scanStatus: 'clean', createdBy: auth.user.id, createdAt: now() };
+      state.mediaAssets.push(asset);
+      audit(state, auth.user, 'media.created', 'media_asset', asset.id, { mediaType: asset.mediaType, byteSize: asset.byteSize });
+      return asset;
+    });
+  } catch (error) {
+    // Avoid leaving an unreachable private object if the database transaction
+    // or durable snapshot write fails after the object upload succeeded.
+    if (objectStored && objectKey) await store.objectStore!.delete({ tenantId: auth.user.tenantId, objectKey }).catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function readPublicMedia(store: Store, assetId: string): Promise<{ mediaType: string; filename: string; bytes: Buffer }> {
-  return store.read((state) => {
+  const record = await store.read((state) => {
     const asset = state.mediaAssets.find((candidate) => candidate.id === assetId && candidate.scanStatus === 'clean');
     const linked = asset && state.contentItems.some((item) => item.mediaAssetId === asset.id && item.tenantId === asset.tenantId && item.state === 'published');
     if (!asset || !linked) throw notFound();
-    return { mediaType: asset.mediaType, filename: asset.filename, bytes: Buffer.from(decrypt<string>(asset.contentCiphertext), 'base64') };
+    return { asset };
   });
+  let bytes: Buffer;
+  if (record.asset.objectKey) {
+    if (!store.objectStore) throw new DomainError('MEDIA_STORAGE_UNAVAILABLE', '媒体私有存储未配置', 503);
+    let object;
+    try { object = await store.objectStore.get({ tenantId: record.asset.tenantId, objectKey: record.asset.objectKey }); } catch { throw new DomainError('MEDIA_STORAGE_UNAVAILABLE', '媒体资源暂时不可用', 503); }
+    if (object.contentType !== record.asset.mediaType || object.byteSize !== record.asset.byteSize || object.sha256 !== record.asset.sha256) throw new DomainError('MEDIA_STORAGE_CORRUPT', '媒体资源校验失败', 503);
+    bytes = object.bytes;
+  } else {
+    bytes = Buffer.from(decrypt<string>(record.asset.contentCiphertext), 'base64');
+  }
+  return { mediaType: record.asset.mediaType, filename: record.asset.filename, bytes };
 }
 
 export async function createContent(store: Store, auth: AuthenticatedUser, input: { title: string; kind: ContentItem['kind']; body: string; ageMin: number; ageMax: number; copyrightSource: string; mediaAssetId?: string; altText?: string; captionText?: string }): Promise<ContentItem> {

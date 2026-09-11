@@ -92,13 +92,13 @@ paths:
       summary: Published age-filtered education content
       responses: {'200': {description: Public content}}
   /v1/media-assets:
-    post: {summary: Upload a bounded, type-checked education media asset, responses: {'201': {description: Clean asset metadata}, '413': {description: Asset too large}}}
+    post: {summary: Upload a bounded, type-checked education media asset to private storage, responses: {'201': {description: Clean asset metadata}, '413': {description: Asset too large}, '503': {description: Private object storage unavailable}}}
   /v1/content/public/{assetId}/media:
     get:
       security: []
       summary: Stream media only when linked to published content
       parameters: [{$ref: '#/components/parameters/assetId'}]
-      responses: {'200': {description: Media bytes}, '404': {description: Unpublished or unknown asset}}
+      responses: {'200': {description: Media bytes}, '404': {description: Unpublished or unknown asset}, '503': {description: Private object storage unavailable or integrity check failed}}
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: opaque-session-token}
