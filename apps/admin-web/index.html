@@ -67,6 +67,11 @@
     </form>
     <p id="contentStatus" class="status" role="status" aria-live="polite"></p>
     <div id="contentList" aria-live="polite"><p class="muted">暂无教育内容</p></div>
+    <h2>危机线索工作台（心理专业角色）</h2>
+    <p class="muted">自动识别仅生成待复核线索；此处不展示原始答卷，也不会自动诊断或结案。</p>
+    <label for="case-note">复核/支持说明</label><textarea id="case-note" rows="3" maxlength="4000" placeholder="请记录最小必要的人工依据"></textarea>
+    <label for="case-assignee">指派给（专业用户编号）</label><input id="case-assignee" value="user-counselor-demo">
+    <div id="caseList" aria-live="polite"><p class="muted">暂无待处理线索，或当前账号没有专业权限。</p></div>
     <h2>无手机学生凭证</h2>
     <form id="credentialForm">
       <label for="credential-student">学生编号</label><input id="credential-student" name="studentId" value="student-demo" required>
@@ -108,18 +113,20 @@
         const overview = await fetch('/v1/admin/overview', { headers }).then((response) => response.json());
         if (!overview.data) throw new Error(overview.error?.message || '无权访问');
         $('#metrics').innerHTML = Object.entries(overview.data).filter(([key]) => key !== 'note').map(([key, value]) => `<span class="metric"><b>${esc(key)}</b><br>${esc(value === null ? '已抑制' : value)}</span>`).join('');
-        const [campaigns, scales, slots, appointments, content] = await Promise.all([
+        const [campaigns, scales, slots, appointments, content, cases] = await Promise.all([
           fetch('/v1/admin/campaigns', { headers }).then((response) => response.json()),
           fetch('/v1/admin/scales', { headers }).then((response) => response.json()),
           fetch('/v1/availability-slots', { headers }).then((response) => response.json()),
           fetch('/v1/appointments', { headers }).then((response) => response.json()),
           fetch('/v1/content', { headers }).then((response) => response.json()),
+          fetch('/v1/cases', { headers }).then((response) => response.json()),
         ]);
         $('#campaigns').innerHTML = (campaigns.data || []).map((campaign) => `<p><b>${esc(campaign.name)}</b> · ${esc(campaign.state)} · ${esc(campaign.participantCount)} 人</p>`).join('') || '<p class="muted">暂无任务</p>';
         $('#scale').innerHTML = (scales.data || []).filter((scale) => scale.status === 'approved').map((scale) => `<option value="${esc(scale.id)}">${esc(scale.title)} ${esc(scale.version)}</option>`).join('');
         renderSlots(slots.data || []);
         renderAppointments(appointments.data || []);
         renderContent(content.data || []);
+        renderCases(cases.data || []);
       } catch (error) { setStatus(error.message); }
     }
 
@@ -182,6 +189,38 @@
       let binary = '';
       for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
       return btoa(binary);
+    }
+
+    const caseStateLabel = { pending_review: '待人工复核', dismissed: '已排除', confirmed: '已确认', assigned: '已指派', in_support: '支持中', follow_up: '随访中', closure_requested: '待独立结案审批', closed: '已结案' };
+    const casePriorityLabel = { attention: '一般关注', urgent: '加急关注' };
+    function renderCases(cases) {
+      $('#caseList').innerHTML = cases.length ? cases.map((riskCase) => {
+        let actions = '';
+        if (riskCase.state === 'pending_review') actions = '<button type="button" data-case-id="' + esc(riskCase.id) + '" data-case-action="confirm">确认线索</button> <button type="button" class="secondary" data-case-id="' + esc(riskCase.id) + '" data-case-action="dismiss">排除误报</button>';
+        else if (riskCase.state === 'confirmed') actions = '<button type="button" data-case-id="' + esc(riskCase.id) + '" data-case-action="assign">指派</button>';
+        else if (riskCase.state === 'assigned') actions = '<button type="button" data-case-id="' + esc(riskCase.id) + '" data-case-action="acknowledge">确认接单</button>';
+        else if (['in_support', 'follow_up'].includes(riskCase.state)) actions = '<button type="button" data-case-id="' + esc(riskCase.id) + '" data-case-action="follow_up">记录随访</button> <button type="button" class="secondary" data-case-id="' + esc(riskCase.id) + '" data-case-action="request_closure">申请结案</button>';
+        else if (riskCase.state === 'closure_requested') actions = '<button type="button" data-case-id="' + esc(riskCase.id) + '" data-case-action="approve_closure">独立审批结案</button>';
+        return `<article class="task"><b>${esc(casePriorityLabel[riskCase.priority] || riskCase.priority)}</b> · ${esc(caseStateLabel[riskCase.state] || riskCase.state)} · ${esc(riskCase.signalCount)} 条线索<br>学生引用：${esc(riskCase.studentId)}<br>${actions}</article>`;
+      }).join('') : '<p class="muted">暂无待处理线索，或当前账号没有专业权限。</p>';
+      document.querySelectorAll('[data-case-id]').forEach((button) => { button.onclick = () => updateCase(button.dataset.caseId, button.dataset.caseAction); });
+    }
+    async function updateCase(caseId, action) {
+      const note = $('#case-note').value.trim();
+      const assigneeId = $('#case-assignee').value.trim();
+      const paths = { confirm: ['reviews', { decision: 'confirm', note }], dismiss: ['reviews', { decision: 'dismiss', note }], assign: ['assign', { assigneeId }], acknowledge: ['acknowledgements', {}], follow_up: ['follow-ups', { kind: 'follow_up', note }], request_closure: ['closure-requests', { reason: note }], approve_closure: ['closure-approvals', {}] };
+      const config = paths[action];
+      if (!config) return;
+      if (['confirm', 'dismiss', 'follow_up', 'request_closure'].includes(action) && !note) { setStatus('请先填写最小必要的人工说明'); return; }
+      if (action === 'assign' && !assigneeId) { setStatus('请填写专业用户编号'); return; }
+      if (action === 'approve_closure' && !window.confirm('确认由当前独立专业角色审批结案？')) return;
+      try {
+        const response = await fetch('/v1/cases/' + encodeURIComponent(caseId) + '/' + config[0], { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(config[1]) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '线索操作失败');
+        setStatus('线索工作流已更新');
+        await load();
+      } catch (error) { setStatus(error.message); }
     }
 
     $('#refresh').onclick = load;
