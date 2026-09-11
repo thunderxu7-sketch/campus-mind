@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="校园心晴：面向中小学的心理健康测评与支持平台参考实现。">
+  <title>校园心晴 · 心理健康测评云平台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17324d;
+      --muted: #5e7184;
+      --line: #dbe7ef;
+      --surface: #ffffff;
+      --surface-alt: #f2f8fb;
+      --brand: #087f8c;
+      --brand-dark: #075d6a;
+      --accent: #f1a74a;
+      --shadow: 0 18px 50px rgba(26, 74, 99, .10);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: linear-gradient(180deg, #ecf8f7 0, #f8fbfd 28rem, #fff 65rem);
+      font: 16px/1.7 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: var(--brand-dark); }
+    a:hover { color: var(--brand); }
+    .wrap { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+    .hero { padding: 70px 0 48px; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
+      border: 1px solid #b9e1df; border-radius: 999px; color: var(--brand-dark);
+      background: rgba(255,255,255,.72); font-size: 13px; font-weight: 700; letter-spacing: .04em;
+    }
+    h1 { max-width: 780px; margin: 18px 0 14px; font-size: clamp(2.35rem, 6vw, 4.7rem); line-height: 1.08; letter-spacing: -.045em; }
+    .lead { max-width: 760px; margin: 0; color: var(--muted); font-size: clamp(1.05rem, 2vw, 1.3rem); }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+    .button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 9px 17px; border-radius: 12px; border: 1px solid var(--brand); font-weight: 700; text-decoration: none; }
+    .button.primary { color: white; background: var(--brand); }
+    .button.primary:hover { color: white; background: var(--brand-dark); }
+    .button.secondary { color: var(--brand-dark); background: rgba(255,255,255,.75); }
+    .notice { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: start; margin-top: 34px; padding: 16px 18px; border-left: 4px solid var(--accent); border-radius: 12px; background: #fffaf2; box-shadow: 0 8px 22px rgba(120, 78, 25, .07); }
+    .notice strong { display: block; margin-bottom: 2px; }
+    .notice p { margin: 0; color: #66533d; }
+    .section { padding: 48px 0; }
+    .section.alt { background: var(--surface-alt); }
+    .section h2 { margin: 0 0 10px; font-size: clamp(1.65rem, 3vw, 2.35rem); letter-spacing: -.025em; }
+    .section-intro { max-width: 750px; margin: 0 0 26px; color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .card { padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); }
+    .card h3 { margin: 0 0 5px; font-size: 1.05rem; }
+    .card p { margin: 0; color: var(--muted); font-size: .94rem; }
+    .number { display: inline-grid; place-items: center; width: 30px; height: 30px; margin-bottom: 12px; border-radius: 9px; color: white; background: var(--brand); font-weight: 800; font-size: .85rem; }
+    .flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; align-items: stretch; }
+    .flow-step { position: relative; padding: 16px 14px; border: 1px solid #cfe3ea; border-radius: 13px; background: #fff; }
+    .flow-step:not(:last-child)::after { content: "→"; position: absolute; right: -17px; top: 50%; z-index: 1; color: var(--brand); font-size: 22px; font-weight: 800; transform: translateY(-50%); }
+    .flow-step b { display: block; margin-bottom: 4px; }
+    .flow-step span { color: var(--muted); font-size: .9rem; }
+    .split { display: grid; grid-template-columns: 1.1fr .9fr; gap: 22px; align-items: start; }
+    .list { margin: 0; padding-left: 1.2em; }
+    .list li { margin: 6px 0; }
+    .code { margin: 0; overflow: auto; padding: 16px; border-radius: 12px; color: #eaf8fa; background: #123042; font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    footer { padding: 34px 0 48px; color: var(--muted); font-size: .9rem; }
+    footer p { margin: 5px 0; }
+    @media (max-width: 820px) {
+      .grid, .split { grid-template-columns: 1fr 1fr; }
+      .flow { grid-template-columns: 1fr; }
+      .flow-step:not(:last-child)::after { content: "↓"; right: auto; left: 50%; top: auto; bottom: -18px; transform: translateX(-50%); }
+    }
+    @media (max-width: 560px) {
+      .wrap { width: min(100% - 28px, 1120px); }
+      .hero { padding-top: 42px; }
+      .grid, .split { grid-template-columns: 1fr; }
+      .section { padding: 34px 0; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <span class="eyebrow">校园心晴 · Campus Mind</span>
+      <h1>让每一次关心，都有可追踪的支持路径。</h1>
+      <p class="lead">面向中小学的心理健康测评与支持平台参考实现，连接学生、心理教师与校方，形成「知情参与 → 测评 → 专业复核 → 支持与转介 → 随访」闭环。</p>
+      <div class="actions">
+        <a class="button primary" href="https://github.com/thunderxu7-sketch/campus-mind">查看 GitHub 仓库</a>
+        <a class="button secondary" href="https://github.com/thunderxu7-sketch/campus-mind/blob/main/docs/06-roadmap.md">阅读开发路线图</a>
+      </div>
+      <div class="notice" role="note">
+        <div aria-hidden="true">⚠️</div>
+        <div><strong>这是合成数据参考站点</strong><p>GitHub Pages 只发布本项目的静态说明页，不接收真实学生资料。筛查结果不是医学诊断，平台也不提供在线治疗或紧急救助。正式运营前必须完成专业、隐私、法律与部署审查。</p></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="section alt">
+      <div class="wrap">
+        <h2>从采集到随访的 11 个子系统</h2>
+        <p class="section-intro">首个 MVP 以一所学校的初中学段试点为默认假设；架构保留多租户隔离，所有量表、常模、阈值与报告模板均需授权、版本化并经过专业审定。</p>
+        <div class="grid">
+          <article class="card"><span class="number">01</span><h3>学校组织与账号权限</h3><p>学校、部门、角色与最小权限访问边界。</p></article>
+          <article class="card"><span class="number">02</span><h3>人员信息与知情参与</h3><p>名单导入、监护关系、通知与参与记录。</p></article>
+          <article class="card"><span class="number">03</span><h3>量表目录与计分引擎</h3><p>授权版本、适龄范围、计分与解释规则。</p></article>
+          <article class="card"><span class="number">04</span><h3>心理普查与任务管理</h3><p>按学校、年级、班级或特定人群发放任务。</p></article>
+          <article class="card"><span class="number">05</span><h3>心理筛查与学生端</h3><p>移动端、PC 与共享终端的测评体验。</p></article>
+          <article class="card"><span class="number">06</span><h3>心理档案与报告</h3><p>电子档案、分级审核、反馈与可追溯导出。</p></article>
+          <article class="card"><span class="number">07</span><h3>危机预警与人工复核</h3><p>线索识别、风险量化、专家审核与升级。</p></article>
+          <article class="card"><span class="number">08</span><h3>干预、转介与随访</h3><p>个性化方案、咨询预约、转介和后续记录。</p></article>
+          <article class="card"><span class="number">09</span><h3>隐私保护的数据统计</h3><p>分层聚合、最小样本量与脱敏分析。</p></article>
+          <article class="card"><span class="number">10</span><h3>咨询师排班与预约</h3><p>服务介绍、时段管理、预约和提醒。</p></article>
+          <article class="card"><span class="number">11</span><h3>心理教育与内容门户</h3><p>公告、文章、视频、音频和支持资源。</p></article>
+          <article class="card"><span class="number">◎</span><h3>统一治理底座</h3><p>审计、留痕、权限复核、密钥轮换和接续演练。</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="wrap">
+        <h2>核心业务闭环</h2>
+        <p class="section-intro">系统自动化处理重复性工作，但不把筛查结果当作诊断，也不让自动规则替代专业人员的判断。</p>
+        <div class="flow" aria-label="知情参与到随访的流程">
+          <div class="flow-step"><b>1 · 知情参与</b><span>适龄说明、监护人参与与可追溯记录。</span></div>
+          <div class="flow-step"><b>2 · 测评</b><span>任务、普查和自选筛查按频次受控。</span></div>
+          <div class="flow-step"><b>3 · 专业复核</b><span>报告分级发布，风险线索由咨询师审核。</span></div>
+          <div class="flow-step"><b>4 · 支持与转介</b><span>咨询、干预方案和必要的外部转介。</span></div>
+          <div class="flow-step"><b>5 · 随访</b><span>记录后续支持效果，审慎调整风险状态。</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt">
+      <div class="wrap split">
+        <div>
+          <h2>平台设计原则</h2>
+          <ul class="list">
+            <li><strong>多端可用：</strong>云端规划覆盖 PC、平板、手机和触摸一体机。</li>
+            <li><strong>自动计分：</strong>保存、计分、报告和统计流程可审计、可重放。</li>
+            <li><strong>隐私优先：</strong>独立账号、最小权限、租户隔离与加密存储。</li>
+            <li><strong>人工负责：</strong>不自动诊断、不自动结案，危机处置保留人工接续。</li>
+            <li><strong>共享终端安全：</strong>退出或切换身份会清理敏感状态，并丢弃迟到响应。</li>
+          </ul>
+        </div>
+        <div>
+          <h2>本地运行参考实现</h2>
+          <p class="section-intro">Pages 不运行 Node API；如需查看管理端和学生端交互，请在本地启动合成数据参考实现。</p>
+          <pre class="code"><code>npm install
+CAMPMIND_DEMO_MFA=true \
+CAMPMIND_MASTER_KEY=local-only-key npm start
+# http://localhost:8787/admin
+# http://localhost:8787/student</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="wrap">
+        <h2>继续阅读</h2>
+        <p class="section-intro">从产品边界、角色流程到验证与生产门槛，所有规划文档都在仓库中维护。</p>
+        <div class="grid">
+          <article class="card"><h3><a href="https://github.com/thunderxu7-sketch/campus-mind/blob/main/docs/01-product-requirements.md">产品需求与范围</a></h3><p>归并原始需求，明确 MVP、后续阶段和不做事项。</p></article>
+          <article class="card"><h3><a href="https://github.com/thunderxu7-sketch/campus-mind/blob/main/docs/02-roles-and-workflows.md">权限与业务流程</a></h3><p>角色、授权、测评、审核和危机处置流转。</p></article>
+          <article class="card"><h3><a href="https://github.com/thunderxu7-sketch/campus-mind/blob/main/docs/05-safety-privacy.md">安全、隐私与专业治理</a></h3><p>未成年人保护、量表版权、生命周期与上线门槛。</p></article>
+          <article class="card"><h3><a href="https://github.com/thunderxu7-sketch/campus-mind/blob/main/docs/07-task-breakdown.md">可执行开发任务</a></h3><p>P0/P1/P2 任务、依赖、责任角色和验收标准。</p></article>
+          <article class="card"><h3><a href="https://github.com/thunderxu7-sketch/campus-mind/blob/main/docs/08-verification.md">测试与试点验收</a></h3><p>计分金标准、隔离测试、故障演练与停止条件。</p></article>
+          <article class="card"><h3><a href="https://github.com/thunderxu7-sketch/campus-mind/blob/main/docs/13-github-pages.md">Pages 部署说明</a></h3><p>了解静态站点范围、发布源和后续切换方式。</p></article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p><strong>校园心晴 · Campus Mind</strong> · 合成数据参考实现 v0.1</p>
+      <p>仅用于开发、评审与验收；正式服务须由学校、专业负责人及法律/隐私负责人共同审查。</p>
+    </div>
+  </footer>
+</body>
+</html>
