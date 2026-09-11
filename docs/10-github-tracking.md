@@ -2,7 +2,7 @@
 
 仓库：[thunderxu7-sketch/campus-mind](https://github.com/thunderxu7-sketch/campus-mind)（私有）。
 
-48 个开发任务已分别建立 Issue，并按 6 个里程碑、P0/P1/P2 及 11 个子系统打标。所有任务为待实现，不代表已开发或已通过真实试点验收。
+48 个开发任务已分别建立 Issue，并按 6 个里程碑、P0/P1/P2 及 11 个子系统打标。Issue 用于协作跟踪；本地 `planning/backlog.json` 是状态事实源，`done` 仅表示合成参考实现和自动化证据完成，仍不代表真实试点验收。
 
 本地事实源为 [backlog.json](../planning/backlog.json)，文字说明见[开发清单](07-task-breakdown.md)。后续变更应同时更新对应 Issue；本文件只记录初始映射，不会自动同步在线状态。
 
