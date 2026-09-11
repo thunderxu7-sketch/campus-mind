@@ -154,9 +154,10 @@ export async function listMyTasks(store: Store, auth: AuthenticatedUser): Promis
         if (!scale) return false;
         try { assertUsableScale(scale, currentTime); return true; } catch { return false; }
       })();
+      const consented = Boolean(student && activeConsent(state, student.id, 'assessment', auth.user.tenantId));
       const ageEligible = Boolean(scaleUsable && student && scale && ageAllowed(student, scale));
-      const available = !terminal && ['assigned', 'started'].includes(assignment.status) && inWindow && scaleUsable && ageEligible && Boolean(reservation && ['reserved', 'exception'].includes(reservation.status));
-      const availabilityReason = terminal ? 'terminal' : !['assigned', 'started'].includes(assignment.status) ? 'assignment_unavailable' : !inWindow ? 'outside_window' : !scaleUsable ? 'scale_unavailable' : !ageEligible ? 'age_not_allowed' : !reservation || !['reserved', 'exception'].includes(reservation.status) ? 'frequency_review' : 'available';
+      const available = !terminal && ['assigned', 'started'].includes(assignment.status) && inWindow && scaleUsable && ageEligible && consented && Boolean(reservation && ['reserved', 'exception'].includes(reservation.status));
+      const availabilityReason = terminal ? 'terminal' : !['assigned', 'started'].includes(assignment.status) ? 'assignment_unavailable' : !inWindow ? 'outside_window' : !scaleUsable ? 'scale_unavailable' : !consented ? 'consent_required' : !ageEligible ? 'age_not_allowed' : !reservation || !['reserved', 'exception'].includes(reservation.status) ? 'frequency_review' : 'available';
       return {
         id: assignment.id,
         name: campaign?.name ?? '测评任务',

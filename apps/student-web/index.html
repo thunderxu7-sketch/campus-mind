@@ -298,7 +298,7 @@
         const terminal = task.availabilityReason === 'terminal';
         const available = task.available === true;
         const label = available ? (task.attempt?.state === 'in_progress' ? '继续' : '开始') : '暂不可用';
-        const statusText = terminal ? '该任务已结束，不能重复提交。' : available ? '' : ({ outside_window: '测评时间已结束或尚未开始。', age_not_allowed: '当前年龄不满足该方案的适用范围。', scale_unavailable: '该测评方案已撤回或授权到期，请联系学校。', frequency_review: '该场次需要学校复核后才能继续。', assignment_unavailable: '任务当前不可用，请联系学校。' }[task.availabilityReason] || '任务尚未开放或需要学校处理。');
+        const statusText = terminal ? '该任务已结束，不能重复提交。' : available ? '' : ({ outside_window: '测评时间已结束或尚未开始。', consent_required: '请先阅读并记录测评参与说明。', age_not_allowed: '当前年龄不满足该方案的适用范围。', scale_unavailable: '该测评方案已撤回或授权到期，请联系学校。', frequency_review: '该场次需要学校复核后才能继续。', assignment_unavailable: '任务当前不可用，请联系学校。' }[task.availabilityReason] || '任务尚未开放或需要学校处理。');
         return `<div class="task"><b>${esc(task.name)}</b> · ${esc(task.status)}<br><span class="muted">${esc(task.scaleTitle || '')}</span>${statusText ? `<br><span class="muted">${esc(statusText)}</span>` : ''}<br><button type="button" data-id="${esc(task.id)}" aria-label="${esc(label)} ${esc(task.name)}" ${available ? '' : 'disabled'}>${esc(label)}</button></div>`;
       }).join('') : '<p class="muted">当前没有可完成的任务。</p>';
       document.querySelectorAll('[data-id]').forEach((button) => { button.onclick = () => start(button.dataset.id); });

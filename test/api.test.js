@@ -557,6 +557,7 @@ test('consent withdrawal blocks future assessment and leaves audit evidence', as
   assert.equal(withdrawn.response.status, 204);
   const task = await request('/v1/me/tasks', { headers: auth(student) });
   assert.equal(task.response.status, 200);
+  assert.equal(task.body.data[0].available, false);
   const attempt = await request(`/v1/me/tasks/${DEMO_IDS.assignment}/attempts`, { method: 'POST', headers: auth(student), body: '{}' });
   assert.equal(attempt.response.status, 400);
   assert.equal(attempt.body.error.code, 'CONSENT_REQUIRED');
