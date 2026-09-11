@@ -697,3 +697,51 @@ export async function campaignProgress(store: JsonStore, auth: AuthenticatedUser
     return { campaignId: campaign.id, state: campaign.state, ...counts, note: '仅显示任务进度，不包含分数、答案或风险等级。' };
   });
 }
+
+export async function createSelfScreening(store: JsonStore, auth: AuthenticatedUser, scaleId: string, academicYear = '2026-2027'): Promise<{ campaign: Campaign; assignment: Assignment }> {
+  if (!isStudent(auth.user)) throw forbidden();
+  requirePermission(auth.user, 'self:assessment');
+  return store.transaction((state) => {
+    const student = state.students.find((candidate) => candidate.id === auth.user.id && candidate.tenantId === auth.user.tenantId && candidate.active);
+    const scale = state.scales.find((candidate) => candidate.id === scaleId && candidate.tenantId === auth.user.tenantId);
+    if (!student || !scale) throw notFound();
+    assertUsableScale(scale);
+    if (!activeConsent(state, student.id, 'assessment')) throw new DomainError('CONSENT_REQUIRED', '需要有效的测评参与记录');
+    if (!ageAllowed(student, scale)) throw new DomainError('AGE_REVIEW_REQUIRED', '年龄不在该方案适用范围');
+    if (state.frequencyReservations.some((reservation) => reservation.tenantId === auth.user.tenantId && reservation.studentId === student.id && reservation.academicYear === academicYear && reservation.status !== 'released')) throw new DomainError('FREQUENCY_REVIEW_REQUIRED', '本学年已有测评场次');
+    const campaign: Campaign = { id: id(), tenantId: auth.user.tenantId, schoolId: student.schoolId, name: '学生自选支持筛查（需专业复核）', purpose: 'screening', state: 'open', academicYear, opensAt: now(), closesAt: new Date(Date.now() + 24 * 60 * 60_000).toISOString(), scaleVersionId: scale.id, reportVisibility: 'professional_review', participantStudentIds: [student.id], createdBy: auth.user.id, publishedAt: now(), createdAt: now() };
+    const reservation = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, academicYear, purpose: 'assessment' as const, status: 'reserved' as const, campaignId: campaign.id, createdAt: now() };
+    const assignment: Assignment = { id: id(), tenantId: auth.user.tenantId, campaignId: campaign.id, studentId: student.id, frequencyReservationId: reservation.id, status: 'assigned', createdAt: now() };
+    state.campaigns.push(campaign); state.frequencyReservations.push(reservation); state.assignments.push(assignment); audit(state, auth.user, 'self_screening.created', 'campaign', campaign.id, { scaleVersionId: scale.id }); return { campaign, assignment };
+  });
+}
+
+export async function regionalAnalytics(store: JsonStore, auth: AuthenticatedUser): Promise<Record<string, unknown>> {
+  requirePermission(auth.user, 'analytics:regional');
+  return store.read((state) => {
+    const regions = new Map<string, { tenants: number; students: number; openCases: number }>();
+    for (const tenant of state.tenants) {
+      const region = tenant.region ?? 'unassigned';
+      const entry = regions.get(region) ?? { tenants: 0, students: 0, openCases: 0 };
+      entry.tenants += 1; entry.students += state.students.filter((student) => student.tenantId === tenant.id && student.active).length; entry.openCases += state.riskCases.filter((riskCase) => riskCase.tenantId === tenant.id && !['closed', 'dismissed'].includes(riskCase.state)).length; regions.set(region, entry);
+    }
+    const rows = [...regions.entries()].map(([region, value]) => ({ region, tenants: value.tenants, students: value.students < 10 ? null : value.students, openCases: value.students < 10 ? null : value.openCases, suppressed: value.students < 10 }));
+    audit(state, auth.user, 'analytics.regional_viewed', 'regional_analytics', 'all', { regionCount: rows.length }); return { rows, suppressionThreshold: 10, note: '仅提供批准的区域聚合；小样本与个体风险均不展示。' };
+  });
+}
+
+
+export async function listStudents(store: JsonStore, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
+  if (!can(auth.user, 'org:read')) throw forbidden();
+  return store.read((state) => state.students.filter((student) => student.tenantId === auth.user.tenantId && student.active && (!auth.user.schoolId || student.schoolId === auth.user.schoolId)).map((student) => ({ id: student.id, schoolId: student.schoolId, classId: student.classId, age: student.age, guardianVerified: student.guardianVerified })));
+}
+
+export async function listCampaigns(store: JsonStore, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
+  if (!can(auth.user, 'campaign:read')) throw forbidden();
+  return store.read((state) => state.campaigns.filter((campaign) => campaign.tenantId === auth.user.tenantId && (!auth.user.schoolId || campaign.schoolId === auth.user.schoolId)).map((campaign) => ({ id: campaign.id, name: campaign.name, purpose: campaign.purpose, state: campaign.state, academicYear: campaign.academicYear, opensAt: campaign.opensAt, closesAt: campaign.closesAt, participantCount: campaign.participantStudentIds.length })));
+}
+
+export async function listScaleCatalog(store: JsonStore, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
+  if (!isProfessional(auth.user) && !can(auth.user, 'campaign:read')) throw forbidden();
+  return store.read((state) => state.scales.filter((scale) => scale.tenantId === auth.user.tenantId).map((scale) => ({ id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, status: scale.status, minAge: scale.minAge, maxAge: scale.maxAge, scoringVersion: scale.scoringVersion })));
+}

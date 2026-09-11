@@ -3,7 +3,7 @@ import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseXlsxBase64 } from './domain/spreadsheet.js';
-import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, campaignProgress, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createProfileSchema, createRiskSignal, createScale, currentUser, submitProfileResponse, drainOutbox, downloadExport, getAnalytics, listCases, listMyTasks, listPublicContent, listReports, listRightsRequests, parseCsv, previewImport, publishCampaign, requestAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, withdrawConsent, completeRightsRequest, createRightsRequest } from './domain/service.js';
+import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, campaignProgress, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createProfileSchema, createRiskSignal, createScale, createSelfScreening, currentUser, regionalAnalytics, submitProfileResponse, drainOutbox, downloadExport, getAnalytics, listCases, listCampaigns, listMyTasks, listPublicContent, listReports, listScaleCatalog, listStudents, listRightsRequests, parseCsv, previewImport, publishCampaign, requestAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, withdrawConsent, completeRightsRequest, createRightsRequest } from './domain/service.js';
 import { authenticate, login as loginUser, logout, requirePermission } from './domain/auth.js';
 import { DomainError, unauthorized } from './domain/errors.js';
 import { JsonStore } from './domain/store.js';
@@ -123,6 +123,9 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   }
   const auth = await getAuth(req, store);
   if (method === 'GET' && path === '/v1/me') { json(res, 200, { data: await currentUser(store, auth) }); return; }
+  if (method === 'GET' && path === '/v1/admin/students') { json(res, 200, { data: await listStudents(store, auth) }); return; }
+  if (method === 'GET' && path === '/v1/admin/campaigns') { json(res, 200, { data: await listCampaigns(store, auth) }); return; }
+  if (method === 'GET' && path === '/v1/admin/scales') { json(res, 200, { data: await listScaleCatalog(store, auth) }); return; }
   if (method === 'GET' && path === '/v1/me/tasks') { json(res, 200, { data: await listMyTasks(store, auth) }); return; }
   if (method === 'POST' && path === '/v1/me/consents') {
     const result = await createConsent(store, auth, { studentId: stringField(input, 'studentId'), actorType: (input.actorType as 'student' | 'guardian' | 'school_legal_basis') ?? 'student', noticeVersion: stringField(input, 'noticeVersion'), purpose: (input.purpose as 'assessment' | 'support' | 'research') ?? 'assessment' });
@@ -162,6 +165,7 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   }
   if (method === 'POST' && segments[1] === 'me' && segments[2] === 'tasks' && segments[4] === 'attempts') { const result = await beginAttempt(store, auth, segments[3]!); json(res, 201, { data: { attempt: result.attempt, scale: publicScale(result.scale) } }); return; }
   if (method === 'POST' && path === '/v1/me/profile-responses') { const result = await submitProfileResponse(store, auth, { schemaId: stringField(input, 'schemaId'), values: (input.values as Record<string, unknown>) ?? {} }); json(res, 201, { data: result }); return; }
+  if (method === 'POST' && path === '/v1/self-screenings') { const result = await createSelfScreening(store, auth, stringField(input, 'scaleId'), typeof input.academicYear === 'string' ? input.academicYear : undefined); json(res, 201, { data: result }); return; }
   if (method === 'PUT' && segments[1] === 'attempts' && segments[3] === 'answers') { const result = await saveAnswers(store, auth, segments[2]!, { expectedRevision: Number(input.expectedRevision), answers: (input.answers as Record<string, unknown>) ?? {} }); json(res, 200, { data: result }); return; }
   if (method === 'POST' && segments[1] === 'attempts' && segments[3] === 'submit') { const result = await submitAttempt(store, auth, segments[2]!, stringField(input, 'idempotencyKey')); json(res, 202, { data: result }); return; }
   if (method === 'GET' && path === '/v1/reports') { const result = await listReports(store, auth, url.searchParams.get('studentId') ?? undefined); json(res, 200, { data: result }); return; }
@@ -195,6 +199,7 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   if (method === 'POST' && segments[1] === 'appointments' && segments[3] === 'state') { const result = await updateAppointment(store, auth, segments[2]!, (input.state as 'requested' | 'confirmed' | 'completed' | 'cancelled' | 'no_show') ?? 'cancelled'); json(res, 200, { data: result }); return; }
   if (method === 'POST' && path === '/v1/content') { const result = await createContent(store, auth, { title: stringField(input, 'title'), kind: (input.kind as 'article' | 'announcement' | 'media') ?? 'article', body: stringField(input, 'body'), ageMin: Number(input.ageMin), ageMax: Number(input.ageMax), copyrightSource: stringField(input, 'copyrightSource') }); json(res, 201, { data: { ...result, bodyCiphertext: undefined } }); return; }
   if (method === 'POST' && segments[1] === 'content' && segments[3] === 'publish') { const result = await approveContent(store, auth, segments[2]!); json(res, 200, { data: { id: result.id, state: result.state, publishedAt: result.publishedAt } }); return; }
+  if (method === 'GET' && path === '/v1/admin/regional-analytics') { json(res, 200, { data: await regionalAnalytics(store, auth) }); return; }
   if (method === 'GET' && path === '/v1/admin/overview') { json(res, 200, { data: await adminOverview(store, auth) }); return; }
   if (method === 'POST' && path === '/v1/admin/worker/drain') { requirePermission(auth.user, 'system:metrics'); json(res, 200, { data: await drainOutbox(store) }); return; }
   if (method === 'GET' && path === '/v1/admin/audit') { requirePermission(auth.user, 'audit:read'); const events = await store.read((state) => state.auditEvents.filter((event) => event.tenantId === auth.user.tenantId).map(({ metadata, ...event }) => ({ ...event, metadata }))); json(res, 200, { data: events.slice(-200) }); return; }

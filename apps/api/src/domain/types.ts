@@ -20,6 +20,7 @@ export type ContentState = 'draft' | 'professional_review' | 'published' | 'reti
 export interface Tenant {
   id: string;
   name: string;
+  region?: string;
   createdAt: string;
 }
 

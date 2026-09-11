@@ -17,7 +17,7 @@ export const DEMO_IDS = {
 export function seedDemoState(): DatabaseState {
   const state = emptyState();
   const createdAt = new Date().toISOString();
-  state.tenants.push({ id: DEMO_IDS.tenant, name: '演示学校租户（合成数据）', createdAt });
+  state.tenants.push({ id: DEMO_IDS.tenant, name: '演示学校租户（合成数据）', region: 'demo-region', createdAt });
   state.schools.push({ id: DEMO_IDS.school, tenantId: DEMO_IDS.tenant, name: '演示中学', createdAt });
   const user = (id: string, email: string, displayName: string, role: User['role'], schoolId?: string, mfaEnabled = false): User => ({ id, tenantId: DEMO_IDS.tenant, schoolId, email, displayName, passwordHash: hashPassword(DEMO_PASSWORD), role, active: true, mfaEnabled, createdAt });
   state.users.push(

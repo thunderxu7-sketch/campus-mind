@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { createCampaign, publishCampaign } from '../dist/apps/api/src/domain/service.js';
+import { createCampaign, createSelfScreening, publishCampaign } from '../dist/apps/api/src/domain/service.js';
 import { JsonStore } from '../dist/apps/api/src/domain/store.js';
 import { seedDemoState } from '../dist/apps/api/src/domain/seed.js';
 
@@ -38,4 +38,17 @@ test('frequency reservation is atomic when two campaigns publish concurrently', 
   assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
   assert.equal(results.filter((result) => result.status === 'rejected' && result.reason?.code === 'FREQUENCY_REVIEW_REQUIRED').length, 1);
   assert.equal(store.snapshot().frequencyReservations.length, 1);
+});
+
+
+test('self screening uses the same consent and academic-year frequency guard', async () => {
+  const state = seedDemoState();
+  state.campaigns = [];
+  state.assignments = [];
+  state.frequencyReservations = [];
+  const store = new JsonStore({ initial: state });
+  const auth = authFor(store.snapshot(), 'student-demo');
+  const first = await createSelfScreening(store, auth, 'scale-synthetic-demo-v1');
+  assert.equal(first.campaign.purpose, 'screening');
+  await assert.rejects(() => createSelfScreening(store, auth, 'scale-synthetic-demo-v1'), (error) => error.code === 'FREQUENCY_REVIEW_REQUIRED');
 });
