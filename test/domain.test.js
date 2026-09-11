@@ -156,6 +156,11 @@ test('scale catalog is metadata-only and supports governed suitability filters',
   assert.deepEqual(primaryDraft.map((scale) => scale.id), ['scale-synthetic-primary-draft']);
   await assert.rejects(() => listScaleCatalog(store, admin, { status: 'published' }), (error) => error.code === 'SCALE_FILTER_INVALID');
   await assert.rejects(() => listScaleCatalog(store, admin, { minAge: 19, maxAge: 6 }), (error) => error.code === 'SCALE_FILTER_INVALID');
+  const corrupted = seedDemoState();
+  corrupted.scales[0].provenance = 'licensed';
+  corrupted.scales[0].licenseExpiresAt = 'not-a-date';
+  const corruptedCatalog = await listScaleCatalog(new JsonStore({ initial: corrupted }), admin);
+  assert.equal(corruptedCatalog[0].licenseState, 'invalid_expiry');
 });
 
 test('revoking a scale blocks new use without changing historical identifiers', async () => {
@@ -178,6 +183,7 @@ test('scale author cannot approve their own draft version', async () => {
   await assert.rejects(() => approveScale(store, author, scale.id), (error) => error.code === 'SEPARATION_OF_DUTIES_REQUIRED');
   const approved = await approveScale(store, reviewer, scale.id);
   assert.equal(approved.status, 'approved');
+  await assert.rejects(() => createScale(store, author, { code: 'SYNTH-LONG', title: 'x'.repeat(201), version: '1.0.0', provenance: 'synthetic_only', minAge: 12, maxAge: 18, scoringVersion: 'synthetic-v1', noticeVersion: 'notice-demo-v1', items: [{ id: 'q1', prompt: '合成题', min: 0, max: 1, reverse: false, factor: 'factor' }] }), (error) => error.code === 'SCALE_INVALID');
 });
 
 test('assessment consent withdrawal stops an in-progress draft and pending processing', async () => {

@@ -217,7 +217,7 @@
 
     const scaleStateLabel = { draft: '草稿', approved: '已批准', revoked: '已撤销' };
     const scalePopulationLabel = { primary: '小学', middle: '初中', high: '高中', mixed: '混合' };
-    const scaleLicenseLabel = { synthetic_only: '合成演示（不可用于生产）', missing_expiry: '缺少授权到期日', expired: '授权已到期', valid: '授权有效' };
+    const scaleLicenseLabel = { synthetic_only: '合成演示（不可用于生产）', missing_expiry: '缺少授权到期日', invalid_expiry: '授权到期日无效', expired: '授权已到期', valid: '授权有效' };
     function setScaleOptions(scales) {
       $('#scale').innerHTML = scales.filter((scale) => scale.status === 'approved').map((scale) => `<option value="${esc(scale.id)}">${esc(scale.title)} ${esc(scale.version)}</option>`).join('');
     }
