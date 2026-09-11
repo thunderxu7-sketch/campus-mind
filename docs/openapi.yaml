@@ -52,7 +52,7 @@ paths:
     post: {summary: Verify a guardian relationship, parameters: [{$ref: '#/components/parameters/linkId'}], responses: {'200': {description: Verified relationship}}}
   /v1/me/consents:
     get: {summary: List the authenticated subject's purpose-bound consent metadata, responses: {'200': {description: Consent metadata without actor identifiers}, '403': {description: Student or guardian role required}}}
-    post: {summary: Record a purpose-bound student, guardian or school legal-basis participation record, responses: {'201': {description: Consent record}, '400': {description: Age, notice or purpose validation failure}}}
+    post: {summary: Record a purpose-bound student, guardian or school legal-basis participation record, responses: {'201': {description: Safe consent metadata without student, tenant or actor identifiers}, '400': {description: Age, notice or purpose validation failure}}}
   /v1/me/consents/{consentId}/withdraw:
     post: {summary: Withdraw a consent record and stop related assessment processing, parameters: [{$ref: '#/components/parameters/consentId'}], responses: {'204': {description: Withdrawn}, '403': {description: Subject or authorized guardian required}}}
   /v1/rights-requests/{requestId}/result:

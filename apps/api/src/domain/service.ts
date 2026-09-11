@@ -34,6 +34,11 @@ function stableJson(value: unknown): string {
 const importPreviewHash = (rows: Array<Record<string, unknown>>): string => createHash('sha256').update(stableJson(rows)).digest('hex');
 type PublicRightsRequest = Omit<RightsRequest, 'resultCiphertext' | 'decisionReasonCiphertext' | 'reason' | 'reasonCiphertext'> & { resultReady: boolean; hasReason: boolean };
 type PublicExportJob = Omit<ExportJob, 'payloadCiphertext'> & { ready: boolean };
+type PublicConsent = Pick<ConsentRecord, 'id' | 'purpose' | 'noticeVersion' | 'actorType' | 'status' | 'recordedAt' | 'withdrawnAt'>;
+
+function publicConsent(consent: ConsentRecord): PublicConsent {
+  return { id: consent.id, purpose: consent.purpose, noticeVersion: consent.noticeVersion, actorType: consent.actorType, status: consent.status, recordedAt: consent.recordedAt, withdrawnAt: consent.withdrawnAt };
+}
 
 function publicRightsRequest(request: RightsRequest): PublicRightsRequest {
   const { resultCiphertext: _resultCiphertext, decisionReasonCiphertext: _decisionReasonCiphertext, reason: _reason, reasonCiphertext: _reasonCiphertext, ...publicRequest } = request;
@@ -217,7 +222,7 @@ export async function verifyGuardianLink(store: Store, auth: AuthenticatedUser, 
   });
 }
 
-export async function createConsent(store: Store, auth: AuthenticatedUser, input: { studentId: string; actorType: ConsentRecord['actorType']; noticeVersion: string; purpose?: ConsentRecord['purpose'] }): Promise<ConsentRecord> {
+export async function createConsent(store: Store, auth: AuthenticatedUser, input: { studentId: string; actorType: ConsentRecord['actorType']; noticeVersion: string; purpose?: ConsentRecord['purpose'] }): Promise<PublicConsent> {
   if (!isStudent(auth.user) && !can(auth.user, 'org:manage') && !can(auth.user, 'rights:request')) throw forbidden();
   const purpose = input.purpose ?? 'assessment';
   if (!['student', 'guardian', 'school_legal_basis'].includes(input.actorType) || !['assessment', 'support', 'research'].includes(purpose) || typeof input.noticeVersion !== 'string' || !input.noticeVersion.trim()) throw new DomainError('CONSENT_INVALID', '参与记录类型、用途或告知版本无效');
@@ -231,11 +236,11 @@ export async function createConsent(store: Store, auth: AuthenticatedUser, input
     }
     if (input.actorType === 'guardian' && !student.guardianVerified) throw new DomainError('GUARDIAN_NOT_VERIFIED', '监护关系尚未核验');
     const existing = state.consents.find((c) => c.tenantId === auth.user.tenantId && c.studentId === student.id && c.purpose === purpose && c.status === 'active');
-    if (existing) return existing;
+    if (existing) return publicConsent(existing);
     const consent: ConsentRecord = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, purpose, noticeVersion: input.noticeVersion, actorType: input.actorType, actorId: auth.user.id, status: 'active', recordedAt: now() };
     state.consents.push(consent);
     audit(state, auth.user, 'consent.recorded', 'consent', consent.id, { purpose, actorType: input.actorType });
-    return consent;
+    return publicConsent(consent);
   });
 }
 
@@ -251,7 +256,7 @@ export async function listMyConsents(store: Store, auth: AuthenticatedUser, purp
       : new Set(state.guardianLinks.filter((link) => link.tenantId === auth.user.tenantId && link.guardianUserId === auth.user.id && link.status === 'verified').map((link) => link.studentId));
     const consents = state.consents
       .filter((consent) => consent.tenantId === auth.user.tenantId && studentIds.has(consent.studentId) && (purpose === undefined || consent.purpose === purpose))
-      .map((consent) => ({ id: consent.id, purpose: consent.purpose, noticeVersion: consent.noticeVersion, actorType: consent.actorType, status: consent.status, recordedAt: consent.recordedAt, withdrawnAt: consent.withdrawnAt }));
+      .map(publicConsent);
     audit(state, auth.user, 'consent.own_listed', 'consent', 'self', { count: consents.length }, 'consent:read');
     return consents;
   });

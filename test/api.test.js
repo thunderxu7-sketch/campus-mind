@@ -574,6 +574,9 @@ test('guardian consent requires a verified guardian link and rejects role spoofi
   assert.equal(verified.response.status, 200);
   const consent = await request('/v1/me/consents', { method: 'POST', headers: auth(guardian), body: JSON.stringify({ studentId: 'student-demo', actorType: 'guardian', noticeVersion: 'notice-support-v1', purpose: 'support' }) });
   assert.equal(consent.response.status, 201);
+  assert.equal(Object.hasOwn(consent.body.data, 'tenantId'), false);
+  assert.equal(Object.hasOwn(consent.body.data, 'studentId'), false);
+  assert.equal(Object.hasOwn(consent.body.data, 'actorId'), false);
   const withdrawn = await request(`/v1/me/consents/${consent.body.data.id}/withdraw`, { method: 'POST', headers: auth(guardian), body: '{}' });
   assert.equal(withdrawn.response.status, 204);
   const guardianConsents = await request('/v1/me/consents?purpose=support', { headers: auth(guardian) });
