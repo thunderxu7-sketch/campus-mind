@@ -150,6 +150,8 @@ export async function commitImport(store: JsonStore, auth: AuthenticatedUser, ba
 export async function createScale(store: JsonStore, auth: AuthenticatedUser, input: Omit<ScaleVersion, 'id' | 'tenantId' | 'status' | 'approvedBy' | 'approvedAt'>): Promise<ScaleVersion> {
   requirePermission(auth.user, 'scale:write');
   if (input.provenance === 'licensed' && !input.code) throw new DomainError('LICENSE_UNAVAILABLE', '授权量表需要来源登记');
+  if (!input.code || !input.title || !input.version || !input.scoringVersion || !input.noticeVersion || !Number.isInteger(input.minAge) || !Number.isInteger(input.maxAge) || input.minAge < 6 || input.maxAge > 19 || input.minAge > input.maxAge) throw new DomainError('SCALE_INVALID', '量表版本或适龄范围无效');
+  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 200 || input.items.some((item) => !item || typeof item.id !== 'string' || !item.id || typeof item.prompt !== 'string' || !item.prompt || !Number.isInteger(item.min) || !Number.isInteger(item.max) || item.min > item.max || typeof item.reverse !== 'boolean' || typeof item.factor !== 'string' || !item.factor)) throw new DomainError('SCALE_INVALID', '量表题目结构无效');
   return store.transaction((state) => {
     const scale: ScaleVersion = { ...input, id: id(), tenantId: auth.user.tenantId, status: 'draft' };
     state.scales.push(scale);
@@ -311,12 +313,18 @@ async function processOutboxEvent(store: JsonStore, eventId: string): Promise<vo
       const output = score(scale, answers);
       const run = state.scoreRuns.find((candidate) => candidate.submissionId === submission.id);
       if (run) { event.status = 'published'; return; }
-      const scoreRun = { id: id(), tenantId: event.tenantId, submissionId: submission.id, scoringVersion: scale.scoringVersion, status: 'completed' as const, factorScores: output.factorScores, total: output.total, validity: output.validity, completedAt: now(), errorCode: output.invalidReason };
+      const scoreRun = { id: id(), tenantId: event.tenantId, submissionId: submission.id, scoringVersion: scale.scoringVersion, status: output.validity === 'valid' ? 'completed' as const : 'failed' as const, factorScores: output.factorScores, total: output.total, validity: output.validity, completedAt: now(), errorCode: output.invalidReason };
       state.scoreRuns.push(scoreRun); attempt.state = output.validity === 'valid' ? 'scored' : 'invalid';
       const assignment = state.assignments.find((candidate) => candidate.id === attempt.assignmentId);
       if (assignment) assignment.status = 'completed';
       const reservation = assignment ? state.frequencyReservations.find((candidate) => candidate.id === assignment.frequencyReservationId) : undefined;
       if (reservation) reservation.status = 'consumed';
+      if (output.validity === 'invalid') {
+        state.outboxEvents.push({ id: id(), tenantId: event.tenantId, type: 'score.failed', aggregateId: scoreRun.id, payload: { submissionId: submission.id, reason: output.invalidReason ?? 'INVALID_ANSWERS' }, status: 'pending', attempts: 0, availableAt: now(), createdAt: now() });
+        audit(state, undefined, 'score.failed', 'score_run', scoreRun.id, { validity: output.validity }, undefined, event.tenantId);
+        event.status = 'published';
+        return;
+      }
       const report: import('./types.js').ReportVersion = { id: id(), tenantId: event.tenantId, studentId: attempt.studentId, scoreRunId: scoreRun.id, state: 'pending_review', title: scale.title, summaryCiphertext: encrypt({ total: output.total, factorScores: output.factorScores, text: '这是演示反馈，不构成心理诊断；如有困扰请联系学校心理专业人员。' }), limitationsCiphertext: encrypt({ text: '演示方案仅用于软件流程验证，不代表有效量表、医学诊断或风险结论。' }), createdAt: now() };
       state.reports.push(report);
       if (scale.warningRule && output.validity === 'valid' && output.total >= scale.warningRule.threshold) {
@@ -661,4 +669,31 @@ export async function approveContent(store: JsonStore, auth: AuthenticatedUser, 
 
 export async function listPublicContent(store: JsonStore, age?: number): Promise<Array<Record<string, unknown>>> {
   return store.read((state) => state.contentItems.filter((item) => item.state === 'published' && (age === undefined || (age >= item.ageMin && age <= item.ageMax))).map((item) => ({ id: item.id, title: item.title, kind: item.kind, ageMin: item.ageMin, ageMax: item.ageMax, body: decrypt<{ body: string }>(item.bodyCiphertext).body, publishedAt: item.publishedAt })));
+}
+
+export async function submitProfileResponse(store: JsonStore, auth: AuthenticatedUser, input: { schemaId: string; values: Record<string, unknown> }): Promise<{ id: string; submittedAt: string }> {
+  if (!isStudent(auth.user)) throw forbidden();
+  requirePermission(auth.user, 'self:assessment');
+  return store.transaction((state) => {
+    const schema = state.profileSchemas.find((candidate) => candidate.id === input.schemaId && candidate.tenantId === auth.user.tenantId && candidate.state === 'approved');
+    if (!schema) throw new DomainError('PROFILE_SCHEMA_NOT_APPROVED', '背景调查版本尚未批准');
+    const allowed = new Set(schema.fields.map((field) => field.id));
+    if (Object.keys(input.values).some((key) => !allowed.has(key))) throw new DomainError('PROFILE_FIELD_INVALID', '调查字段不属于当前版本');
+    for (const field of schema.fields) if (field.required && (input.values[field.id] === undefined || input.values[field.id] === null || input.values[field.id] === '')) throw new DomainError('PROFILE_FIELD_REQUIRED', `缺少字段 ${field.label}`);
+    const response = { id: id(), tenantId: auth.user.tenantId, studentId: auth.user.id, schemaId: schema.id, valuesCiphertext: encrypt(input.values), submittedAt: now() };
+    state.profileResponses.push(response); audit(state, auth.user, 'profile_response.submitted', 'profile_response', response.id, { schemaId: schema.id }); return { id: response.id, submittedAt: response.submittedAt };
+  });
+}
+
+export async function campaignProgress(store: JsonStore, auth: AuthenticatedUser, campaignId: string): Promise<Record<string, unknown>> {
+  requirePermission(auth.user, 'campaign:progress');
+  return store.read((state) => {
+    const campaign = state.campaigns.find((candidate) => candidate.id === campaignId && candidate.tenantId === auth.user.tenantId);
+    if (!campaign) throw notFound();
+    if (auth.user.schoolId && campaign.schoolId !== auth.user.schoolId) throw forbidden();
+    const assignments = state.assignments.filter((assignment) => assignment.campaignId === campaign.id && assignment.tenantId === auth.user.tenantId);
+    const counts = { assigned: assignments.length, started: assignments.filter((assignment) => ['started', 'completed'].includes(assignment.status)).length, completed: assignments.filter((assignment) => assignment.status === 'completed').length, declined: assignments.filter((assignment) => assignment.status === 'declined').length };
+    audit(state, auth.user, 'campaign.progress_viewed', 'campaign', campaign.id, counts);
+    return { campaignId: campaign.id, state: campaign.state, ...counts, note: '仅显示任务进度，不包含分数、答案或风险等级。' };
+  });
 }

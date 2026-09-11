@@ -1,7 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createProfileSchema, createRiskSignal, createScale, currentUser, drainOutbox, downloadExport, getAnalytics, listCases, listMyTasks, listPublicContent, listReports, listRightsRequests, parseCsv, previewImport, publishCampaign, requestAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, withdrawConsent, completeRightsRequest, createRightsRequest } from './domain/service.js';
+import { fileURLToPath } from 'node:url';
+import { parseXlsxBase64 } from './domain/spreadsheet.js';
+import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, campaignProgress, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createProfileSchema, createRiskSignal, createScale, currentUser, submitProfileResponse, drainOutbox, downloadExport, getAnalytics, listCases, listMyTasks, listPublicContent, listReports, listRightsRequests, parseCsv, previewImport, publishCampaign, requestAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, withdrawConsent, completeRightsRequest, createRightsRequest } from './domain/service.js';
 import { authenticate, login as loginUser, logout, requirePermission } from './domain/auth.js';
 import { DomainError, unauthorized } from './domain/errors.js';
 import { JsonStore } from './domain/store.js';
@@ -132,6 +134,11 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
     const rows = parseCsv(csv).map((row) => ({ ...row, age: Number(row.age), guardianVerified: row.guardianVerified === 'true' }));
     const result = await previewImport(store, auth, { schoolId: stringField(input, 'schoolId'), filename: typeof input.filename === 'string' ? input.filename : 'upload.csv', rows }); json(res, 201, { data: result }); return;
   }
+  if (method === 'POST' && path === '/v1/imports/preview-xlsx') {
+    const encoded = stringField(input, 'xlsxBase64');
+    const rows = parseXlsxBase64(encoded).map((row) => ({ ...row, age: Number(row.age), guardianVerified: row.guardianVerified === 'true' }));
+    const result = await previewImport(store, auth, { schoolId: stringField(input, 'schoolId'), filename: typeof input.filename === 'string' ? input.filename : 'upload.xlsx', rows }); json(res, 201, { data: result }); return;
+  }
   if (method === 'POST' && path === '/v1/imports/preview') {
     const rows = arrayField(input, 'rows').filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object' && !Array.isArray(row)));
     const result = await previewImport(store, auth, { schoolId: stringField(input, 'schoolId'), filename: stringField(input, 'filename'), rows }); json(res, 201, { data: result }); return;
@@ -149,10 +156,12 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
     const campaign = await createCampaign(store, auth, { schoolId: stringField(input, 'schoolId'), name: stringField(input, 'name'), purpose: (input.purpose as 'screening' | 'survey') ?? 'screening', academicYear: stringField(input, 'academicYear'), opensAt: stringField(input, 'opensAt'), closesAt: stringField(input, 'closesAt'), scaleVersionId: stringField(input, 'scaleVersionId'), participantStudentIds: ids }); json(res, 201, { data: campaign }); return;
   }
   if (method === 'POST' && segments[1] === 'campaigns' && segments[3] === 'publish') { const campaign = await publishCampaign(store, auth, segments[2]!); json(res, 200, { data: campaign }); return; }
+  if (method === 'GET' && segments[1] === 'campaigns' && segments[3] === 'progress') { const progress = await campaignProgress(store, auth, segments[2]!); json(res, 200, { data: progress }); return; }
   if (method === 'GET' && path === '/v1/me/scales') {
     requirePermission(auth.user, 'self:assessment'); const scales = await store.read((state) => state.scales.filter((scale) => scale.tenantId === auth.user.tenantId).map(publicScale)); json(res, 200, { data: scales }); return;
   }
   if (method === 'POST' && segments[1] === 'me' && segments[2] === 'tasks' && segments[4] === 'attempts') { const result = await beginAttempt(store, auth, segments[3]!); json(res, 201, { data: { attempt: result.attempt, scale: publicScale(result.scale) } }); return; }
+  if (method === 'POST' && path === '/v1/me/profile-responses') { const result = await submitProfileResponse(store, auth, { schemaId: stringField(input, 'schemaId'), values: (input.values as Record<string, unknown>) ?? {} }); json(res, 201, { data: result }); return; }
   if (method === 'PUT' && segments[1] === 'attempts' && segments[3] === 'answers') { const result = await saveAnswers(store, auth, segments[2]!, { expectedRevision: Number(input.expectedRevision), answers: (input.answers as Record<string, unknown>) ?? {} }); json(res, 200, { data: result }); return; }
   if (method === 'POST' && segments[1] === 'attempts' && segments[3] === 'submit') { const result = await submitAttempt(store, auth, segments[2]!, stringField(input, 'idempotencyKey')); json(res, 202, { data: result }); return; }
   if (method === 'GET' && path === '/v1/reports') { const result = await listReports(store, auth, url.searchParams.get('studentId') ?? undefined); json(res, 200, { data: result }); return; }
@@ -192,7 +201,7 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   throw new DomainError('NOT_FOUND', '资源不存在', 404);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const server = createApp();
   server.listen(PORT, () => console.log(`Campus Mind API listening on http://localhost:${PORT}`));
 }

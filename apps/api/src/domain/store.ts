@@ -9,7 +9,7 @@ export function emptyState(): DatabaseState {
     tenants: [], schools: [], users: [], sessions: [], students: [], consents: [], scales: [], campaigns: [],
     assignments: [], frequencyReservations: [], attempts: [], answerRevisions: [], submissions: [], scoreRuns: [],
     reports: [], riskSignals: [], riskCases: [], riskReviews: [], acknowledgements: [], followUps: [], auditEvents: [],
-    outboxEvents: [], importBatches: [], importRows: [], rightsRequests: [], deletionTombstones: [], exportJobs: [], deliveryAttempts: [], availabilitySlots: [], appointments: [], contentItems: [], profileSchemas: [],
+    outboxEvents: [], importBatches: [], importRows: [], rightsRequests: [], deletionTombstones: [], exportJobs: [], deliveryAttempts: [], availabilitySlots: [], appointments: [], contentItems: [], profileSchemas: [], profileResponses: [],
   };
 }
 
@@ -27,9 +27,12 @@ export class JsonStore {
   constructor(options: StoreOptions = {}) {
     this.filePath = options.filePath;
     if (options.initial) {
-      this.state = structuredClone(options.initial);
+      this.state = { ...emptyState(), ...structuredClone(options.initial) };
       this.persist();
-    } else if (this.filePath && existsSync(this.filePath)) this.state = JSON.parse(readFileSync(this.filePath, 'utf8')) as DatabaseState;
+    } else if (this.filePath && existsSync(this.filePath)) {
+      const parsed = JSON.parse(readFileSync(this.filePath, 'utf8')) as Partial<DatabaseState>;
+      this.state = { ...emptyState(), ...parsed };
+    }
     else this.state = emptyState();
   }
 

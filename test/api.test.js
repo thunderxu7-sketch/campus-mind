@@ -3,7 +3,7 @@ import { test, before, after } from 'node:test';
 import { createApp } from '../dist/apps/api/src/main.js';
 import { JsonStore } from '../dist/apps/api/src/domain/store.js';
 import { seedDemoState, DEMO_PASSWORD, DEMO_IDS } from '../dist/apps/api/src/domain/seed.js';
-import { drainOutbox } from '../dist/apps/api/src/domain/service.js';
+import { createCampaign, drainOutbox, publishCampaign } from '../dist/apps/api/src/domain/service.js';
 
 process.env.CAMPMIND_DEMO_MFA = 'true';
 process.env.CAMPMIND_MASTER_KEY = 'test-master-key-never-use-in-production';
@@ -147,6 +147,9 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   assert.equal(schema.response.status, 201);
   const schemaApproved = await request(`/v1/profile-schemas/${schema.body.data.id}/approve`, { method: 'POST', headers: auth(professional), body: '{}' });
   assert.equal(schemaApproved.response.status, 200);
+  const student = await login('student@campus-mind.demo');
+  const profileResponse = await request('/v1/me/profile-responses', { method: 'POST', headers: auth(student), body: JSON.stringify({ schemaId: schema.body.data.id, values: { sleep: '合成：大致规律' } }) });
+  assert.equal(profileResponse.response.status, 201);
   const analytics = await request('/v1/analytics/summary?groupBy=school', { headers: auth(professional) });
   assert.equal(analytics.response.status, 200);
   assert.equal(analytics.body.data.rows[0].suppressed, true);
@@ -159,7 +162,6 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   assert.equal(exportDownload.body.data.suppressionThreshold, 10);
   const slot = await request('/v1/availability-slots', { method: 'POST', headers: auth(professional), body: JSON.stringify({ counselorId: 'user-counselor-demo', startsAt: new Date(Date.now() + 3_600_000).toISOString(), endsAt: new Date(Date.now() + 7_200_000).toISOString(), room: '合成咨询室' }) });
   assert.equal(slot.response.status, 201);
-  const student = await login('student@campus-mind.demo');
   const appointment = await request('/v1/appointments', { method: 'POST', headers: auth(student), body: JSON.stringify({ slotId: slot.body.data.id, note: '合成预约说明' }) });
   assert.equal(appointment.response.status, 201);
   const confirmed = await request(`/v1/appointments/${appointment.body.data.id}/state`, { method: 'POST', headers: auth(professional), body: JSON.stringify({ state: 'confirmed' }) });
@@ -171,6 +173,16 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   const publicContent = await request('/v1/content/public?age=15');
   assert.equal(publicContent.response.status, 200);
   assert.ok(publicContent.body.data.some((item) => item.id === content.body.data.id));
+});
+
+
+test('teacher progress is limited to operational counts', async () => {
+  const teacher = await login('teacher@campus-mind.demo');
+  const progress = await request('/v1/campaigns/campaign-demo/progress', { headers: auth(teacher) });
+  assert.equal(progress.response.status, 200);
+  assert.equal(progress.body.data.completed, 1);
+  assert.match(progress.body.data.note, /不包含分数/);
+  assert.equal(Object.hasOwn(progress.body.data, 'studentIds'), false);
 });
 
 test('rights requests are auditable and privacy staff can complete non-destructive access requests', async () => {
@@ -201,4 +213,7 @@ test('consent withdrawal blocks future assessment and leaves audit evidence', as
   const audit = await request('/v1/admin/audit', { headers: auth(admin) });
   assert.equal(audit.response.status, 403, 'school admin cannot read sensitive audit by default');
   assert.ok(store.snapshot().auditEvents.some((e) => e.action === 'consent.withdrawn'));
+  const ops = await login('ops@campus-mind.demo');
+  const drained = await request('/v1/admin/worker/drain', { method: 'POST', headers: auth(ops), body: '{}' });
+  assert.equal(drained.response.status, 200);
 });

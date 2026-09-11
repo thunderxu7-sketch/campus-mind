@@ -384,6 +384,15 @@ export interface ContentItem {
   createdAt: string;
 }
 
+export interface ProfileResponse {
+  id: string;
+  tenantId: string;
+  studentId: string;
+  schemaId: string;
+  valuesCiphertext: string;
+  submittedAt: string;
+}
+
 export interface ProfileSchemaVersion {
   id: string;
   tenantId: string;
@@ -438,6 +447,7 @@ export interface DatabaseState {
   appointments: Appointment[];
   contentItems: ContentItem[];
   profileSchemas: ProfileSchemaVersion[];
+  profileResponses: ProfileResponse[];
 }
 
 export interface AuthenticatedUser {

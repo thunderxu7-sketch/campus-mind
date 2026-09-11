@@ -276,3 +276,13 @@ begin
     end;
   end loop;
 end $$;
+create table if not exists profile_responses (
+  id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null,
+  schema_id uuid not null, values_ciphertext text not null, submitted_at timestamptz not null default now(),
+  foreign key (tenant_id, student_id) references students(tenant_id, id), foreign key (tenant_id, schema_id) references profile_schemas(tenant_id, id)
+);
+alter table profile_responses enable row level security;
+do $$ begin
+  execute 'create policy profile_responses_isolation on profile_responses using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
+exception when duplicate_object then null;
+end $$;
