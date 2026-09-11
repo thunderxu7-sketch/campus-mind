@@ -15,6 +15,17 @@ const id = () => randomUUID();
 const sameTenant = <T extends { tenantId: string }>(record: T, tenantId: string): boolean => record.tenantId === tenantId;
 const hashExternal = (value: string): string => createHash('sha256').update(value.trim()).digest('hex');
 const validDate = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(new Date(value).getTime());
+const academicYearPattern = /^(\d{4})-(\d{4})$/;
+function currentAcademicYear(date = new Date()): string {
+  const configured = process.env.CAMPMIND_ACADEMIC_YEAR?.trim();
+  const configuredMatch = configured?.match(academicYearPattern);
+  if (configuredMatch && Number(configuredMatch[2]) === Number(configuredMatch[1]) + 1) return configured!;
+  // Chinese school years normally begin in September.  Keep the fallback
+  // server-derived so a student cannot pick an arbitrary year to bypass the
+  // annual frequency reservation.
+  const startYear = date.getUTCMonth() >= 8 ? date.getUTCFullYear() : date.getUTCFullYear() - 1;
+  return `${startYear}-${startYear + 1}`;
+}
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
   if (value && typeof value === 'object') return `{${Object.keys(value as Record<string, unknown>).sort().map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`).join(',')}}`;
@@ -1581,11 +1592,11 @@ export async function campaignProgress(store: Store, auth: AuthenticatedUser, ca
   });
 }
 
-export async function createSelfScreening(store: Store, auth: AuthenticatedUser, scaleId: string, academicYear = '2026-2027'): Promise<{ campaign: Campaign; assignment: Assignment }> {
+export async function createSelfScreening(store: Store, auth: AuthenticatedUser, scaleId: string, requestedAcademicYear?: string): Promise<{ campaign: Campaign; assignment: Assignment }> {
   if (!isStudent(auth.user)) throw forbidden();
   requirePermission(auth.user, 'self:assessment');
-  if (typeof academicYear !== 'string' || !academicYear.trim()) throw new DomainError('ACADEMIC_YEAR_INVALID', '学年标识无效');
-  academicYear = academicYear.trim();
+  const academicYear = currentAcademicYear();
+  if (requestedAcademicYear !== undefined && (typeof requestedAcademicYear !== 'string' || !requestedAcademicYear.trim() || requestedAcademicYear.trim() !== academicYear)) throw new DomainError('ACADEMIC_YEAR_INVALID', '自选筛查只能使用当前学年');
   return store.transaction((state) => {
     const student = state.students.find((candidate) => candidate.id === auth.user.id && candidate.tenantId === auth.user.tenantId && candidate.active);
     const scale = state.scales.find((candidate) => candidate.id === scaleId && candidate.tenantId === auth.user.tenantId);

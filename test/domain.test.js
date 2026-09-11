@@ -48,6 +48,7 @@ test('self screening uses the same consent and academic-year frequency guard', a
   state.frequencyReservations = [];
   const store = new JsonStore({ initial: state });
   const auth = authFor(store.snapshot(), 'student-demo');
+  await assert.rejects(() => createSelfScreening(store, auth, 'scale-synthetic-demo-v1', '9999-10000'), (error) => error.code === 'ACADEMIC_YEAR_INVALID');
   const first = await createSelfScreening(store, auth, 'scale-synthetic-demo-v1');
   assert.equal(first.campaign.purpose, 'screening');
   await assert.rejects(() => createSelfScreening(store, auth, 'scale-synthetic-demo-v1'), (error) => error.code === 'FREQUENCY_REVIEW_REQUIRED');

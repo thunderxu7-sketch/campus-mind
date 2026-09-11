@@ -88,7 +88,7 @@ paths:
   /v1/me/scales:
     get: {summary: List only age-eligible, usable self-screening scale versions, responses: {'200': {description: Available scale catalog}}}
   /v1/self-screenings:
-    post: {summary: Create a frequency-checked student self-screening task, responses: {'201': {description: Self-screening campaign and assignment}, '400': {description: Consent, age or annual frequency review required}}}
+    post: {summary: Create a current-academic-year frequency-checked student self-screening task, responses: {'201': {description: Self-screening campaign and assignment}, '400': {description: Consent, age or annual frequency review required; the server rejects arbitrary academic years}}}
   /v1/me/tasks/{assignmentId}/attempts:
     post: {summary: Start an age/consent/frequency-checked attempt, parameters: [{$ref: '#/components/parameters/assignmentId'}], responses: {'201': {description: Attempt}, '400': {description: Consent, age, frequency or time-window failure}}}
   /v1/attempts/{attemptId}/answers:
