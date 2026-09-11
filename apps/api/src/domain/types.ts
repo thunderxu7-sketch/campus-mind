@@ -179,6 +179,8 @@ export interface FrequencyReservation {
   status: 'reserved' | 'consumed' | 'released' | 'exception';
   campaignId: string;
   approvedBy?: string;
+  /** Encrypted purpose/evidence for an approved re-evaluation exception. */
+  reasonCiphertext?: string;
   reason?: string;
   createdAt: string;
 }

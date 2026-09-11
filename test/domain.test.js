@@ -62,6 +62,11 @@ test('professional frequency exceptions are explicit and scoped to one draft cam
   const campaign = await createCampaign(store, admin, { schoolId: 'school-demo', name: '合成复评例外任务', purpose: 'screening', academicYear: '2026-2027', opensAt: new Date(Date.now() - 1_000).toISOString(), closesAt: new Date(Date.now() + 3_600_000).toISOString(), scaleVersionId: 'scale-synthetic-demo-v1', participantStudentIds: ['student-demo'] });
   const reservation = await approveFrequencyException(store, professional, campaign.id, { studentId: 'student-demo', reason: '合成演示：专业人员记录必要复评用途' });
   assert.equal(reservation.status, 'exception');
+  assert.equal(reservation.hasReason, true);
+  assert.equal(Object.hasOwn(reservation, 'reason'), false);
+  const storedReservation = store.snapshot().frequencyReservations.find((candidate) => candidate.id === reservation.id);
+  assert.ok(storedReservation.reasonCiphertext);
+  assert.equal(Object.hasOwn(storedReservation, 'reason'), false);
   await publishCampaign(store, admin, campaign.id);
   assert.equal(store.snapshot().assignments.filter((assignment) => assignment.campaignId === campaign.id).length, 1);
 });

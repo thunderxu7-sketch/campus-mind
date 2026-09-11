@@ -35,9 +35,15 @@ const importPreviewHash = (rows: Array<Record<string, unknown>>): string => crea
 type PublicRightsRequest = Omit<RightsRequest, 'resultCiphertext' | 'decisionReasonCiphertext' | 'reason' | 'reasonCiphertext'> & { resultReady: boolean; hasReason: boolean };
 type PublicExportJob = Omit<ExportJob, 'payloadCiphertext'> & { ready: boolean };
 type PublicConsent = Pick<ConsentRecord, 'id' | 'purpose' | 'noticeVersion' | 'actorType' | 'status' | 'recordedAt' | 'withdrawnAt'>;
+type PublicFrequencyReservation = Omit<FrequencyReservation, 'reason' | 'reasonCiphertext'> & { hasReason: boolean };
 
 function publicConsent(consent: ConsentRecord): PublicConsent {
   return { id: consent.id, purpose: consent.purpose, noticeVersion: consent.noticeVersion, actorType: consent.actorType, status: consent.status, recordedAt: consent.recordedAt, withdrawnAt: consent.withdrawnAt };
+}
+
+function publicFrequencyReservation(reservation: FrequencyReservation): PublicFrequencyReservation {
+  const { reason: _reason, reasonCiphertext: _reasonCiphertext, ...publicReservation } = reservation;
+  return { ...publicReservation, hasReason: Boolean(_reason || _reasonCiphertext) };
 }
 
 function publicRightsRequest(request: RightsRequest): PublicRightsRequest {
@@ -433,9 +439,9 @@ export async function publishCampaign(store: Store, auth: AuthenticatedUser, cam
 }
 
 /** Record an approved same-year re-evaluation exception before a campaign is published. */
-export async function approveFrequencyException(store: Store, auth: AuthenticatedUser, campaignId: string, input: { studentId: string; reason: string }): Promise<FrequencyReservation> {
+export async function approveFrequencyException(store: Store, auth: AuthenticatedUser, campaignId: string, input: { studentId: string; reason: string }): Promise<PublicFrequencyReservation> {
   requirePermission(auth.user, 'frequency:approve');
-  if (typeof input.reason !== 'string' || !input.reason.trim()) throw new DomainError('FREQUENCY_EXCEPTION_REASON_REQUIRED', '复评例外需要记录用途和依据');
+  if (typeof input.reason !== 'string' || !input.reason.trim() || input.reason.length > 1000 || /[\0\r\n]/.test(input.reason)) throw new DomainError('FREQUENCY_EXCEPTION_REASON_REQUIRED', '复评例外需要记录用途和依据');
   return store.transaction((state) => {
     const campaign = state.campaigns.find((candidate) => candidate.id === campaignId && candidate.tenantId === auth.user.tenantId);
     const student = state.students.find((candidate) => candidate.id === input.studentId && candidate.tenantId === auth.user.tenantId && candidate.active);
@@ -448,14 +454,15 @@ export async function approveFrequencyException(store: Store, auth: Authenticate
     const existingException = state.frequencyReservations.find((reservation) => reservation.tenantId === auth.user.tenantId && reservation.studentId === student.id && reservation.academicYear === campaign.academicYear && reservation.campaignId === campaign.id && reservation.status === 'exception');
     if (existingException) {
       existingException.approvedBy = auth.user.id;
-      existingException.reason = input.reason.trim().slice(0, 1000);
+      existingException.reasonCiphertext = encrypt({ reason: input.reason.trim().slice(0, 1000) });
+      existingException.reason = undefined;
       audit(state, auth.user, 'frequency.exception_updated', 'frequency_reservation', existingException.id, { campaignId, studentId: student.id });
-      return existingException;
+      return publicFrequencyReservation(existingException);
     }
-    const reservation: FrequencyReservation = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, academicYear: campaign.academicYear, purpose: 'assessment', status: 'exception', campaignId: campaign.id, approvedBy: auth.user.id, reason: input.reason.trim().slice(0, 1000), createdAt: now() };
+    const reservation: FrequencyReservation = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, academicYear: campaign.academicYear, purpose: 'assessment', status: 'exception', campaignId: campaign.id, approvedBy: auth.user.id, reasonCiphertext: encrypt({ reason: input.reason.trim().slice(0, 1000) }), createdAt: now() };
     state.frequencyReservations.push(reservation);
     audit(state, auth.user, 'frequency.exception_approved', 'frequency_reservation', reservation.id, { campaignId, studentId: student.id });
-    return reservation;
+    return publicFrequencyReservation(reservation);
   });
 }
 
