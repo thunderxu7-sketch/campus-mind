@@ -41,6 +41,16 @@
     <div id="questions" aria-live="polite"></div>
   </section>
 
+  <section id="participation" hidden aria-labelledby="participation-title">
+    <h2 id="participation-title">测评参与说明</h2>
+    <p class="muted">测评只用于约定的心理支持目的。参与是自愿的；反馈不是诊断，学校会按说明的范围和期限处理资料。你可以随时申请撤回或删除。</p>
+    <form id="consentForm">
+      <label><input id="consentAgree" type="checkbox" required> 我已阅读以上说明，并同意按当前任务告知版本记录本人参与。</label>
+      <button type="submit">记录本人参与</button>
+    </form>
+    <p id="consentStatus" class="status" role="status" aria-live="polite"></p>
+  </section>
+
   <section id="appointments" hidden aria-labelledby="appointments-title">
     <h2 id="appointments-title">咨询预约</h2>
     <p class="muted">预约不是即时咨询或紧急救助。如需立即帮助，请使用“我想找人聊聊”或联系学校提供的人工支持渠道。</p>
@@ -83,6 +93,7 @@
     let currentUserId = '';
     let attempt = null;
     let revision = 0;
+    let currentNoticeVersion = 'notice-demo-v1';
     let saveTimer = null;
     let saveInFlight = false;
     let dirty = false;
@@ -154,6 +165,21 @@
       } catch (error) { $('#reportList').innerHTML = `<p class="muted">${esc(error.message || '反馈暂时不可用')}</p>`; }
     }
 
+    async function loadConsent() {
+      try {
+        const consents = await api('/v1/me/consents?purpose=assessment');
+        const active = consents.find((consent) => consent.status === 'active');
+        if (active) {
+          $('#consentForm').hidden = true;
+          $('#consentStatus').textContent = `已记录参与（告知版本 ${active.noticeVersion}）。如需停止测评，请在“资料权利申请”中提交撤回。`;
+        } else {
+          $('#consentForm').hidden = false;
+          $('#consentAgree').checked = false;
+          $('#consentStatus').textContent = '尚未记录当前测评参与。未完成参与记录时，任务不能开始。';
+        }
+      } catch (error) { $('#consentStatus').textContent = error.message || '参与记录暂时不可用'; }
+    }
+
     const rightsStateLabel = { open: '待处理', processing: '处理中', completed: '已完成', rejected: '已拒绝' };
     const rightsKindLabel = { access: '查阅', correct: '更正', withdraw: '撤回参与', delete: '删除' };
     async function loadRights() {
@@ -198,6 +224,7 @@
       if (saveTimer) clearTimeout(saveTimer);
       saveTimer = null;
       $('#tasks').hidden = true;
+      $('#participation').hidden = true;
       $('#appointments').hidden = true;
       $('#reports').hidden = true;
       $('#rights').hidden = true;
@@ -206,6 +233,10 @@
       $('#appointmentSlots').replaceChildren();
       $('#myAppointments').replaceChildren();
       $('#appointment-note').value = '';
+      $('#consentForm').hidden = false;
+      $('#consentForm').reset();
+      $('#consentStatus').textContent = '';
+      currentNoticeVersion = 'notice-demo-v1';
       appointmentKeys.clear();
       $('#login').reset();
     }
@@ -261,6 +292,18 @@
       setSaveStatus(revision > 0 ? '已恢复最近一次服务端保存的草稿。' : '尚未保存');
     }
 
+    function renderTasks(tasks) {
+      currentNoticeVersion = tasks.find((task) => task.noticeVersion)?.noticeVersion || 'notice-demo-v1';
+      $('#taskList').innerHTML = tasks.length ? tasks.map((task) => {
+        const terminal = task.availabilityReason === 'terminal';
+        const available = task.available === true;
+        const label = available ? (task.attempt?.state === 'in_progress' ? '继续' : '开始') : '暂不可用';
+        const statusText = terminal ? '该任务已结束，不能重复提交。' : available ? '' : ({ outside_window: '测评时间已结束或尚未开始。', age_not_allowed: '当前年龄不满足该方案的适用范围。', scale_unavailable: '该测评方案已撤回或授权到期，请联系学校。', frequency_review: '该场次需要学校复核后才能继续。', assignment_unavailable: '任务当前不可用，请联系学校。' }[task.availabilityReason] || '任务尚未开放或需要学校处理。');
+        return `<div class="task"><b>${esc(task.name)}</b> · ${esc(task.status)}<br><span class="muted">${esc(task.scaleTitle || '')}</span>${statusText ? `<br><span class="muted">${esc(statusText)}</span>` : ''}<br><button type="button" data-id="${esc(task.id)}" aria-label="${esc(label)} ${esc(task.name)}" ${available ? '' : 'disabled'}>${esc(label)}</button></div>`;
+      }).join('') : '<p class="muted">当前没有可完成的任务。</p>';
+      document.querySelectorAll('[data-id]').forEach((button) => { button.onclick = () => start(button.dataset.id); });
+    }
+
     $('#login').onsubmit = async (event) => {
       event.preventDefault();
       try {
@@ -275,19 +318,13 @@
         currentUserId = payload.data.user.id;
         setStatus('已登录');
         $('#tasks').hidden = false;
+        $('#participation').hidden = false;
         $('#appointments').hidden = false;
         $('#reports').hidden = false;
         $('#rights').hidden = false;
         const tasks = await api('/v1/me/tasks');
-        $('#taskList').innerHTML = tasks.length ? tasks.map((task) => {
-          const terminal = task.availabilityReason === 'terminal';
-          const available = task.available === true;
-          const label = available ? (task.attempt?.state === 'in_progress' ? '继续' : '开始') : '暂不可用';
-          const statusText = terminal ? '该任务已结束，不能重复提交。' : available ? '' : ({ outside_window: '测评时间已结束或尚未开始。', age_not_allowed: '当前年龄不满足该方案的适用范围。', scale_unavailable: '该测评方案已撤回或授权到期，请联系学校。', frequency_review: '该场次需要学校复核后才能继续。', assignment_unavailable: '任务当前不可用，请联系学校。' }[task.availabilityReason] || '任务尚未开放或需要学校处理。');
-          return `<div class="task"><b>${esc(task.name)}</b> · ${esc(task.status)}<br><span class="muted">${esc(task.scaleTitle || '')}</span>${statusText ? `<br><span class="muted">${esc(statusText)}</span>` : ''}<br><button type="button" data-id="${esc(task.id)}" aria-label="${esc(label)} ${esc(task.name)}" ${available ? '' : 'disabled'}>${esc(label)}</button></div>`;
-        }).join('') : '<p class="muted">当前没有可完成的任务。</p>';
-        document.querySelectorAll('[data-id]').forEach((button) => { button.onclick = () => start(button.dataset.id); });
-        await Promise.all([loadAppointments(), loadReports(), loadRights()]);
+        renderTasks(tasks);
+        await Promise.all([loadConsent(), loadAppointments(), loadReports(), loadRights()]);
       } catch (error) { setStatus(error.message); }
     };
 
@@ -331,6 +368,18 @@
         event.target.reset();
         await loadRights();
       } catch (error) { $('#rightsStatus').textContent = error.message || '申请提交失败'; }
+    };
+
+    $('#consentForm').onsubmit = async (event) => {
+      event.preventDefault();
+      if (!$('#consentAgree').checked) return;
+      try {
+        const result = await api('/v1/me/consents', { method: 'POST', body: JSON.stringify({ studentId: currentUserId, actorType: 'student', noticeVersion: currentNoticeVersion, purpose: 'assessment' }) });
+        $('#consentForm').hidden = true;
+        $('#consentStatus').textContent = `参与记录已保存（告知版本 ${result.noticeVersion}）。现在可以开始符合条件的任务。`;
+        const tasks = await api('/v1/me/tasks');
+        renderTasks(tasks);
+      } catch (error) { $('#consentStatus').textContent = error.message || '参与记录失败'; }
     };
 
     $('#logout').onclick = async () => {

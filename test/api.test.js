@@ -58,6 +58,7 @@ test('health and browser surfaces expose safety headers', async () => {
   assert.match(pageHtml, /预约此时段/);
   assert.match(pageHtml, /我的反馈/);
   assert.match(pageHtml, /资料权利申请/);
+  assert.match(pageHtml, /测评参与说明/);
   const adminPage = await fetch(base + '/admin');
   assert.equal(adminPage.status, 200);
   const adminHtml = await adminPage.text();
@@ -532,7 +533,16 @@ test('guardian consent requires a verified guardian link and rejects role spoofi
   assert.equal(consent.response.status, 201);
   const withdrawn = await request(`/v1/me/consents/${consent.body.data.id}/withdraw`, { method: 'POST', headers: auth(guardian), body: '{}' });
   assert.equal(withdrawn.response.status, 204);
+  const guardianConsents = await request('/v1/me/consents?purpose=support', { headers: auth(guardian) });
+  assert.equal(guardianConsents.response.status, 200);
+  assert.equal(guardianConsents.body.data[0].status, 'withdrawn');
+  assert.equal(Object.hasOwn(guardianConsents.body.data[0], 'actorId'), false);
+  assert.equal(Object.hasOwn(guardianConsents.body.data[0], 'studentId'), false);
   const student = await login('student@campus-mind.demo');
+  const studentConsents = await request('/v1/me/consents?purpose=assessment', { headers: auth(student) });
+  assert.equal(studentConsents.response.status, 200);
+  assert.equal(studentConsents.body.data[0].status, 'active');
+  assert.equal(Object.hasOwn(studentConsents.body.data[0], 'tenantId'), false);
   const spoof = await request('/v1/me/consents', { method: 'POST', headers: auth(student), body: JSON.stringify({ studentId: 'student-demo', actorType: 'guardian', noticeVersion: 'notice-spoof-v1', purpose: 'research' }) });
   assert.equal(spoof.response.status, 403);
 });

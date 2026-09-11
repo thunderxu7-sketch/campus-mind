@@ -165,6 +165,7 @@ export async function listMyTasks(store: Store, auth: AuthenticatedUser): Promis
         opensAt: campaign?.opensAt,
         closesAt: campaign?.closesAt,
         scaleTitle: scale?.title,
+        noticeVersion: scale?.noticeVersion,
         status: assignment.status,
         available,
         availabilityReason,
@@ -223,6 +224,24 @@ export async function createConsent(store: Store, auth: AuthenticatedUser, input
     state.consents.push(consent);
     audit(state, auth.user, 'consent.recorded', 'consent', consent.id, { purpose, actorType: input.actorType });
     return consent;
+  });
+}
+
+/** Return purpose-bound consent metadata to the subject (or a verified
+ * guardian for linked students). Actor identifiers and tenant internals are
+ * intentionally omitted; the endpoint only renders participation state. */
+export async function listMyConsents(store: Store, auth: AuthenticatedUser, purpose?: string): Promise<Array<Record<string, unknown>>> {
+  if (!isStudent(auth.user) && auth.user.role !== 'guardian') throw forbidden();
+  if (purpose !== undefined && !['assessment', 'support', 'research'].includes(purpose)) throw new DomainError('CONSENT_INVALID', '参与记录用途无效');
+  return store.transaction((state) => {
+    const studentIds = isStudent(auth.user)
+      ? new Set([auth.user.id])
+      : new Set(state.guardianLinks.filter((link) => link.tenantId === auth.user.tenantId && link.guardianUserId === auth.user.id && link.status === 'verified').map((link) => link.studentId));
+    const consents = state.consents
+      .filter((consent) => consent.tenantId === auth.user.tenantId && studentIds.has(consent.studentId) && (purpose === undefined || consent.purpose === purpose))
+      .map((consent) => ({ id: consent.id, purpose: consent.purpose, noticeVersion: consent.noticeVersion, actorType: consent.actorType, status: consent.status, recordedAt: consent.recordedAt, withdrawnAt: consent.withdrawnAt }));
+    audit(state, auth.user, 'consent.own_listed', 'consent', 'self', { count: consents.length }, 'consent:read');
+    return consents;
   });
 }
 
