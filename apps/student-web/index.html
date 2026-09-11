@@ -19,6 +19,8 @@
       <input id="email" name="email" type="email" autocomplete="username" value="student@campus-mind.demo" required>
       <label for="password">密码</label>
       <input id="password" name="password" type="password" autocomplete="current-password" value="CampusMind-Demo-2026!" required>
+      <label for="access-code">学校一次性凭证（无手机时填写，可替代邮箱密码）</label>
+      <input id="access-code" name="accessCode" type="text" autocomplete="one-time-code" inputmode="text" pattern="[A-Za-z0-9_-]{20,}" minlength="20">
       <button type="submit">进入任务</button>
     </form>
     <p id="status" class="status" role="status" aria-live="polite"></p>
@@ -126,6 +128,8 @@
       event.preventDefault();
       try {
         const body = Object.fromEntries(new FormData(event.target));
+        if (!body.accessCode) delete body.accessCode;
+        else { delete body.email; delete body.password; delete body.mfaCode; }
         const response = await fetch('/v1/auth/login', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body) });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error?.message || '登录失败');

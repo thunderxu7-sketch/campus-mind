@@ -39,6 +39,13 @@
       <button type="submit">创建草稿</button>
     </form>
     <p class="muted">发布前仍需满足适龄、参与、频次、量表和专业门槛；校务账号不能查看分数。</p>
+    <h2>无手机学生凭证</h2>
+    <form id="credentialForm">
+      <label for="credential-student">学生编号</label><input id="credential-student" name="studentId" value="student-demo" required>
+      <label for="credential-ttl">有效期（分钟，5–1440）</label><input id="credential-ttl" name="ttlMinutes" type="number" min="5" max="1440" value="30" required>
+      <button type="submit" class="secondary">签发一次性凭证</button>
+    </form>
+    <p id="credentialStatus" class="status" role="status" aria-live="polite">凭证只显示一次，请通过学校批准的线下渠道交付。</p>
   </section>
 
   <script>
@@ -87,6 +94,17 @@
         setStatus(response.ok ? '已创建草稿' : result.error?.message || '创建失败');
         if (response.ok) await load();
       } catch (error) { setStatus(error.message); }
+    };
+
+    $('#credentialForm').onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        const form = Object.fromEntries(new FormData(event.target));
+        const response = await fetch('/v1/admin/student-credentials', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ studentId: form.studentId, ttlMinutes: Number(form.ttlMinutes) }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '签发失败');
+        $('#credentialStatus').innerHTML = `一次性凭证（仅显示一次）：<code>${esc(result.data.code)}</code><br>有效期至 ${esc(result.data.expiresAt)}`;
+      } catch (error) { $('#credentialStatus').textContent = error.message; }
     };
 
     $('#logout').onclick = async () => {
