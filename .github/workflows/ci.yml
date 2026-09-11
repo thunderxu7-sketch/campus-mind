@@ -12,6 +12,20 @@ jobs:
   plan-and-reference-app:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: campus_mind
+          POSTGRES_USER: campus_mind_migration
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U campus_mind_migration -d campus_mind"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
     env:
       NODE_ENV: test
       CAMPMIND_MASTER_KEY: ci-only-test-key
@@ -23,6 +37,15 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: apply and inspect PostgreSQL reference migration
+        env:
+          PGPASSWORD: ci-only-password
+        run: |
+          psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --set ON_ERROR_STOP=1 --file infra/migrations/001_initial.sql
+          test "$(psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --tuples-only --no-align --command "select count(*) from information_schema.tables where table_schema = 'public';")" = "34"
+          test "$(psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --tuples-only --no-align --command "select count(*) from pg_class where relnamespace = 'public'::regnamespace and relrowsecurity and relforcerowsecurity;")" = "34"
+          test "$(psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --tuples-only --no-align --command "select count(*) from pg_policies where schemaname = 'public';")" = "34"
+          test "$(psql --host 127.0.0.1 --port 5432 --username campus_mind_migration --dbname campus_mind --tuples-only --no-align --command "select count(*) from information_schema.columns where table_name = 'media_assets' and column_name = 'object_key';")" = "1"
       - run: npm run build
       - run: npm test
       - run: npm run drill:capacity
