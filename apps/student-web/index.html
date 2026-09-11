@@ -176,13 +176,14 @@
       try {
         const consents = await api('/v1/me/consents?purpose=assessment');
         const active = consents.find((consent) => consent.status === 'active');
-        if (active) {
+        const matching = active && (!currentNoticeVersion || active.noticeVersion === currentNoticeVersion) ? active : null;
+        if (matching) {
           $('#consentForm').hidden = true;
-          $('#consentStatus').textContent = `已记录参与（告知版本 ${active.noticeVersion}）。如需停止测评，请在“资料权利申请”中提交撤回。`;
+          $('#consentStatus').textContent = `已记录参与（告知版本 ${matching.noticeVersion}）。如需停止测评，请在“资料权利申请”中提交撤回。`;
         } else {
           $('#consentForm').hidden = false;
           $('#consentAgree').checked = false;
-          $('#consentStatus').textContent = '尚未记录当前测评参与。未完成参与记录时，任务不能开始。';
+          $('#consentStatus').textContent = active ? `当前任务需要告知版本 ${currentNoticeVersion}，已有记录为 ${active.noticeVersion}；请重新阅读并记录当前参与。` : '尚未记录当前测评参与。未完成参与记录时，任务不能开始。';
         }
       } catch (error) { $('#consentStatus').textContent = error.message || '参与记录暂时不可用'; }
     }
