@@ -333,6 +333,7 @@ create table if not exists media_assets (
   created_by uuid not null, created_at timestamptz not null default now(), unique (tenant_id, id), unique (tenant_id, sha256)
 );
 alter table media_assets add column if not exists object_key text;
+create unique index if not exists media_assets_tenant_object_key on media_assets(tenant_id, object_key) where object_key is not null;
 create table if not exists content_items (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), title text not null, kind text not null,
   age_min smallint not null, age_max smallint not null, body_ciphertext text not null, state text not null, copyright_source text not null,
