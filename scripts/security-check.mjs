@@ -54,6 +54,7 @@ const requiredSnippets = [
   [studentWeb, "$('#reportList').replaceChildren()", 'student report cleanup'],
   [studentWeb, "$('#rightsList').replaceChildren()", 'student rights cleanup'],
   [studentWeb, 'active.noticeVersion === currentNoticeVersion', 'student consent notice refresh'],
+  [studentWeb, 'let helpSubmitted = false', 'student help debounce state'],
 ];
 for (const [text, snippet, label] of requiredSnippets) if (!text.includes(snippet)) suspicious.push(`missing ${label}`);
 const gitignore = readFileSync(join(root, '.gitignore'), 'utf8');
