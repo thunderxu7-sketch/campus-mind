@@ -1,0 +1,84 @@
+openapi: 3.1.0
+info:
+  title: Campus Mind API
+  version: 0.1.0
+  description: |
+    合成数据参考 API。筛查反馈不是医学诊断；风险信号必须由有授权的心理专业人员复核。
+    生产环境必须替换本地 JsonStore、演示身份和 synthetic_only 量表，并通过 M4 Gate。
+servers:
+  - url: http://localhost:8787
+    description: Local reference server only
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      security: []
+      summary: Health check
+      responses: {'200': {description: OK}}
+  /v1/auth/login:
+    post:
+      security: []
+      summary: Login with a named account
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/Login'}}}
+      responses: {'200': {description: Session}, '401': {description: Invalid credentials or MFA required}}
+  /v1/auth/logout:
+    post: {summary: Revoke current session, responses: {'204': {description: Revoked}}}
+  /v1/me:
+    get: {summary: Current named user, responses: {'200': {description: User}}}
+  /v1/me/tasks:
+    get: {summary: Student's own assignments, responses: {'200': {description: Tasks}}}
+  /v1/me/tasks/{assignmentId}/attempts:
+    post: {summary: Start an age/consent/frequency-checked attempt, parameters: [{$ref: '#/components/parameters/assignmentId'}], responses: {'201': {description: Attempt}, '400': {description: Consent, age, frequency or time-window failure}}}
+  /v1/attempts/{attemptId}/answers:
+    put: {summary: Save a revision-safe draft, parameters: [{$ref: '#/components/parameters/attemptId'}], responses: {'200': {description: Saved}, '409': {description: Revision conflict}}}
+  /v1/attempts/{attemptId}/submit:
+    post: {summary: Idempotently freeze a submission and enqueue scoring, parameters: [{$ref: '#/components/parameters/attemptId'}], responses: {'202': {description: Scoring pending}, '409': {description: Idempotency conflict}}}
+  /v1/reports:
+    get: {summary: Professional reports or released own reports, responses: {'200': {description: Reports}}}
+  /v1/reports/{reportId}/approve:
+    post: {summary: Professional report approval, parameters: [{$ref: '#/components/parameters/reportId'}], responses: {'204': {description: Approved}}}
+  /v1/reports/{reportId}/release:
+    post: {summary: Release an approved report to its allowed reader, parameters: [{$ref: '#/components/parameters/reportId'}], responses: {'204': {description: Released}}}
+  /v1/risk-signals:
+    post: {summary: Student self-help or professional manual signal, responses: {'201': {description: Human-review case created}}}
+  /v1/cases:
+    get: {summary: Professional case work queue without raw answers, responses: {'200': {description: Cases}}}
+  /v1/cases/{caseId}/reviews:
+    post: {summary: Confirm or dismiss a signal with a professional note, parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'200': {description: Reviewed}}}
+  /v1/cases/{caseId}/acknowledgements:
+    post: {summary: Record human receipt (not just message delivery), parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'201': {description: Acknowledged}}}
+  /v1/cases/{caseId}/closure-approvals:
+    post: {summary: Independently approve a closure request, parameters: [{$ref: '#/components/parameters/caseId'}], responses: {'200': {description: Closed}}}
+  /v1/imports/preview:
+    post: {summary: Preview JSON-mapped spreadsheet rows before commit, responses: {'201': {description: Preview}}}
+  /v1/imports/preview-csv:
+    post: {summary: Preview bounded CSV upload, responses: {'201': {description: Preview}}}
+  /v1/imports/preview-xlsx:
+    post: {summary: Preview a bounded first worksheet without executing formulas/macros, responses: {'201': {description: Preview}}}
+  /v1/admin/overview:
+    get: {summary: Suppressed operational overview, responses: {'200': {description: Overview}}}
+  /v1/analytics/summary:
+    get: {summary: Whitelisted aggregate analytics with suppression, responses: {'200': {description: Aggregate rows}}}
+  /v1/content/public:
+    get:
+      security: []
+      summary: Published age-filtered education content
+      responses: {'200': {description: Public content}}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: opaque-session-token}
+  parameters:
+    assignmentId: {name: assignmentId, in: path, required: true, schema: {type: string}}
+    attemptId: {name: attemptId, in: path, required: true, schema: {type: string}}
+    reportId: {name: reportId, in: path, required: true, schema: {type: string}}
+    caseId: {name: caseId, in: path, required: true, schema: {type: string}}
+  schemas:
+    Login:
+      type: object
+      required: [email, password]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string, minLength: 12, writeOnly: true}

@@ -749,3 +749,30 @@ export async function listScaleCatalog(store: JsonStore, auth: AuthenticatedUser
   if (!isProfessional(auth.user) && !can(auth.user, 'campaign:read')) throw forbidden();
   return store.read((state) => state.scales.filter((scale) => scale.tenantId === auth.user.tenantId).map((scale) => ({ id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, status: scale.status, minAge: scale.minAge, maxAge: scale.maxAge, scoringVersion: scale.scoringVersion })));
 }
+
+export async function updateCampaignState(store: JsonStore, auth: AuthenticatedUser, campaignId: string, nextState: Campaign['state']): Promise<Campaign> {
+  requirePermission(auth.user, 'campaign:write');
+  return store.transaction((state) => {
+    const campaign = state.campaigns.find((candidate) => candidate.id === campaignId && candidate.tenantId === auth.user.tenantId);
+    if (!campaign) throw notFound();
+    const allowed: Record<Campaign['state'], Campaign['state'][]> = {
+      draft: ['approved', 'cancelled'], approved: ['scheduled', 'open', 'cancelled'], scheduled: ['open', 'paused', 'cancelled'], open: ['paused', 'closed'], paused: ['open', 'closed', 'cancelled'], closed: ['archived'], cancelled: ['archived'], archived: [],
+    };
+    if (!allowed[campaign.state].includes(nextState)) throw new DomainError('CAMPAIGN_STATE_INVALID', '任务状态不能这样变更');
+    campaign.state = nextState;
+    if (['closed', 'cancelled', 'archived'].includes(nextState)) {
+      for (const assignment of state.assignments.filter((candidate) => candidate.campaignId === campaign.id && candidate.status === 'assigned')) assignment.status = 'expired';
+      if (nextState !== 'closed') for (const reservation of state.frequencyReservations.filter((candidate) => candidate.campaignId === campaign.id && candidate.status === 'reserved')) reservation.status = 'released';
+    }
+    audit(state, auth.user, `campaign.${nextState}`, 'campaign', campaign.id, {}); return campaign;
+  });
+}
+
+export async function revokeReport(store: JsonStore, auth: AuthenticatedUser, reportId: string, reason: string): Promise<void> {
+  requirePermission(auth.user, 'report:approve');
+  return store.transaction((state) => {
+    const report = state.reports.find((candidate) => candidate.id === reportId && candidate.tenantId === auth.user.tenantId);
+    if (!report || !['approved', 'released'].includes(report.state)) throw notFound();
+    report.state = 'revoked'; report.revokedAt = now(); audit(state, auth.user, 'report.revoked', 'report', report.id, { reason: reason.slice(0, 200) });
+  });
+}

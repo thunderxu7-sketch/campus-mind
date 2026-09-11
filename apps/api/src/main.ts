@@ -1,9 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseXlsxBase64 } from './domain/spreadsheet.js';
-import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, campaignProgress, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createProfileSchema, createRiskSignal, createScale, createSelfScreening, currentUser, regionalAnalytics, submitProfileResponse, drainOutbox, downloadExport, getAnalytics, listCases, listCampaigns, listMyTasks, listPublicContent, listReports, listScaleCatalog, listStudents, listRightsRequests, parseCsv, previewImport, publishCampaign, requestAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, withdrawConsent, completeRightsRequest, createRightsRequest } from './domain/service.js';
+import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, campaignProgress, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createProfileSchema, createRiskSignal, createScale, createSelfScreening, currentUser, regionalAnalytics, submitProfileResponse, drainOutbox, downloadExport, getAnalytics, listCases, listCampaigns, listMyTasks, listPublicContent, listReports, listScaleCatalog, listStudents, listRightsRequests, parseCsv, previewImport, publishCampaign, requestAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, updateCampaignState, revokeReport, withdrawConsent, completeRightsRequest, createRightsRequest } from './domain/service.js';
 import { authenticate, login as loginUser, logout, requirePermission } from './domain/auth.js';
 import { DomainError, unauthorized } from './domain/errors.js';
 import { JsonStore } from './domain/store.js';
@@ -12,7 +13,8 @@ import type { AuthenticatedUser, DatabaseState } from './domain/types.js';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const DATA_FILE = process.env.CAMPMIND_DATA_FILE ?? resolve(process.cwd(), 'private-data/demo-store.json');
-const MAX_BODY_BYTES = 1_500_000;
+const MAX_BODY_BYTES = 3_000_000;
+const loginRate = new Map<string, { count: number; resetAt: number }>();
 
 function loadStore(): JsonStore {
   if (!existsSync(DATA_FILE) && process.env.NODE_ENV !== 'production') {
@@ -86,10 +88,16 @@ export function createApp(options: AppOptions = {}) {
   const store = options.store ?? loadStore();
   const server = createServer(async (req, res) => {
     headers(res);
+    res.setHeader('X-Request-Id', randomUUID());
     try {
       const method = req.method ?? 'GET';
       const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
       const path = url.pathname.replace(/\/$/, '') || '/';
+      if (method === 'POST' && path === '/v1/auth/login') {
+        const key = req.socket.remoteAddress ?? 'unknown'; const current = loginRate.get(key); const timestamp = Date.now();
+        if (!current || current.resetAt <= timestamp) loginRate.set(key, { count: 1, resetAt: timestamp + 60_000 });
+        else { current.count += 1; if (current.count > 20) throw new DomainError('RATE_LIMITED', '登录请求过于频繁，请稍后重试', 429); }
+      }
       if (method === 'GET' && path === '/health') { json(res, 200, { status: 'ok', service: 'campus-mind-api', version: '0.1.0', demo: process.env.NODE_ENV !== 'production' }); return; }
       if (method === 'GET' && (path === '/' || path === '/admin' || path === '/student')) { servePage(res, path); return; }
       if (path.startsWith('/v1/')) await routeApi(req, res, method, path, url, store);
@@ -160,6 +168,7 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   }
   if (method === 'POST' && segments[1] === 'campaigns' && segments[3] === 'publish') { const campaign = await publishCampaign(store, auth, segments[2]!); json(res, 200, { data: campaign }); return; }
   if (method === 'GET' && segments[1] === 'campaigns' && segments[3] === 'progress') { const progress = await campaignProgress(store, auth, segments[2]!); json(res, 200, { data: progress }); return; }
+  if (method === 'POST' && segments[1] === 'campaigns' && segments[3] === 'state') { const campaign = await updateCampaignState(store, auth, segments[2]!, (input.state as 'draft' | 'approved' | 'scheduled' | 'open' | 'paused' | 'closed' | 'cancelled' | 'archived') ?? 'paused'); json(res, 200, { data: campaign }); return; }
   if (method === 'GET' && path === '/v1/me/scales') {
     requirePermission(auth.user, 'self:assessment'); const scales = await store.read((state) => state.scales.filter((scale) => scale.tenantId === auth.user.tenantId).map(publicScale)); json(res, 200, { data: scales }); return;
   }
@@ -177,6 +186,7 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   }
   if (method === 'POST' && segments[1] === 'reports' && segments[3] === 'approve') { await approveReport(store, auth, segments[2]!, false); json(res, 204, {}); return; }
   if (method === 'POST' && segments[1] === 'reports' && segments[3] === 'release') { await approveReport(store, auth, segments[2]!, true); json(res, 204, {}); return; }
+  if (method === 'POST' && segments[1] === 'reports' && segments[3] === 'revoke') { await revokeReport(store, auth, segments[2]!, stringField(input, 'reason')); json(res, 204, {}); return; }
   if (method === 'POST' && path === '/v1/risk-signals') { const riskCase = await createRiskSignal(store, auth, { studentId: stringField(input, 'studentId'), level: (input.level as 'attention' | 'urgent') ?? 'attention', reason: stringField(input, 'reason'), source: input.source as never }); json(res, 201, { data: riskCase }); return; }
   if (method === 'GET' && path === '/v1/cases') { json(res, 200, { data: await listCases(store, auth) }); return; }
   if (method === 'POST' && segments[1] === 'cases' && segments[3] === 'reviews') { const result = await reviewCase(store, auth, segments[2]!, { decision: input.decision === 'dismiss' ? 'dismiss' : 'confirm', note: stringField(input, 'note') }); json(res, 200, { data: result }); return; }

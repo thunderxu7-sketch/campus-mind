@@ -183,6 +183,8 @@ test('teacher progress is limited to operational counts', async () => {
   assert.equal(progress.body.data.completed, 1);
   assert.match(progress.body.data.note, /不包含分数/);
   assert.equal(Object.hasOwn(progress.body.data, 'studentIds'), false);
+  const students = await request('/v1/admin/students', { headers: auth(teacher) });
+  assert.equal(students.response.status, 403, '班主任不可读取完整学生目录');
 });
 
 test('rights requests are auditable and privacy staff can complete non-destructive access requests', async () => {
