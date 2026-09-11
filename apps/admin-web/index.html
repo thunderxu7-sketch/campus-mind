@@ -30,6 +30,8 @@
     <div><button id="refresh" type="button">刷新</button> <button id="logout" type="button" class="secondary">退出</button></div>
     <h2>测评任务</h2>
     <div id="campaigns" aria-live="polite"></div>
+    <p id="campaignStatus" class="status" role="status" aria-live="polite"></p>
+    <div id="campaignProgress" aria-live="polite"><p class="muted">选择任务可读取完成进度。</p></div>
     <form id="campaignForm">
       <label for="campaign-name">任务名称</label><input id="campaign-name" name="name" placeholder="任务名称" value="合成演示任务" required>
       <label for="academic-year">学年</label><input id="academic-year" name="academicYear" value="2026-2027" required>
@@ -39,6 +41,14 @@
       <button type="submit">创建草稿</button>
     </form>
     <p class="muted">发布前仍需满足适龄、参与、频次、量表和专业门槛；校务账号不能查看分数。</p>
+    <h2>隐私保护统计</h2>
+    <p class="muted">仅显示批准维度的聚合计数；小样本会抑制，不展示个体分数或风险等级。</p>
+    <form id="analyticsForm">
+      <label for="analytics-group">统计维度</label><select id="analytics-group" name="groupBy"><option value="school">学校</option><option value="age_band">年龄段</option><option value="academic_year">学年</option></select>
+      <button type="submit">读取聚合统计</button>
+    </form>
+    <p id="analyticsStatus" class="status" role="status" aria-live="polite"></p>
+    <div id="analyticsView" aria-live="polite"><p class="muted">尚未读取统计。</p></div>
     <h2>咨询排班与预约</h2>
     <p class="muted">预约不是即时咨询或紧急救助。这里只展示时间、状态和最小身份引用，不展示心理说明。</p>
     <form id="slotForm">
@@ -140,7 +150,7 @@
           fetch('/v1/cases', { headers }).then((response) => response.json()),
           fetch('/v1/admin/rights-requests', { headers }).then((response) => response.json()),
         ]);
-        $('#campaigns').innerHTML = (campaigns.data || []).map((campaign) => `<p><b>${esc(campaign.name)}</b> · ${esc(campaign.state)} · ${esc(campaign.participantCount)} 人</p>`).join('') || '<p class="muted">暂无任务</p>';
+        renderCampaigns(campaigns.data || []);
         $('#scale').innerHTML = (scales.data || []).filter((scale) => scale.status === 'approved').map((scale) => `<option value="${esc(scale.id)}">${esc(scale.title)} ${esc(scale.version)}</option>`).join('');
         renderSlots(slots.data || []);
         renderAppointments(appointments.data || []);
@@ -152,6 +162,50 @@
 
     const appointmentStateLabel = { requested: '待确认', confirmed: '已确认', completed: '已完成', cancelled: '已取消', no_show: '未到访' };
     const formatWhen = (value) => { const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString() : '时间不可用'; };
+    const campaignStateLabel = { draft: '草稿', approved: '已批准', scheduled: '已排期', open: '开放中', paused: '已暂停', closed: '已关闭', cancelled: '已取消', archived: '已归档' };
+    function renderCampaigns(campaigns) {
+      $('#campaigns').innerHTML = campaigns.length ? campaigns.map((campaign) => {
+        const publish = ['draft', 'approved'].includes(campaign.state) ? `<button type="button" data-campaign-id="${esc(campaign.id)}" data-campaign-action="publish">发布任务</button>` : '';
+        const pause = ['scheduled', 'open'].includes(campaign.state) ? `<button type="button" class="secondary" data-campaign-id="${esc(campaign.id)}" data-campaign-action="paused">暂停</button>` : '';
+        const progress = `<button type="button" class="secondary" data-campaign-id="${esc(campaign.id)}" data-campaign-action="progress">查看进度</button>`;
+        return `<article class="metric"><b>${esc(campaign.name)}</b><br>${esc(campaignStateLabel[campaign.state] || campaign.state)} · ${esc(campaign.purpose)} · ${esc(campaign.participantCount)} 人${publish || pause || progress ? `<br>${publish} ${pause} ${progress}` : ''}</article>`;
+      }).join('') : '<p class="muted">暂无任务</p>';
+      document.querySelectorAll('[data-campaign-id]').forEach((button) => { button.onclick = () => updateCampaign(button.dataset.campaignId, button.dataset.campaignAction); });
+    }
+    async function updateCampaign(campaignId, action) {
+      try {
+        if (action === 'progress') {
+          const response = await fetch('/v1/campaigns/' + encodeURIComponent(campaignId) + '/progress', { headers: { authorization: 'Bearer ' + token } });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error?.message || '任务进度暂时不可用');
+          $('#campaignProgress').innerHTML = Object.entries(result.data).filter(([key]) => key !== 'note').map(([key, value]) => `<span class="metric"><b>${esc(key)}</b><br>${esc(value)}</span>`).join('') + `<p class="muted">${esc(result.data.note || '')}</p>`;
+          $('#campaignStatus').textContent = '已读取任务进度（不含分数或风险等级）。';
+          return;
+        }
+        const path = action === 'publish' ? 'publish' : 'state';
+        const body = action === 'publish' ? {} : { state: action };
+        const response = await fetch('/v1/campaigns/' + encodeURIComponent(campaignId) + '/' + path, { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '任务状态更新失败');
+        $('#campaignStatus').textContent = action === 'publish' ? '任务已发布（服务端已重新校验门槛）。' : '任务已暂停。';
+        await load();
+      } catch (error) { $('#campaignStatus').textContent = error.message || '任务操作失败'; }
+    }
+    function renderAnalytics(value) {
+      if (!value) { $('#analyticsView').innerHTML = '<p class="muted">尚未读取统计。</p>'; return; }
+      const rows = Array.isArray(value.rows) ? value.rows : [];
+      $('#analyticsView').innerHTML = rows.length ? rows.map((row) => `<article class="metric">${Object.entries(row).map(([key, item]) => `<b>${esc(key)}</b>：${esc(item === null ? '已抑制' : item)} `).join('')}</article>`).join('') + `<p class="muted">${esc(value.note || '')}</p>` : '<p class="muted">当前范围暂无可展示聚合。</p>';
+    }
+    async function loadAnalytics() {
+      const groupBy = $('#analytics-group').value;
+      try {
+        const response = await fetch('/v1/analytics/summary?groupBy=' + encodeURIComponent(groupBy), { headers: { authorization: 'Bearer ' + token } });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '统计暂时不可用');
+        renderAnalytics(result.data);
+        $('#analyticsStatus').textContent = '统计已读取。';
+      } catch (error) { $('#analyticsStatus').textContent = error.message || '统计暂时不可用'; renderAnalytics(null); }
+    }
     function renderSlots(slots) {
       $('#slotList').innerHTML = slots.length ? slots.map((slot) => {
         const action = slot.status === 'held' ? '<span class="muted">已有预约</span>' : `<button type="button" class="secondary" data-slot-id="${esc(slot.id)}" data-slot-status="${slot.status === 'blocked' ? 'available' : 'blocked'}">${slot.status === 'blocked' ? '重新开放' : '停用时段'}</button>`;
@@ -327,6 +381,7 @@
     }
 
     $('#refresh').onclick = load;
+    $('#analyticsForm').onsubmit = async (event) => { event.preventDefault(); await loadAnalytics(); };
     $('#archiveForm').onsubmit = async (event) => { event.preventDefault(); await loadProfessionalData(); };
     $('#operationsRefresh').onclick = loadOperations;
     $('#operationsRequeue').onclick = () => operationsAction('/v1/admin/operations/requeue-dead-letters', { limit: 50 });
