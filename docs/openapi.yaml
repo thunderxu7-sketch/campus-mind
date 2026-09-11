@@ -31,7 +31,14 @@ paths:
   /v1/admin/campaigns:
     get: {summary: List scoped campaign metadata and participant counts, responses: {'200': {description: Campaign list}}}
   /v1/admin/scales:
-    get: {summary: List tenant scale versions and approval metadata, responses: {'200': {description: Scale catalog}}}
+    get:
+      summary: List tenant scale versions and approval metadata without item prompts
+      parameters:
+        - {name: status, in: query, required: false, schema: {type: string, enum: [draft, approved, revoked]}}
+        - {name: population, in: query, required: false, schema: {type: string, enum: [primary, middle, high, mixed]}}
+        - {name: minAge, in: query, required: false, schema: {type: integer, minimum: 6, maximum: 19}}
+        - {name: maxAge, in: query, required: false, schema: {type: integer, minimum: 6, maximum: 19}}
+      responses: {'200': {description: Scale catalog with licenseState and suitability metadata}, '400': {description: Invalid catalog filter}, '403': {description: Scale or campaign read permission required}}
   /v1/admin/users/{userId}/sessions/revoke:
     post:
       summary: Revoke all active sessions and unspent terminal credentials for a scoped user

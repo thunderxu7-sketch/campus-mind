@@ -193,7 +193,21 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   }
   if (method === 'GET' && path === '/v1/admin/students') { json(res, 200, { data: await listStudents(store, auth) }); return; }
   if (method === 'GET' && path === '/v1/admin/campaigns') { json(res, 200, { data: await listCampaigns(store, auth) }); return; }
-  if (method === 'GET' && path === '/v1/admin/scales') { json(res, 200, { data: await listScaleCatalog(store, auth) }); return; }
+  if (method === 'GET' && path === '/v1/admin/scales') {
+    const status = url.searchParams.get('status');
+    const population = url.searchParams.get('population');
+    const queryAge = (name: string): number | undefined => {
+      const value = url.searchParams.get(name);
+      return value === null || value === '' ? undefined : Number(value);
+    };
+    const filters = {
+      ...(status ? { status: status as 'draft' | 'approved' | 'revoked' } : {}),
+      ...(population ? { population: population as 'primary' | 'middle' | 'high' | 'mixed' } : {}),
+      minAge: queryAge('minAge'),
+      maxAge: queryAge('maxAge'),
+    };
+    json(res, 200, { data: await listScaleCatalog(store, auth, filters) }); return;
+  }
   if (method === 'GET' && path === '/v1/me/tasks') { json(res, 200, { data: await listMyTasks(store, auth) }); return; }
   if (method === 'GET' && path === '/v1/availability-slots') { json(res, 200, { data: await listAvailabilitySlots(store, auth) }); return; }
   if (method === 'GET' && path === '/v1/appointments') { json(res, 200, { data: await listAppointments(store, auth) }); return; }

@@ -32,6 +32,40 @@
     <div id="campaigns" aria-live="polite"></div>
     <p id="campaignStatus" class="status" role="status" aria-live="polite"></p>
     <div id="campaignProgress" aria-live="polite"><p class="muted">选择任务可读取完成进度。</p></div>
+    <h2>量表版本目录</h2>
+    <p class="muted">这里只展示量表版本的治理元数据，不展示题目正文。真实量表必须先完成授权、适龄、计分金标准和专业审批；演示环境只能使用合成内容。</p>
+    <form id="scaleCatalogForm">
+      <label for="scale-catalog-status">版本状态</label><select id="scale-catalog-status" name="status"><option value="">全部</option><option value="draft">草稿</option><option value="approved">已批准</option><option value="revoked">已撤销</option></select>
+      <label for="scale-catalog-population">适用学段</label><select id="scale-catalog-population" name="population"><option value="">全部</option><option value="primary">小学</option><option value="middle">初中</option><option value="high">高中</option><option value="mixed">混合</option></select>
+      <label for="scale-catalog-min-age">年龄范围（可选）</label><input id="scale-catalog-min-age" name="minAge" type="number" min="6" max="19" placeholder="最小年龄">
+      <input id="scale-catalog-max-age" name="maxAge" type="number" min="6" max="19" placeholder="最大年龄">
+      <button type="submit" class="secondary">筛选目录</button>
+    </form>
+    <p id="scaleCatalogStatus" class="status" role="status" aria-live="polite"></p>
+    <div id="scaleCatalog" aria-live="polite"><p class="muted">尚未读取量表目录。</p></div>
+    <details id="scaleDraftDetails" hidden>
+      <summary>新建量表版本草稿（仅专业负责人）</summary>
+      <p class="muted">请只提交经过授权的内容或合成演示题目；版本创建后不可覆盖，只能创建新版本。授权量表需填写证据引用和到期日。</p>
+      <form id="scaleDraftForm">
+        <label for="scale-code">代码</label><input id="scale-code" name="code" maxlength="80" value="SYNTH-NEW" required>
+        <label for="scale-title">标题</label><input id="scale-title" name="title" maxlength="200" value="合成新版本" required>
+        <label for="scale-version">版本</label><input id="scale-version" name="version" maxlength="40" value="1.0.0" required>
+        <label for="scale-provenance">来源</label><select id="scale-provenance" name="provenance"><option value="synthetic_only">合成演示</option><option value="licensed">已授权量表</option></select>
+        <label for="scale-min-age">最小年龄</label><input id="scale-min-age" name="minAge" type="number" min="6" max="19" value="12" required>
+        <label for="scale-max-age">最大年龄</label><input id="scale-max-age" name="maxAge" type="number" min="6" max="19" value="18" required>
+        <label for="scale-population">适用学段</label><select id="scale-population" name="population"><option value="middle">初中</option><option value="primary">小学</option><option value="high">高中</option><option value="mixed">混合</option></select>
+        <label for="scale-language">语言</label><input id="scale-language" name="language" maxlength="32" value="zh-CN" required>
+        <label for="scale-scoring">计分版本</label><input id="scale-scoring" name="scoringVersion" maxlength="80" value="synthetic-scoring-v1" required>
+        <label for="scale-notice">告知版本</label><input id="scale-notice" name="noticeVersion" maxlength="80" value="notice-demo-v1" required>
+        <label for="scale-dimensions">维度（用逗号分隔）</label><input id="scale-dimensions" name="dimensions" maxlength="500" value="情绪支持,压力觉察">
+        <label for="scale-expiry">授权到期日（授权量表必填）</label><input id="scale-expiry" name="licenseExpiresAt" type="datetime-local">
+        <label for="scale-evidence">专业审定证据引用（授权量表必填）</label><input id="scale-evidence" name="reviewEvidenceRef" maxlength="500" placeholder="私有证据库引用，不填写正文">
+        <label for="scale-items">题目 JSON（仅合成示例或已授权内容）</label><textarea id="scale-items" name="itemsJson" rows="4" maxlength="30000">[{"id":"q1","prompt":"合成题：我知道可以向可信任的人求助。","min":0,"max":1,"reverse":false,"factor":"help_seeking"}]</textarea>
+        <label for="scale-warning">预警规则 JSON（可选）</label><textarea id="scale-warning" name="warningRuleJson" rows="2" maxlength="4000" placeholder='{"threshold":1,"level":"attention","reason":"合成演示规则，仅用于人工复核流程"}'></textarea>
+        <button type="submit">保存版本草稿</button>
+      </form>
+    </details>
+    <label for="scale-revoke-reason">撤销原因（专业负责人操作时必填）</label><input id="scale-revoke-reason" maxlength="200" placeholder="例如：授权到期或适用性复核变更">
     <h2>人员信息导入预检</h2>
     <p class="muted">支持受限 CSV（字段：externalId、displayName、age、classId、guardianVerified）。服务端会再次校验；预检文件不应包含超出目的的敏感字段。</p>
     <form id="importForm">
@@ -134,6 +168,7 @@
 
   <script>
     let token = '';
+    let currentRole = '';
     const $ = (selector) => document.querySelector(selector);
     const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     const setStatus = (message) => { $('#status').textContent = message; };
@@ -146,6 +181,8 @@
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error?.message || '登录失败');
         token = payload.data.token;
+        currentRole = payload.data.user.role || '';
+        $('#scaleDraftDetails').hidden = currentRole !== 'professional_lead';
         $('#dashboard').hidden = false;
         setStatus('已登录：' + payload.data.user.displayName);
         await load();
@@ -168,7 +205,8 @@
           fetch('/v1/admin/rights-requests', { headers }).then((response) => response.json()),
         ]);
         renderCampaigns(campaigns.data || []);
-        $('#scale').innerHTML = (scales.data || []).filter((scale) => scale.status === 'approved').map((scale) => `<option value="${esc(scale.id)}">${esc(scale.title)} ${esc(scale.version)}</option>`).join('');
+        setScaleOptions(scales.data || []);
+        renderScaleCatalog(scales.data || []);
         renderSlots(slots.data || []);
         renderAppointments(appointments.data || []);
         renderContent(content.data || []);
@@ -176,6 +214,66 @@
         renderRightsAdmin(rights.data || []);
       } catch (error) { setStatus(error.message); }
     }
+
+    const scaleStateLabel = { draft: '草稿', approved: '已批准', revoked: '已撤销' };
+    const scalePopulationLabel = { primary: '小学', middle: '初中', high: '高中', mixed: '混合' };
+    const scaleLicenseLabel = { synthetic_only: '合成演示（不可用于生产）', missing_expiry: '缺少授权到期日', expired: '授权已到期', valid: '授权有效' };
+    function setScaleOptions(scales) {
+      $('#scale').innerHTML = scales.filter((scale) => scale.status === 'approved').map((scale) => `<option value="${esc(scale.id)}">${esc(scale.title)} ${esc(scale.version)}</option>`).join('');
+    }
+    function renderScaleCatalog(scales) {
+      $('#scaleCatalog').innerHTML = scales.length ? scales.map((scale) => {
+        const actions = currentRole === 'professional_lead' && scale.status === 'draft' ? `<button type="button" data-scale-id="${esc(scale.id)}" data-scale-action="approve">专业批准</button>` : currentRole === 'professional_lead' && scale.status === 'approved' ? `<button type="button" class="secondary" data-scale-id="${esc(scale.id)}" data-scale-action="revoke">撤销版本</button>` : '';
+        const expiry = scale.licenseExpiresAt ? ` · 到期 ${esc(formatWhen(scale.licenseExpiresAt))}` : '';
+        const dimensions = Array.isArray(scale.dimensions) && scale.dimensions.length ? ` · 维度：${esc(scale.dimensions.join('、'))}` : '';
+        return `<article class="metric"><b>${esc(scale.title)}</b> · ${esc(scale.version)}<br>${esc(scaleStateLabel[scale.status] || scale.status)} · ${esc(scalePopulationLabel[scale.population] || scale.population)} · ${esc(scale.minAge)}–${esc(scale.maxAge)} 岁<br><span class="muted">${esc(scale.code)} · ${esc(scaleLicenseLabel[scale.licenseState] || scale.licenseState || '授权状态待核验')}${expiry}${dimensions}</span>${actions ? `<br>${actions}` : ''}</article>`;
+      }).join('') : '<p class="muted">没有符合筛选条件的量表版本。</p>';
+      document.querySelectorAll('[data-scale-id]').forEach((button) => { button.onclick = () => updateScale(button.dataset.scaleId, button.dataset.scaleAction); });
+    }
+    async function loadScaleCatalog() {
+      const params = new URLSearchParams();
+      const fields = { status: 'scale-catalog-status', population: 'scale-catalog-population', minAge: 'scale-catalog-min-age', maxAge: 'scale-catalog-max-age' };
+      for (const [name, id] of Object.entries(fields)) { const value = $('#' + id).value; if (value) params.set(name, value); }
+      try {
+        const response = await fetch('/v1/admin/scales?' + params.toString(), { headers: { authorization: 'Bearer ' + token } });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '量表目录暂时不可用');
+        renderScaleCatalog(result.data || []);
+        $('#scaleCatalogStatus').textContent = `已读取 ${result.data?.length || 0} 个版本的治理元数据。`;
+      } catch (error) { $('#scaleCatalogStatus').textContent = error.message || '量表目录暂时不可用'; renderScaleCatalog([]); }
+    }
+    async function updateScale(scaleId, action) {
+      if (action === 'revoke') {
+        const reason = $('#scale-revoke-reason').value.trim();
+        if (!reason) { $('#scaleCatalogStatus').textContent = '撤销版本前请填写原因。'; return; }
+        if (!window.confirm('确认撤销该版本？历史答卷不会被改写，新任务将不能使用。')) return;
+      }
+      try {
+        const body = action === 'revoke' ? { reason: $('#scale-revoke-reason').value.trim() } : {};
+        const response = await fetch('/v1/scales/' + encodeURIComponent(scaleId) + '/' + (action === 'approve' ? 'approve' : 'revoke'), { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '量表版本操作失败');
+        $('#scaleCatalogStatus').textContent = action === 'approve' ? '版本已记录专业批准。' : '版本已撤销，新任务将不能使用。';
+        await load();
+      } catch (error) { $('#scaleCatalogStatus').textContent = error.message || '量表版本操作失败'; }
+    }
+    $('#scaleCatalogForm').onsubmit = async (event) => { event.preventDefault(); await loadScaleCatalog(); };
+    $('#scaleDraftForm').onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        const form = Object.fromEntries(new FormData(event.target));
+        let items;
+        let warningRule;
+        try { items = JSON.parse(form.itemsJson); } catch { throw new Error('题目 JSON 格式无效'); }
+        if (form.warningRuleJson.trim()) { try { warningRule = JSON.parse(form.warningRuleJson); } catch { throw new Error('预警规则 JSON 格式无效'); } }
+        const response = await fetch('/v1/scales', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ code: form.code, title: form.title, version: form.version, provenance: form.provenance, minAge: Number(form.minAge), maxAge: Number(form.maxAge), population: form.population, language: form.language, scoringVersion: form.scoringVersion, noticeVersion: form.noticeVersion, dimensions: form.dimensions.split(',').map((value) => value.trim()).filter(Boolean), licenseExpiresAt: form.licenseExpiresAt ? new Date(form.licenseExpiresAt).toISOString() : undefined, reviewEvidenceRef: form.reviewEvidenceRef || undefined, items, warningRule }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '量表版本草稿保存失败');
+        $('#scaleCatalogStatus').textContent = '量表版本草稿已保存；需由不同专业负责人审核。';
+        event.target.reset();
+        await load();
+      } catch (error) { $('#scaleCatalogStatus').textContent = error.message || '量表版本草稿保存失败'; }
+    };
 
     const appointmentStateLabel = { requested: '待确认', confirmed: '已确认', completed: '已完成', cancelled: '已取消', no_show: '未到访' };
     const formatWhen = (value) => { const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString() : '时间不可用'; };
@@ -561,7 +659,7 @@
 
     $('#logout').onclick = async () => {
       try { if (token) await fetch('/v1/auth/logout', { method: 'POST', headers: { authorization: 'Bearer ' + token } }); }
-      finally { token = ''; $('#dashboard').hidden = true; $('#login').reset(); $('#credentialStatus').textContent = '凭证只显示一次，请通过学校批准的线下渠道交付。'; $('#revokeStatus').textContent = '共享终端遗失或人员离岗时，可撤销活跃会话及未兑换凭证。'; setStatus('已退出'); }
+      finally { token = ''; currentRole = ''; $('#dashboard').hidden = true; $('#scaleDraftDetails').hidden = true; $('#login').reset(); $('#credentialStatus').textContent = '凭证只显示一次，请通过学校批准的线下渠道交付。'; $('#revokeStatus').textContent = '共享终端遗失或人员离岗时，可撤销活跃会话及未兑换凭证。'; setStatus('已退出'); }
     };
   </script>
 </body>

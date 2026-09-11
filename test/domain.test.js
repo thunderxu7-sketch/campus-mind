@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { approveFrequencyException, approveScale, beginAttempt, createCampaign, createScale, createSelfScreening, listAvailableScales, listMyTasks, publishCampaign, revokeScale, saveAnswers, updateCampaignState, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
+import { approveFrequencyException, approveScale, beginAttempt, createCampaign, createScale, createSelfScreening, listAvailableScales, listMyTasks, listScaleCatalog, publishCampaign, revokeScale, saveAnswers, updateCampaignState, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
 import { JsonStore } from '../dist/apps/api/src/domain/store.js';
 import { DEMO_IDS, seedDemoState } from '../dist/apps/api/src/domain/seed.js';
 
@@ -129,6 +129,32 @@ test('task availability and self-service catalog hide revoked or expired scales'
   assert.equal(expiredTasks[0].available, false);
   assert.equal(expiredTasks[0].availabilityReason, 'scale_unavailable');
   assert.deepEqual(await listAvailableScales(store, student), []);
+});
+
+test('scale catalog is metadata-only and supports governed suitability filters', async () => {
+  const state = seedDemoState();
+  state.scales.push({
+    ...state.scales[0],
+    id: 'scale-synthetic-primary-draft',
+    code: 'SYNTH-PRIMARY',
+    title: '合成小学支持草稿',
+    version: '0.1.0',
+    status: 'draft',
+    minAge: 9,
+    maxAge: 11,
+    population: 'primary',
+    items: [{ id: 'q1', prompt: '不应出现在目录卡片中的合成题', min: 0, max: 1, reverse: false, factor: 'support' }],
+  });
+  const store = new JsonStore({ initial: state });
+  const admin = authFor(store.snapshot(), 'user-admin-demo');
+  const catalog = await listScaleCatalog(store, admin);
+  assert.equal(catalog.length, 2);
+  assert.equal(Object.hasOwn(catalog[0], 'items'), false);
+  assert.equal(catalog.find((scale) => scale.id === DEMO_IDS.scale).licenseState, 'synthetic_only');
+  const primaryDraft = await listScaleCatalog(store, admin, { status: 'draft', population: 'primary', minAge: 10, maxAge: 11 });
+  assert.deepEqual(primaryDraft.map((scale) => scale.id), ['scale-synthetic-primary-draft']);
+  await assert.rejects(() => listScaleCatalog(store, admin, { status: 'published' }), (error) => error.code === 'SCALE_FILTER_INVALID');
+  await assert.rejects(() => listScaleCatalog(store, admin, { minAge: 19, maxAge: 6 }), (error) => error.code === 'SCALE_FILTER_INVALID');
 });
 
 test('revoking a scale blocks new use without changing historical identifiers', async () => {

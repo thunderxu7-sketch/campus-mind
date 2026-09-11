@@ -1646,11 +1646,36 @@ export async function listCampaigns(store: Store, auth: AuthenticatedUser): Prom
   return store.read((state) => state.campaigns.filter((campaign) => campaign.tenantId === auth.user.tenantId && (!auth.user.schoolId || campaign.schoolId === auth.user.schoolId)).map((campaign) => ({ id: campaign.id, name: campaign.name, purpose: campaign.purpose, state: campaign.state, academicYear: campaign.academicYear, opensAt: campaign.opensAt, closesAt: campaign.closesAt, participantCount: campaign.participantStudentIds.length })));
 }
 
-export async function listScaleCatalog(store: Store, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
+export interface ScaleCatalogFilters {
+  status?: ScaleVersion['status'];
+  population?: NonNullable<ScaleVersion['population']>;
+  minAge?: number;
+  maxAge?: number;
+}
+
+function validateScaleCatalogFilters(filters: ScaleCatalogFilters): void {
+  if (filters.status !== undefined && !['draft', 'approved', 'revoked'].includes(filters.status)) throw new DomainError('SCALE_FILTER_INVALID', '量表状态筛选条件无效');
+  if (filters.population !== undefined && !['primary', 'middle', 'high', 'mixed'].includes(filters.population)) throw new DomainError('SCALE_FILTER_INVALID', '量表学段筛选条件无效');
+  for (const age of [filters.minAge, filters.maxAge]) if (age !== undefined && (!Number.isInteger(age) || age < 6 || age > 19)) throw new DomainError('SCALE_FILTER_INVALID', '量表年龄筛选条件必须是 6–19 岁整数');
+  if (filters.minAge !== undefined && filters.maxAge !== undefined && filters.minAge > filters.maxAge) throw new DomainError('SCALE_FILTER_INVALID', '量表年龄筛选范围无效');
+}
+
+export async function listScaleCatalog(store: Store, auth: AuthenticatedUser, filters: ScaleCatalogFilters = {}): Promise<Array<Record<string, unknown>>> {
   if (!isProfessional(auth.user) && !can(auth.user, 'campaign:read')) throw forbidden();
+  validateScaleCatalogFilters(filters);
   return store.transaction((state) => {
-    const scales = state.scales.filter((scale) => scale.tenantId === auth.user.tenantId).map((scale) => ({ id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, status: scale.status, minAge: scale.minAge, maxAge: scale.maxAge, scoringVersion: scale.scoringVersion, dimensions: scale.dimensions ?? [], population: scale.population ?? 'mixed', language: scale.language ?? 'zh-CN', licenseExpiresAt: scale.licenseExpiresAt }));
-    audit(state, auth.user, 'scale.catalog_listed', 'scale_version', 'tenant', { count: scales.length }, 'scale:read');
+    const scales = state.scales.filter((scale) => {
+      if (scale.tenantId !== auth.user.tenantId) return false;
+      if (filters.status && scale.status !== filters.status) return false;
+      if (filters.population && (scale.population ?? 'mixed') !== filters.population) return false;
+      if (filters.minAge !== undefined && scale.maxAge < filters.minAge) return false;
+      if (filters.maxAge !== undefined && scale.minAge > filters.maxAge) return false;
+      return true;
+    }).map((scale) => {
+      const licenseState = scale.provenance === 'synthetic_only' ? 'synthetic_only' : !scale.licenseExpiresAt ? 'missing_expiry' : new Date(scale.licenseExpiresAt) <= new Date() ? 'expired' : 'valid';
+      return { id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, status: scale.status, minAge: scale.minAge, maxAge: scale.maxAge, scoringVersion: scale.scoringVersion, dimensions: scale.dimensions ?? [], population: scale.population ?? 'mixed', language: scale.language ?? 'zh-CN', licenseExpiresAt: scale.licenseExpiresAt, licenseState };
+    });
+    audit(state, auth.user, 'scale.catalog_listed', 'scale_version', 'tenant', { count: scales.length, status: filters.status ?? null, population: filters.population ?? null, minAge: filters.minAge ?? null, maxAge: filters.maxAge ?? null }, 'scale:read');
     return scales;
   });
 }

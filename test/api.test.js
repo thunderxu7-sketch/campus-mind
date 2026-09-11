@@ -72,6 +72,8 @@ test('health and browser surfaces expose safety headers', async () => {
   assert.match(adminHtml, /隐私保护统计/);
   assert.match(adminHtml, /复评例外审批/);
   assert.match(adminHtml, /人员信息导入预检/);
+  assert.match(adminHtml, /量表版本目录/);
+  assert.match(adminHtml, /新建量表版本草稿/);
 });
 
 test('state-changing requests reject an untrusted browser origin', async () => {
@@ -111,6 +113,19 @@ test('tenant scope rejects cross-school and cross-tenant identifiers', async () 
   const admin = await login('admin@campus-mind.demo');
   const campaign = await request('/v1/campaigns', { method: 'POST', headers: auth(admin), body: JSON.stringify({ schoolId: 'school-demo', name: '跨租户名单', purpose: 'screening', academicYear: '2026-2027', opensAt: new Date(Date.now() - 1_000).toISOString(), closesAt: new Date(Date.now() + 3_600_000).toISOString(), scaleVersionId: 'scale-synthetic-demo-v1', participantStudentIds: ['student-other'] }) });
   assert.equal(campaign.response.status, 403);
+});
+
+test('scale catalog filters return suitability metadata without question prompts', async () => {
+  const admin = await login('admin@campus-mind.demo');
+  const filtered = await request('/v1/admin/scales?status=approved&population=middle&minAge=14&maxAge=16', { headers: auth(admin) });
+  assert.equal(filtered.response.status, 200, JSON.stringify(filtered.body));
+  assert.equal(filtered.body.data.length, 1);
+  assert.equal(filtered.body.data[0].id, 'scale-synthetic-demo-v1');
+  assert.equal(filtered.body.data[0].licenseState, 'synthetic_only');
+  assert.equal(Object.hasOwn(filtered.body.data[0], 'items'), false);
+  const invalid = await request('/v1/admin/scales?status=published', { headers: auth(admin) });
+  assert.equal(invalid.response.status, 400);
+  assert.equal(invalid.body.error.code, 'SCALE_FILTER_INVALID');
 });
 
 test('admin MFA is enforced unless demo override is explicitly enabled', async () => {
