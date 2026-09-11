@@ -48,6 +48,13 @@ test('self screening uses the same consent and academic-year frequency guard', a
   state.frequencyReservations = [];
   const store = new JsonStore({ initial: state });
   const auth = authFor(store.snapshot(), 'student-demo');
+  const previousAcademicYear = process.env.CAMPMIND_ACADEMIC_YEAR;
+  try {
+    process.env.CAMPMIND_ACADEMIC_YEAR = 'not-a-school-year';
+    await assert.rejects(() => createSelfScreening(store, auth, 'scale-synthetic-demo-v1'), (error) => error.code === 'ACADEMIC_YEAR_CONFIG_INVALID');
+  } finally {
+    if (previousAcademicYear === undefined) delete process.env.CAMPMIND_ACADEMIC_YEAR; else process.env.CAMPMIND_ACADEMIC_YEAR = previousAcademicYear;
+  }
   await assert.rejects(() => createSelfScreening(store, auth, 'scale-synthetic-demo-v1', '9999-10000'), (error) => error.code === 'ACADEMIC_YEAR_INVALID');
   const first = await createSelfScreening(store, auth, 'scale-synthetic-demo-v1');
   assert.equal(first.campaign.purpose, 'screening');

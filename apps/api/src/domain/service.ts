@@ -18,8 +18,11 @@ const validDate = (value: unknown): value is string => typeof value === 'string'
 const academicYearPattern = /^(\d{4})-(\d{4})$/;
 function currentAcademicYear(date = new Date()): string {
   const configured = process.env.CAMPMIND_ACADEMIC_YEAR?.trim();
-  const configuredMatch = configured?.match(academicYearPattern);
-  if (configuredMatch && Number(configuredMatch[2]) === Number(configuredMatch[1]) + 1) return configured!;
+  if (configured !== undefined) {
+    const configuredMatch = configured.match(academicYearPattern);
+    if (!configuredMatch || Number(configuredMatch[2]) !== Number(configuredMatch[1]) + 1) throw new DomainError('ACADEMIC_YEAR_CONFIG_INVALID', '服务器学年配置无效');
+    return configured;
+  }
   // Chinese school years normally begin in September.  Keep the fallback
   // server-derived so a student cannot pick an arbitrary year to bypass the
   // annual frequency reservation.
