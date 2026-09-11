@@ -24,6 +24,8 @@ export interface StoreOptions { filePath?: string; initial?: DatabaseState; obje
 export interface Store {
   transaction<T>(fn: (state: DatabaseState) => T | Promise<T>): Promise<T>;
   read<T>(fn: (state: DatabaseState) => T | Promise<T>): Promise<T>;
+  /** Adapter identity is explicit so production cannot accept an arbitrary in-memory substitute. */
+  readonly adapterKind?: 'json' | 'postgres';
   /** Private media/object storage boundary. Production must inject a managed private adapter. */
   readonly objectStore?: PrivateObjectStore;
 }
@@ -33,7 +35,7 @@ export interface Store {
  * silently writing psychological records to a JSON file is not an acceptable
  * fallback. */
 export function assertProductionStoreInjection(store?: Store): void {
-  if (process.env.NODE_ENV === 'production' && (!store || store instanceof JsonStore || !store.objectStore)) throw new Error('Production requires an injected PostgreSQL-backed store and private object-store adapter; JsonStore is reference-only');
+  if (process.env.NODE_ENV === 'production' && (!store || store instanceof JsonStore || store.adapterKind !== 'postgres' || !store.objectStore)) throw new Error('Production requires an injected PostgreSQL-backed store and private object-store adapter; JsonStore is reference-only');
 }
 
 /**
@@ -44,6 +46,7 @@ export class JsonStore implements Store {
   private state: DatabaseState;
   private lock: Promise<void> = Promise.resolve();
   private readonly filePath?: string;
+  readonly adapterKind = 'json' as const;
   readonly objectStore?: PrivateObjectStore;
 
   constructor(options: StoreOptions = {}) {
