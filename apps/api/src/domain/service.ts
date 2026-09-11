@@ -781,7 +781,7 @@ export async function approveClosure(store: Store, auth: AuthenticatedUser, case
     const requester = riskCase.closureRequestedBy;
     // Legacy snapshots may not have the requester marker.  Fail closed for
     // non-lead roles rather than inferring the actor from an arbitrary note.
-    if (auth.user.role !== 'professional_lead' && (!requester || requester === auth.user.id)) throw new DomainError('SEPARATION_OF_DUTIES_REQUIRED', '结案审批需要独立专业复核', 403);
+    if (requester === auth.user.id || (auth.user.role !== 'professional_lead' && !requester)) throw new DomainError('SEPARATION_OF_DUTIES_REQUIRED', '结案审批需要独立专业复核', 403);
     riskCase.state = 'closed'; riskCase.updatedAt = now(); audit(state, auth.user, 'risk.case_closed', 'risk_case', caseId, {}); return riskCase;
   });
 }
