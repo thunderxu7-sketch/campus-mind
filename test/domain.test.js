@@ -92,6 +92,11 @@ test('declined or completed assignments cannot be reopened after their session i
   const student = await store.read((state) => state.users.find((user) => user.id === DEMO_IDS.student));
   assert.ok(student);
   const auth = { user: student, session: { tokenHash: 'synthetic', userId: student.id, tenantId: student.tenantId, expiresAt: new Date(Date.now() + 60_000).toISOString(), createdAt: new Date().toISOString() } };
+  await store.transaction((state) => { state.students.find((candidate) => candidate.id === DEMO_IDS.student).age = 10; });
+  const ageRestrictedTasks = await listMyTasks(store, auth);
+  assert.equal(ageRestrictedTasks[0].available, false);
+  assert.equal(ageRestrictedTasks[0].availabilityReason, 'age_not_allowed');
+  await store.transaction((state) => { state.students.find((candidate) => candidate.id === DEMO_IDS.student).age = 15; });
   await store.transaction((state) => { state.assignments.find((assignment) => assignment.id === DEMO_IDS.assignment).status = 'declined'; });
   await assert.rejects(() => beginAttempt(store, auth, DEMO_IDS.assignment), (error) => error.code === 'ASSIGNMENT_NOT_AVAILABLE');
   await store.transaction((state) => {
