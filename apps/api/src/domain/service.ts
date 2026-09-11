@@ -434,17 +434,19 @@ export async function approveScale(store: Store, auth: AuthenticatedUser, scaleI
 
 export async function createCampaign(store: Store, auth: AuthenticatedUser, input: { schoolId: string; name: string; purpose: Campaign['purpose']; academicYear: string; opensAt: string; closesAt: string; scaleVersionId: string; participantStudentIds: string[] }): Promise<Campaign> {
   requirePermission(auth.user, 'campaign:write');
+  const name = typeof input.name === 'string' ? input.name.trim() : '';
   const academicYear = typeof input.academicYear === 'string' ? input.academicYear.trim() : '';
   if (!validAcademicYear(academicYear)) throw new DomainError('CAMPAIGN_INVALID', '学年必须是连续的 YYYY-YYYY 格式');
+  if (!name || name.length > 200 || /[\0\r\n]/.test(name) || !Array.isArray(input.participantStudentIds) || input.participantStudentIds.length > 10_000 || input.participantStudentIds.some((studentId) => typeof studentId !== 'string' || !studentId.trim() || studentId.length > 200 || /[\0\r\n]/.test(studentId))) throw new DomainError('CAMPAIGN_INVALID', '任务名称或名单范围无效');
   return store.transaction((state) => {
     const school = state.schools.find((candidate) => candidate.id === input.schoolId && sameTenant(candidate, auth.user.tenantId));
     const scale = state.scales.find((candidate) => candidate.id === input.scaleVersionId && sameTenant(candidate, auth.user.tenantId));
     if (!school || !scale) throw notFound();
     if (auth.user.schoolId && auth.user.schoolId !== school.id) throw forbidden();
-    if (!['screening', 'survey'].includes(input.purpose) || typeof input.name !== 'string' || !input.name.trim() || !validDate(input.opensAt) || !validDate(input.closesAt) || new Date(input.opensAt) >= new Date(input.closesAt) || !Array.isArray(input.participantStudentIds)) throw new DomainError('CAMPAIGN_INVALID', '任务名称、用途或时间窗无效');
-    const uniqueStudents = [...new Set(input.participantStudentIds)];
+    if (!['screening', 'survey'].includes(input.purpose) || !validDate(input.opensAt) || !validDate(input.closesAt) || new Date(input.opensAt) >= new Date(input.closesAt)) throw new DomainError('CAMPAIGN_INVALID', '任务名称、用途或时间窗无效');
+    const uniqueStudents = [...new Set(input.participantStudentIds.map((studentId) => studentId.trim()))];
     if (uniqueStudents.some((studentId) => !state.students.some((student) => student.id === studentId && student.schoolId === school.id && sameTenant(student, auth.user.tenantId) && student.active))) throw forbidden();
-    const campaign: Campaign = { id: id(), tenantId: auth.user.tenantId, schoolId: school.id, name: input.name.trim(), purpose: input.purpose, state: 'draft', academicYear, opensAt: input.opensAt, closesAt: input.closesAt, scaleVersionId: scale.id, reportVisibility: 'professional_review', participantStudentIds: uniqueStudents, createdBy: auth.user.id, createdAt: now() };
+    const campaign: Campaign = { id: id(), tenantId: auth.user.tenantId, schoolId: school.id, name, purpose: input.purpose, state: 'draft', academicYear, opensAt: input.opensAt, closesAt: input.closesAt, scaleVersionId: scale.id, reportVisibility: 'professional_review', participantStudentIds: uniqueStudents, createdBy: auth.user.id, createdAt: now() };
     state.campaigns.push(campaign); audit(state, auth.user, 'campaign.created', 'campaign', campaign.id, { participantCount: uniqueStudents.length }); return campaign;
   });
 }
