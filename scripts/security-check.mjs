@@ -30,6 +30,8 @@ const crypto = readFileSync(join(root, 'apps/api/src/domain/crypto.ts'), 'utf8')
 const store = readFileSync(join(root, 'apps/api/src/domain/store.ts'), 'utf8');
 const objectStore = readFileSync(join(root, 'apps/api/src/infra/object-store.ts'), 'utf8');
 const scoring = readFileSync(join(root, 'apps/api/src/domain/scoring.ts'), 'utf8');
+const adminWeb = readFileSync(join(root, 'apps/admin-web/index.html'), 'utf8');
+const studentWeb = readFileSync(join(root, 'apps/student-web/index.html'), 'utf8');
 const requiredSnippets = [
   [crypto, "NODE_ENV !== 'production'", 'production key guard'],
   [crypto, 'CAMPMIND_MASTER_KEY', 'production key source'],
@@ -45,6 +47,10 @@ const requiredSnippets = [
   [scoring, 'SYNTHETIC_SCALE_BLOCKED', 'synthetic scale production guard'],
   [main, 'Content-Security-Policy', 'CSP header'],
   [main, 'MAX_BODY_BYTES', 'request body bound'],
+  [adminWeb, 'function clearDashboard()', 'admin shared-terminal cleanup'],
+  [adminWeb, "document.querySelectorAll('#dashboard form')", 'admin form cleanup'],
+  [studentWeb, "$('#reportList').replaceChildren()", 'student report cleanup'],
+  [studentWeb, "$('#rightsList').replaceChildren()", 'student rights cleanup'],
 ];
 for (const [text, snippet, label] of requiredSnippets) if (!text.includes(snippet)) suspicious.push(`missing ${label}`);
 const gitignore = readFileSync(join(root, '.gitignore'), 'utf8');

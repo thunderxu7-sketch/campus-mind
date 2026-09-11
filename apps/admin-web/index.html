@@ -169,9 +169,28 @@
   <script>
     let token = '';
     let currentRole = '';
+    let pendingImport = null;
     const $ = (selector) => document.querySelector(selector);
     const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     const setStatus = (message) => { $('#status').textContent = message; };
+
+    // Shared workstations must not briefly expose the previous operator's
+    // records while the next account is loading. Clear both rendered results
+    // and in-progress form/import state before hiding the dashboard.
+    function clearDashboard() {
+      pendingImport = null;
+      const empty = ['metrics', 'campaigns', 'scaleCatalog', 'importPreview', 'campaignProgress', 'analyticsView', 'slotList', 'appointmentList', 'contentList', 'caseList', 'professionalReports', 'rightsAdminList', 'operationsView'];
+      for (const id of empty) document.getElementById(id)?.replaceChildren();
+      for (const id of ['campaignStatus', 'scaleCatalogStatus', 'importStatus', 'frequencyStatus', 'analyticsStatus', 'contentStatus', 'archiveStatus', 'operationsStatus']) {
+        const node = document.getElementById(id); if (node) node.textContent = '';
+      }
+      const archive = document.getElementById('archiveView');
+      if (archive) { archive.textContent = ''; archive.hidden = true; }
+      for (const form of document.querySelectorAll('#dashboard form')) form.reset();
+      const commit = document.getElementById('importCommit'); if (commit) commit.disabled = true;
+      $('#credentialStatus').textContent = '凭证只显示一次，请通过学校批准的线下渠道交付。';
+      $('#revokeStatus').textContent = '共享终端遗失或人员离岗时，可撤销活跃会话及未兑换凭证。';
+    }
 
     $('#login').addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -180,6 +199,7 @@
         const response = await fetch('/v1/auth/login', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body) });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error?.message || '登录失败');
+        clearDashboard();
         token = payload.data.token;
         currentRole = payload.data.user.role || '';
         $('#scaleDraftDetails').hidden = currentRole !== 'professional_lead';
@@ -277,7 +297,6 @@
 
     const appointmentStateLabel = { requested: '待确认', confirmed: '已确认', completed: '已完成', cancelled: '已取消', no_show: '未到访' };
     const formatWhen = (value) => { const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString() : '时间不可用'; };
-    let pendingImport = null;
     function parseCsvClient(text) {
       const source = text.replace(/^\uFEFF/, '');
       if (new Blob([source]).size > 2_000_000) throw new Error('CSV 文件大小超出限制');
@@ -659,7 +678,7 @@
 
     $('#logout').onclick = async () => {
       try { if (token) await fetch('/v1/auth/logout', { method: 'POST', headers: { authorization: 'Bearer ' + token } }); }
-      finally { token = ''; currentRole = ''; $('#dashboard').hidden = true; $('#scaleDraftDetails').hidden = true; $('#login').reset(); $('#credentialStatus').textContent = '凭证只显示一次，请通过学校批准的线下渠道交付。'; $('#revokeStatus').textContent = '共享终端遗失或人员离岗时，可撤销活跃会话及未兑换凭证。'; setStatus('已退出'); }
+      finally { token = ''; currentRole = ''; clearDashboard(); $('#dashboard').hidden = true; $('#scaleDraftDetails').hidden = true; $('#login').reset(); setStatus('已退出'); }
     };
   </script>
 </body>
