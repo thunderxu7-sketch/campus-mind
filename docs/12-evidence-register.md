@@ -15,7 +15,7 @@
 
 | 证据 ID | 覆盖范围 | 可复现入口 | 当前状态 |
 |---|---|---|---|
-| E-REF-TEST | API、权限、同意、频次、危机闭环、媒体、会话撤销/过期、审计、字段/对象密钥轮换和登录限流 | `npm test`（46 项 Node 测试） | `verified` |
+| E-REF-TEST | API、权限、同意、频次及答题窗口复核、危机闭环、媒体、会话撤销/过期、审计、字段/对象密钥轮换、登录限流、导出用途/水印和授权到期阻断 | `npm test`（46 项 Node 测试） | `verified` |
 | E-REF-SEC | 凭据模式、生产后端/演示 MFA、CSP、请求体和私有对象边界 | `npm run security:check` | `verified` |
 | E-REF-PLAN | 48 项任务、依赖 DAG、生成任务清单同步 | `python3 scripts/check_plan.py` | `verified` |
 | E-PG-MIGRATION | 36 张表、36 个 `FORCE RLS`、36 个策略、关键跨租户外键、应用角色无 `SUPERUSER/BYPASSRLS`，合成双租户串引用被拒绝，审计 UPDATE/DELETE 触发追加写保护 | CI PostgreSQL 16 步骤；本地 `infra/migrations/001_initial.sql` | `verified`（参考迁移） |

@@ -74,6 +74,11 @@ test('closing an unfinished campaign expires drafts and releases unused frequenc
   const admin = authFor(store.snapshot(), 'user-admin-demo');
   const campaign = await createCampaign(store, admin, { schoolId: 'school-demo', name: '合成未完成任务', purpose: 'screening', academicYear: '2026-2027', opensAt: new Date(Date.now() - 1_000).toISOString(), closesAt: new Date(Date.now() + 3_600_000).toISOString(), scaleVersionId: 'scale-synthetic-demo-v1', participantStudentIds: ['student-demo'] });
   await publishCampaign(store, admin, campaign.id);
+  const student = authFor(store.snapshot(), 'student-demo');
+  const started = await beginAttempt(store, student, store.snapshot().assignments.find((assignment) => assignment.campaignId === campaign.id).id);
+  await saveAnswers(store, student, started.attempt.id, { expectedRevision: 0, answers: { q1: 1 } });
+  await store.transaction((state) => { state.campaigns.find((candidate) => candidate.id === campaign.id).closesAt = '2020-01-01T00:00:00.000Z'; });
+  await assert.rejects(() => saveAnswers(store, student, started.attempt.id, { expectedRevision: 1, answers: { q1: 0 } }), (error) => error.code === 'CAMPAIGN_CLOSED');
   await updateCampaignState(store, admin, campaign.id, 'closed');
   assert.equal(store.snapshot().assignments[0].status, 'expired');
   assert.equal(store.snapshot().frequencyReservations[0].status, 'released');
@@ -86,6 +91,11 @@ test('declined or completed assignments cannot be reopened after their session i
   const auth = { user: student, session: { tokenHash: 'synthetic', userId: student.id, tenantId: student.tenantId, expiresAt: new Date(Date.now() + 60_000).toISOString(), createdAt: new Date().toISOString() } };
   await store.transaction((state) => { state.assignments.find((assignment) => assignment.id === DEMO_IDS.assignment).status = 'declined'; });
   await assert.rejects(() => beginAttempt(store, auth, DEMO_IDS.assignment), (error) => error.code === 'ASSIGNMENT_NOT_AVAILABLE');
+  await store.transaction((state) => {
+    state.assignments.find((assignment) => assignment.id === DEMO_IDS.assignment).status = 'assigned';
+    state.frequencyReservations.find((reservation) => reservation.id === 'frequency-demo').status = 'released';
+  });
+  await assert.rejects(() => beginAttempt(store, auth, DEMO_IDS.assignment), (error) => error.code === 'FREQUENCY_REVIEW_REQUIRED');
 });
 
 test('revoking a scale blocks new use without changing historical identifiers', async () => {

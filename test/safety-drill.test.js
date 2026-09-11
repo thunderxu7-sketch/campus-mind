@@ -38,6 +38,7 @@ test('outbox failures leave a redacted delivery attempt and a retryable dead let
   assert.equal(state.outboxEvents.find((event) => event.id === 'broken-scoring-event').status, 'dead_letter');
   assert.equal(state.deliveryAttempts.find((attempt) => attempt.outboxEventId === 'broken-scoring-event').status, 'failed');
   assert.match(state.deliveryAttempts.find((attempt) => attempt.outboxEventId === 'broken-scoring-event').errorCode, /^[A-Z0-9_:-]+$/);
+  assert.doesNotMatch(state.deliveryAttempts.find((attempt) => attempt.outboxEventId === 'broken-scoring-event').errorCode, /missing-attempt/);
 });
 
 test('delete rights workflow removes sensitive derivatives and leaves a minimal tombstone', async () => {
@@ -48,7 +49,7 @@ test('delete rights workflow removes sensitive derivatives and leaves a minimal 
     state.studentAccessCredentials.push({ id: 'delete-credential-drill', tenantId: 'tenant-demo', studentId: 'student-demo', codeHash: 'synthetic-code-hash', expiresAt: new Date(Date.now() + 60_000).toISOString(), issuedBy: 'user-admin-demo', createdAt: new Date().toISOString() });
     state.importBatches.push({ id: 'expired-import-drill', tenantId: 'tenant-demo', schoolId: 'school-demo', createdBy: 'user-admin-demo', filename: 'synthetic.csv', status: 'previewed', mappingVersion: 1, rowCount: 1, validRowCount: 1, errorCount: 0, previewHash: 'synthetic-hash', createdAt: '2020-01-01T00:00:00.000Z' });
     state.importRows.push({ id: 'expired-import-row-drill', tenantId: 'tenant-demo', batchId: 'expired-import-drill', rowNumber: 1, status: 'valid' });
-    state.exportJobs.push({ id: 'student-export-drill', tenantId: 'tenant-demo', requestedBy: 'student-demo', kind: 'report', studentId: 'student-demo', status: 'ready', expiresAt: new Date(Date.now() + 60_000).toISOString(), payloadCiphertext: 'synthetic-ciphertext', createdAt: new Date().toISOString() });
+    state.exportJobs.push({ id: 'student-export-drill', tenantId: 'tenant-demo', requestedBy: 'student-demo', purpose: 'synthetic_delete_drill', kind: 'report', studentId: 'student-demo', status: 'ready', expiresAt: new Date(Date.now() + 60_000).toISOString(), payloadCiphertext: 'synthetic-ciphertext', createdAt: new Date().toISOString() });
     state.attempts.push({ id: 'delete-attempt-drill', tenantId: 'tenant-demo', assignmentId: 'assignment-demo', studentId: 'student-demo', scaleVersionId: 'scale-synthetic-demo-v1', state: 'scoring_pending', currentRevision: 1, startedAt: new Date().toISOString(), submissionId: 'delete-submission-drill' });
     state.answerRevisions.push({ id: 'delete-revision-drill', tenantId: 'tenant-demo', attemptId: 'delete-attempt-drill', revision: 1, answersCiphertext: 'synthetic-ciphertext', savedAt: new Date().toISOString(), actorId: 'student-demo' });
     state.submissions.push({ id: 'delete-submission-drill', tenantId: 'tenant-demo', attemptId: 'delete-attempt-drill', answerRevisionId: 'delete-revision-drill', idempotencyKey: 'delete-drill-key', contentHash: 'synthetic-hash', submittedAt: new Date().toISOString() });
@@ -88,7 +89,7 @@ test('delete rights workflow removes sensitive derivatives and leaves a minimal 
   const restoredState = store.snapshot();
   restoredState.students.find((student) => student.id === 'student-demo').active = true;
   restoredState.users.find((user) => user.id === 'student-demo').active = true;
-  restoredState.exportJobs.push({ id: 'expired-after-restore', tenantId: 'tenant-demo', requestedBy: 'student-demo', kind: 'report', studentId: 'student-demo', status: 'ready', expiresAt: '2020-01-01T00:00:00.000Z', payloadCiphertext: 'synthetic-ciphertext', createdAt: new Date().toISOString() });
+  restoredState.exportJobs.push({ id: 'expired-after-restore', tenantId: 'tenant-demo', requestedBy: 'student-demo', purpose: 'synthetic_restore_drill', kind: 'report', studentId: 'student-demo', status: 'ready', expiresAt: '2020-01-01T00:00:00.000Z', payloadCiphertext: 'synthetic-ciphertext', createdAt: new Date().toISOString() });
   const restored = new JsonStore({ initial: restoredState });
   const opsAuth = authFor(restored.snapshot(), 'user-ops-demo');
   const replay = await processRetention(restored, opsAuth, '2026-09-11T00:00:00.000Z');

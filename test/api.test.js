@@ -272,9 +272,18 @@ test('imports, governed schemas, aggregate analytics, exports and public content
   assert.equal(exportApprove.response.status, 200);
   assert.equal(Object.hasOwn(exportApprove.body.data, 'payloadCiphertext'), false);
   assert.equal(exportApprove.body.data.ready, true);
+  assert.equal(exportApprove.body.data.purpose, 'approved_aggregate_reporting');
   const exportDownload = await request(`/v1/exports/${exportRequest.body.data.id}`, { headers: auth(admin) });
   assert.equal(exportDownload.response.status, 200);
   assert.equal(exportDownload.body.data.suppressionThreshold, 10);
+  assert.equal(exportDownload.body.data.watermark.jobId, exportRequest.body.data.id);
+  assert.equal(exportDownload.body.data.watermark.approvedBy, 'user-professional-demo');
+
+  const selfApproval = await request('/v1/exports', { method: 'POST', headers: auth(professional), body: JSON.stringify({ kind: 'aggregate', purpose: 'synthetic_self_approval_check' }) });
+  assert.equal(selfApproval.response.status, 201);
+  const selfApproved = await request(`/v1/exports/${selfApproval.body.data.id}/approve`, { method: 'POST', headers: auth(professional), body: '{}' });
+  assert.equal(selfApproved.response.status, 403);
+  assert.equal(selfApproved.body.error.code, 'SEPARATION_OF_DUTIES_REQUIRED');
   const slot = await request('/v1/availability-slots', { method: 'POST', headers: auth(professional), body: JSON.stringify({ counselorId: 'user-counselor-demo', startsAt: new Date(Date.now() + 3_600_000).toISOString(), endsAt: new Date(Date.now() + 7_200_000).toISOString(), room: '合成咨询室' }) });
   assert.equal(slot.response.status, 201);
   const roomConflict = await request('/v1/availability-slots', { method: 'POST', headers: auth(professional), body: JSON.stringify({ counselorId: 'user-professional-demo', startsAt: new Date(Date.now() + 4_000_000).toISOString(), endsAt: new Date(Date.now() + 6_000_000).toISOString(), room: '合成咨询室' }) });
@@ -421,6 +430,9 @@ test('workflow inputs reject invalid enums, dates and governed field shapes', as
   const invalidExport = await request('/v1/exports', { method: 'POST', headers: auth(admin), body: JSON.stringify({ kind: 'raw_answers' }) });
   assert.equal(invalidExport.response.status, 400);
   assert.equal(invalidExport.body.error.code, 'EXPORT_KIND_INVALID');
+  const invalidExportPurpose = await request('/v1/exports', { method: 'POST', headers: auth(admin), body: JSON.stringify({ kind: 'aggregate', purpose: { raw: 'not-a-string' } }) });
+  assert.equal(invalidExportPurpose.response.status, 400);
+  assert.equal(invalidExportPurpose.body.error.code, 'EXPORT_PURPOSE_INVALID');
   const operations = await request('/v1/admin/operations/status', { headers: auth(opsToken) });
   assert.equal(operations.response.status, 200);
   assert.equal(Object.hasOwn(operations.body.data, 'riskSignals'), false);

@@ -34,6 +34,12 @@ export function assertUsableScale(scale: ScaleVersion, now = new Date()): void {
   if (scale.provenance === 'synthetic_only' && process.env.NODE_ENV === 'production') {
     throw new DomainError('SYNTHETIC_SCALE_BLOCKED', '演示量表不能用于生产测评');
   }
+  if (scale.provenance === 'licensed' && !scale.licenseExpiresAt) {
+    throw new DomainError('LICENSE_EXPIRY_REQUIRED', '授权量表必须登记明确的授权到期时间');
+  }
+  if (scale.licenseExpiresAt && Number.isNaN(new Date(scale.licenseExpiresAt).getTime())) {
+    throw new DomainError('LICENSE_EXPIRY_INVALID', '量表授权到期时间无效');
+  }
   if (scale.licenseExpiresAt && new Date(scale.licenseExpiresAt) <= now) {
     throw new DomainError('LICENSE_EXPIRED', '量表授权已到期，不能开始新的测评');
   }

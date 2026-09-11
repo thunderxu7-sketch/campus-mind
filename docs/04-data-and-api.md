@@ -85,10 +85,10 @@ erDiagram
 | `POST /v1/campaigns/{id}/frequency-exceptions` | 必要复评审批 | 专业负责人记录用途/依据；例外与普通学年场次分开留痕 |
 | `POST /v1/scales/{id}/revoke` | 撤销量表版本 | 只阻断新使用，不改写历史答卷和计分；必须记录原因 |
 | `GET /v1/me/tasks` | 当前学生任务 | 仅自己，返回参与状态与可用操作 |
-| `POST /v1/me/tasks/{id}/attempts` | 开始作答 | 同意/适龄/频次/任务时窗原子验证 |
+| `POST /v1/me/tasks/{id}/attempts` | 开始作答 | 同意/适龄/频次/任务时窗原子验证；已释放场次不能靠旧 assignment 重开 |
 | `GET /v1/attempts/{id}` | 恢复草稿 | 仅本人读取服务端已确认的答案与 revision；已提交/关闭答题不可恢复 |
-| `PUT /v1/attempts/{id}/answers` | 保存答案 | `expectedRevision`、题目白名单、服务端持久化确认 |
-| `POST /v1/attempts/{id}/submit` | 提交 | 幂等键、内容 hash、事务快照与 outbox，不再修改 |
+| `PUT /v1/attempts/{id}/answers` | 保存答案 | `expectedRevision`、题目白名单、服务端持久化确认；每次写入重新检查任务窗口/场次 |
+| `POST /v1/attempts/{id}/submit` | 提交 | 幂等键、内容 hash、事务快照与 outbox，不再修改；提交前再次检查窗口/场次 |
 | `GET /v1/reports/{id}`、`POST /v1/reports/{id}/release` | 查看/发布报告 | 字段权限、专业审核及读者范围；下载单独鉴权 |
 | `GET /v1/students/{id}/archive?purpose=...` | 个案级心理档案 | 仅同租户且在校/个案授权范围内的专业人员；用途必须是批准的 `case_review`、`report_review` 或 `support_follow_up` 并写入审计；班主任/运维拒绝 |
 | `POST /v1/risk-signals` | 主动求助/手工线索 | 合法主体、最小内容、加急独立持久化与通知 |
@@ -96,13 +96,13 @@ erDiagram
 | `POST /v1/cases/{id}/follow-ups` | 支持与随访 | 个案范围、记录版本、到期提醒 |
 | `POST /v1/cases/{id}/closure-requests`、`POST /v1/cases/{id}/closure-approvals` | 申请/审批结案 | 独立专业复核、证据、拒绝自动结案 |
 | `GET /v1/analytics/summary` | 聚合指标 | 固定维度、小样本/互补抑制、查询预算、不支持任意 SQL |
-| `POST /v1/exports`、`GET /v1/exports/{id}/download` | 导出 | 明确目的/字段/审批，到期与授权实时校验 |
+| `POST /v1/exports`、`GET /v1/exports/{id}/download` | 导出 | 记录有限用途、范围与独立审批；受控产物带 job/purpose/时间水印，到期与授权实时校验 |
 | `POST /v1/appointments` | 咨询预约 | M5；资源排他、幂等、资质与可预约窗口 |
 | `POST /v1/content/{id}/publish` | 教育内容发布 | M5；专业审核、适龄、版权证明 |
 | `POST /v1/content/{id}/retire` | 教育内容下架 | 仅专业审批权限；立即从公开列表移除并使关联媒体 URL 不再可用，保留审计历史 |
 | `POST /v1/media-assets`、`GET /v1/content/public/{assetId}/media` | 媒体上传与公开播放 | 仅允许批准类型/大小；签名、脚本特征和哈希检查；媒体正文写入私有对象存储并只在已审核内容关联时公开读取；生产适配器必须隔离租户与 KMS 密钥 |
 
-建议错误码：`CONSENT_REQUIRED`、`AGE_REVIEW_REQUIRED`、`FREQUENCY_REVIEW_REQUIRED`、`CAMPAIGN_CLOSED`、`LICENSE_UNAVAILABLE`、`REVISION_CONFLICT`、`IDEMPOTENCY_CONFLICT`、`PROFESSIONAL_REVIEW_REQUIRED`、`SLOT_UNAVAILABLE`、`EXPORT_REVOKED`。敏感权限错误不返回其他学生信息。
+建议错误码：`CONSENT_REQUIRED`、`AGE_REVIEW_REQUIRED`、`FREQUENCY_REVIEW_REQUIRED`、`CAMPAIGN_CLOSED`、`LICENSE_UNAVAILABLE`、`LICENSE_EXPIRY_REQUIRED`、`LICENSE_EXPIRY_INVALID`、`LICENSE_EXPIRED`、`REVISION_CONFLICT`、`IDEMPOTENCY_CONFLICT`、`PROFESSIONAL_REVIEW_REQUIRED`、`SLOT_UNAVAILABLE`、`EXPORT_REVOKED`。敏感权限错误不返回其他学生信息。
 
 ## 5. 事件契约
 

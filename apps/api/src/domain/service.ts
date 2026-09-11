@@ -306,6 +306,9 @@ export async function approveScale(store: Store, auth: AuthenticatedUser, scaleI
     if (scale.status === 'approved') throw new DomainError('SCALE_ALREADY_APPROVED', '量表版本已经通过专业审定');
     if (scale.createdBy && scale.createdBy === auth.user.id) throw new DomainError('SEPARATION_OF_DUTIES_REQUIRED', '量表作者不能审批自己的版本');
     if (scale.provenance === 'licensed' && !scale.reviewEvidenceRef) throw new DomainError('LICENSE_EVIDENCE_REQUIRED', '授权量表需要专业审定证据引用');
+    if (scale.provenance === 'licensed' && !scale.licenseExpiresAt) throw new DomainError('LICENSE_EXPIRY_REQUIRED', '授权量表必须登记明确的授权到期时间');
+    if (scale.licenseExpiresAt && Number.isNaN(new Date(scale.licenseExpiresAt).getTime())) throw new DomainError('LICENSE_EXPIRY_INVALID', '量表授权到期时间无效');
+    if (scale.licenseExpiresAt && new Date(scale.licenseExpiresAt) <= new Date()) throw new DomainError('LICENSE_EXPIRED', '量表授权已到期，不能通过专业审定');
     assertUsableScale({ ...scale, status: 'approved' });
     scale.status = 'approved'; scale.approvedBy = auth.user.id; scale.approvedAt = now();
     audit(state, auth.user, 'scale.approved', 'scale_version', scale.id, { version: scale.version });
@@ -405,6 +408,8 @@ export async function beginAttempt(store: Store, auth: AuthenticatedUser, assign
     if (!activeConsent(state, student.id, 'assessment', auth.user.tenantId)) throw new DomainError('CONSENT_REQUIRED', '需要有效的测评参与记录');
     if (!ageAllowed(student, scale)) throw new DomainError('AGE_REVIEW_REQUIRED', '年龄不在该方案适用范围');
     if (!['assigned', 'started'].includes(assignment.status)) throw new DomainError('ASSIGNMENT_NOT_AVAILABLE', '该任务已结束或不再接受答题', 409);
+    const reservation = state.frequencyReservations.find((candidate) => candidate.id === assignment.frequencyReservationId && candidate.tenantId === auth.user.tenantId);
+    if (!reservation || !['reserved', 'exception'].includes(reservation.status)) throw new DomainError('FREQUENCY_REVIEW_REQUIRED', '该测评场次已释放或已被占用', 409);
     const current = state.attempts.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.assignmentId === assignment.id);
     if (current) return { attempt: current, scale };
     const attempt: Attempt = { id: id(), tenantId: auth.user.tenantId, assignmentId: assignment.id, studentId: student.id, scaleVersionId: scale.id, state: 'in_progress', currentRevision: 0, startedAt: now() };
@@ -420,6 +425,8 @@ export async function getAttempt(store: Store, auth: AuthenticatedUser, attemptI
     const attempt = state.attempts.find((candidate) => candidate.id === attemptId && sameTenant(candidate, auth.user.tenantId) && candidate.studentId === auth.user.id);
     if (!attempt) throw notFound();
     if (attempt.state !== 'in_progress') throw new DomainError('ATTEMPT_NOT_RESUMABLE', '该答题已提交或已关闭', 409);
+    assertAttemptWritable(state, attempt);
+    if (!activeConsent(state, attempt.studentId, 'assessment', auth.user.tenantId)) throw new DomainError('CONSENT_REQUIRED', '需要有效的测评参与记录');
     const revision = state.answerRevisions.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.attemptId === attempt.id && candidate.revision === attempt.currentRevision);
     const answers = revision ? decrypt<Record<string, unknown>>(revision.answersCiphertext) : {};
     audit(state, auth.user, 'attempt.draft_read', 'attempt', attempt.id, { revision: attempt.currentRevision }, 'assessment');
@@ -433,6 +440,24 @@ function answersFrom(state: DatabaseState, attempt: Attempt): Record<string, unk
   return decrypt<Record<string, unknown>>(revision.answersCiphertext);
 }
 
+/** Re-check the server-side task window and frequency reservation on every
+ * draft mutation, not only when the student first opens a task. A campaign
+ * may be paused/closed, a reservation may be released, or consent may be
+ * withdrawn while a browser tab is still open. */
+function assertAttemptWritable(state: DatabaseState, attempt: Attempt): void {
+  const assignment = state.assignments.find((candidate) => candidate.tenantId === attempt.tenantId && candidate.id === attempt.assignmentId);
+  const campaign = assignment && state.campaigns.find((candidate) => candidate.tenantId === attempt.tenantId && candidate.id === assignment.campaignId);
+  const reservation = assignment && state.frequencyReservations.find((candidate) => candidate.tenantId === attempt.tenantId && candidate.id === assignment.frequencyReservationId);
+  if (!assignment || !campaign) throw notFound();
+  if (!['open', 'scheduled'].includes(campaign.state) || !validDate(campaign.opensAt) || !validDate(campaign.closesAt) || new Date(campaign.opensAt) > new Date() || new Date(campaign.closesAt) <= new Date()) {
+    attempt.state = 'expired';
+    if (['assigned', 'started'].includes(assignment.status)) assignment.status = 'expired';
+    releaseUnusedCampaignReservations(state, attempt.tenantId, campaign.id);
+    throw new DomainError('CAMPAIGN_CLOSED', '任务当前不在开放时间', 409);
+  }
+  if (!reservation || !['reserved', 'exception'].includes(reservation.status)) throw new DomainError('FREQUENCY_REVIEW_REQUIRED', '该测评场次已释放或已被占用', 409);
+}
+
 export async function saveAnswers(store: Store, auth: AuthenticatedUser, attemptId: string, input: { expectedRevision: number; answers: Record<string, unknown> }): Promise<{ revision: number; savedAt: string }> {
   requirePermission(auth.user, 'self:assessment');
   if (!isStudent(auth.user)) throw forbidden();
@@ -441,6 +466,7 @@ export async function saveAnswers(store: Store, auth: AuthenticatedUser, attempt
     const attempt = state.attempts.find((candidate) => candidate.id === attemptId && sameTenant(candidate, auth.user.tenantId) && candidate.studentId === auth.user.id);
     if (!attempt || attempt.state !== 'in_progress') throw notFound();
     if (!activeConsent(state, attempt.studentId, 'assessment', auth.user.tenantId)) throw new DomainError('CONSENT_REQUIRED', '需要有效的测评参与记录');
+    assertAttemptWritable(state, attempt);
     if (attempt.currentRevision !== input.expectedRevision) throw new DomainError('REVISION_CONFLICT', '答题内容已在其他窗口更新', 409, { currentRevision: attempt.currentRevision });
     const scale = state.scales.find((candidate) => candidate.id === attempt.scaleVersionId && sameTenant(candidate, auth.user.tenantId));
     if (!scale) throw notFound();
@@ -465,6 +491,8 @@ export async function submitAttempt(store: Store, auth: AuthenticatedUser, attem
       if (existing.idempotencyKey !== idempotencyKey) throw new DomainError('IDEMPOTENCY_CONFLICT', '该答卷已经提交', 409);
       return { submissionId: existing.id, state: attempt.state, scoreRunId: state.scoreRuns.find((run) => run.tenantId === auth.user.tenantId && run.submissionId === existing.id)?.id };
     }
+    if (attempt.state !== 'in_progress') throw new DomainError('ATTEMPT_NOT_SUBMITTABLE', '该答题已提交或已关闭', 409);
+    assertAttemptWritable(state, attempt);
     const answers = answersFrom(state, attempt);
     const scale = state.scales.find((candidate) => candidate.id === attempt.scaleVersionId && sameTenant(candidate, auth.user.tenantId));
     if (!scale) throw notFound();
@@ -499,7 +527,11 @@ export async function drainOutbox(store: Store, limit = 50): Promise<{ processed
       await store.transaction((state) => {
         const current = state.outboxEvents.find((candidate) => candidate.id === event.id);
         if (!current) return;
-        const safeErrorCode = (error instanceof Error ? error.message : 'OUTBOX_PROCESSING_FAILED').replace(/[^A-Z0-9_:-]/gi, '_').slice(0, 64) || 'OUTBOX_PROCESSING_FAILED';
+        // Only persist a machine-readable error code.  Copying an arbitrary
+        // exception message into delivery metadata could leak a decrypted
+        // value if a future handler includes request data in its error.
+        const rawErrorCode = error instanceof Error ? error.message : '';
+        const safeErrorCode = /^[A-Z][A-Z0-9_:-]{0,63}$/.test(rawErrorCode) ? rawErrorCode : 'OUTBOX_PROCESSING_FAILED';
         state.deliveryAttempts.push({ id: id(), tenantId: current.tenantId, outboxEventId: current.id, channel: 'in_app', status: 'failed', attemptedAt: now(), errorCode: safeErrorCode });
         current.attempts += 1; current.status = current.attempts >= 5 ? 'dead_letter' : 'pending'; current.availableAt = new Date(Date.now() + Math.min(60_000, 2 ** current.attempts * 1000)).toISOString();
       });
@@ -956,10 +988,14 @@ function aggregatePayload(state: DatabaseState, tenantId: string, schoolId?: str
   return { studentCount: students.length, assignmentCount: assignments.length, completedCount: assignments.filter((assignment) => assignment.status === 'completed').length, openCaseCount: suppress(cases.length), suppressionThreshold: 10, generatedAt: now() };
 }
 
-export async function requestExport(store: Store, auth: AuthenticatedUser, input: { kind: ExportJob['kind']; studentId?: string }): Promise<ExportJob> {
+export async function requestExport(store: Store, auth: AuthenticatedUser, input: { kind: ExportJob['kind']; studentId?: string; purpose?: string }): Promise<ExportJob> {
   requirePermission(auth.user, 'export:request');
   if (!['aggregate', 'report'].includes(input.kind)) throw new DomainError('EXPORT_KIND_INVALID', '导出类型无效');
   if (input.kind === 'report' && !isProfessional(auth.user)) throw forbidden();
+  const defaultPurpose = input.kind === 'aggregate' ? 'approved_aggregate_reporting' : 'approved_professional_report';
+  if (input.purpose !== undefined && typeof input.purpose !== 'string') throw new DomainError('EXPORT_PURPOSE_INVALID', '导出用途必须是有限、可审计的说明');
+  const purpose = input.purpose === undefined ? defaultPurpose : input.purpose.trim();
+  if (!purpose || purpose.length > 120 || /[\0\r\n]/.test(purpose)) throw new DomainError('EXPORT_PURPOSE_INVALID', '导出用途必须是有限、可审计的说明');
   return store.transaction((state) => {
     if (input.studentId) {
       const student = state.students.find((candidate) => candidate.id === input.studentId && candidate.tenantId === auth.user.tenantId && candidate.active);
@@ -968,8 +1004,8 @@ export async function requestExport(store: Store, auth: AuthenticatedUser, input
       if (input.kind === 'report' && !professionalCanReadStudent(state, auth, student.id)) throw notFound();
     }
     if (input.kind === 'report' && !input.studentId) throw new DomainError('EXPORT_SCOPE_REQUIRED', '报告导出需要明确学生范围');
-    const job: ExportJob = { id: id(), tenantId: auth.user.tenantId, requestedBy: auth.user.id, kind: input.kind, studentId: input.studentId, status: 'requested', expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(), createdAt: now() };
-    state.exportJobs.push(job); audit(state, auth.user, 'export.requested', 'export_job', job.id, { kind: job.kind }); return job;
+    const job: ExportJob = { id: id(), tenantId: auth.user.tenantId, requestedBy: auth.user.id, purpose, kind: input.kind, studentId: input.studentId, status: 'requested', expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(), createdAt: now() };
+    state.exportJobs.push(job); audit(state, auth.user, 'export.requested', 'export_job', job.id, { kind: job.kind, purpose }); return job;
   });
 }
 
@@ -979,15 +1015,18 @@ export async function approveExport(store: Store, auth: AuthenticatedUser, jobId
     const job = state.exportJobs.find((candidate) => candidate.id === jobId && candidate.tenantId === auth.user.tenantId);
     if (!job) throw notFound();
     if (job.status !== 'requested') throw new DomainError('EXPORT_STATE_INVALID', '导出任务当前不可审批');
+    if (job.requestedBy === auth.user.id) throw new DomainError('SEPARATION_OF_DUTIES_REQUIRED', '导出审批需要独立审批人', 403);
     if (new Date(job.expiresAt) <= new Date()) { job.status = 'expired'; throw new DomainError('EXPORT_EXPIRED', '导出请求已过期', 410); }
     let payload: unknown;
-    if (job.kind === 'aggregate') payload = aggregatePayload(state, auth.user.tenantId, auth.user.schoolId);
+    const issuedAt = now();
+    const watermark = { jobId: job.id, purpose: job.purpose ?? 'legacy', requestedBy: job.requestedBy, approvedBy: auth.user.id, issuedAt };
+    if (job.kind === 'aggregate') payload = { ...aggregatePayload(state, auth.user.tenantId, auth.user.schoolId), watermark };
     else {
       if (!job.studentId) throw new DomainError('EXPORT_SCOPE_REQUIRED', '报告导出需要明确学生范围');
       if (!isProfessional(auth.user) || !professionalCanReadStudent(state, auth, job.studentId)) throw forbidden();
       const report = state.reports.find((candidate) => candidate.studentId === job.studentId && candidate.tenantId === auth.user.tenantId && candidate.state === 'released');
       if (!report) throw new DomainError('REPORT_NOT_RELEASED', '只有已发布报告可导出');
-      payload = { reportId: report.id, studentId: report.studentId, title: report.title, summary: decrypt(report.summaryCiphertext), exportedAt: now(), note: '导出内容来自已发布报告，不包含原始答卷。' };
+      payload = { reportId: report.id, studentId: report.studentId, title: report.title, summary: decrypt(report.summaryCiphertext), exportedAt: issuedAt, watermark, note: '导出内容来自已发布报告，不包含原始答卷。' };
     }
     job.approvedBy = auth.user.id; job.approvedAt = now(); job.status = 'ready'; job.payloadCiphertext = encrypt(payload); audit(state, auth.user, 'export.approved', 'export_job', job.id, { kind: job.kind });
     const { payloadCiphertext: _payloadCiphertext, ...publicJob } = job;

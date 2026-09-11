@@ -347,9 +347,13 @@ create table if not exists deletion_tombstones (
 );
 create table if not exists export_jobs (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), requested_by uuid not null, approved_by uuid,
-  kind text not null, student_id uuid, status text not null, expires_at timestamptz not null, payload_ciphertext text, created_at timestamptz not null default now(), approved_at timestamptz,
+  purpose text not null default 'legacy', kind text not null, student_id uuid, status text not null, expires_at timestamptz not null, payload_ciphertext text, created_at timestamptz not null default now(), approved_at timestamptz,
   foreign key (tenant_id, student_id) references students(tenant_id, id), unique (tenant_id, id)
 );
+alter table export_jobs add column if not exists purpose text;
+update export_jobs set purpose = 'legacy' where purpose is null;
+alter table export_jobs alter column purpose set default 'legacy';
+alter table export_jobs alter column purpose set not null;
 create table if not exists delivery_attempts (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), outbox_event_id uuid not null,
   channel text not null, status text not null, attempted_at timestamptz not null default now(), error_code text,

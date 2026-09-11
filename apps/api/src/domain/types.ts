@@ -367,6 +367,8 @@ export interface ExportJob {
   id: string;
   tenantId: string;
   requestedBy: string;
+  /** A bounded, governance-facing purpose code for the export. */
+  purpose: string;
   approvedBy?: string;
   kind: 'aggregate' | 'report';
   studentId?: string;
