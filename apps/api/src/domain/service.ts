@@ -437,7 +437,7 @@ export async function createCampaign(store: Store, auth: AuthenticatedUser, inpu
   const name = typeof input.name === 'string' ? input.name.trim() : '';
   const academicYear = typeof input.academicYear === 'string' ? input.academicYear.trim() : '';
   if (!validAcademicYear(academicYear)) throw new DomainError('CAMPAIGN_INVALID', '学年必须是连续的 YYYY-YYYY 格式');
-  if (!name || name.length > 200 || /[\0\r\n]/.test(name) || !Array.isArray(input.participantStudentIds) || input.participantStudentIds.length < 1 || input.participantStudentIds.length > 10_000 || input.participantStudentIds.some((studentId) => typeof studentId !== 'string' || !studentId.trim() || studentId.length > 200 || /[\0\r\n]/.test(studentId))) throw new DomainError('CAMPAIGN_INVALID', '任务名称或名单范围无效');
+  if (!name || name.length > 200 || /[\0\r\n]/.test(name) || !Array.isArray(input.participantStudentIds) || input.participantStudentIds.length > 10_000 || input.participantStudentIds.some((studentId) => typeof studentId !== 'string' || !studentId.trim() || studentId.length > 200 || /[\0\r\n]/.test(studentId))) throw new DomainError('CAMPAIGN_INVALID', '任务名称或名单范围无效');
   return store.transaction((state) => {
     const school = state.schools.find((candidate) => candidate.id === input.schoolId && sameTenant(candidate, auth.user.tenantId));
     const scale = state.scales.find((candidate) => candidate.id === input.scaleVersionId && sameTenant(candidate, auth.user.tenantId));

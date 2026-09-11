@@ -485,7 +485,7 @@ do $$
 begin
   alter table campaigns add constraint campaigns_participant_snapshot_check check (
     jsonb_typeof(participant_snapshot) = 'array' and
-    case when jsonb_typeof(participant_snapshot) = 'array' then jsonb_array_length(participant_snapshot) between 1 and 10000 else false end
+    case when jsonb_typeof(participant_snapshot) = 'array' then jsonb_array_length(participant_snapshot) between 0 and 10000 else false end
   );
 exception when duplicate_object then null;
 end $$;
