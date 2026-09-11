@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseXlsxBase64 } from './domain/spreadsheet.js';
 import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveFrequencyException, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, campaignProgress, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createGuardianLink, createMediaAsset, createProfileSchema, createRiskSignal, createScale, createSelfScreening, currentUser, downloadRightsResult, escalateUnacknowledged, getAttempt, getStudentArchive, listAvailableScales, operationalStatus, processRetention, regionalAnalytics, requeueDeadLetters, submitProfileResponse, drainOutbox, downloadExport, getAnalytics, listCases, listCampaigns, listMyTasks, listPublicContent, listReports, listScaleCatalog, listStudents, listRightsRequests, parseCsv, previewImport, publishCampaign, readPublicMedia, requestAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, updateCampaignState, revokeReport, revokeScale, verifyGuardianLink, withdrawConsent, completeRightsRequest, createRightsRequest } from './domain/service.js';
-import { authenticate, login as loginUser, logout, requirePermission } from './domain/auth.js';
+import { authenticate, issueStudentAccessCode, login as loginUser, loginWithStudentAccessCode, logout, requirePermission } from './domain/auth.js';
 import { assertProductionConfig } from './domain/crypto.js';
 import { DomainError } from './domain/errors.js';
 import { assertProductionStoreInjection, JsonStore } from './domain/store.js';
@@ -148,7 +148,7 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
     res.statusCode = 200; res.setHeader('Content-Type', media.mediaType); res.setHeader('Content-Length', media.bytes.byteLength); res.setHeader('Cache-Control', 'public, max-age=300'); res.setHeader('Content-Disposition', `inline; filename="${media.filename.replace(/"/g, '')}"`); res.end(media.bytes); return;
   }
   if (method === 'POST' && path === '/v1/auth/login') {
-    const result = await loginUser(store, stringField(input, 'email'), stringField(input, 'password'), typeof input.mfaCode === 'string' ? input.mfaCode : undefined);
+    const result = typeof input.accessCode === 'string' ? await loginWithStudentAccessCode(store, input.accessCode.trim()) : await loginUser(store, stringField(input, 'email'), stringField(input, 'password'), typeof input.mfaCode === 'string' ? input.mfaCode : undefined);
     json(res, 200, { data: result }); return;
   }
   if (method === 'POST' && path === '/v1/auth/logout') {
@@ -156,6 +156,10 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   }
   const auth = await getAuth(req, store);
   if (method === 'GET' && path === '/v1/me') { json(res, 200, { data: await currentUser(store, auth) }); return; }
+  if (method === 'POST' && path === '/v1/admin/student-credentials') {
+    const result = await issueStudentAccessCode(store, auth, stringField(input, 'studentId'), input.ttlMinutes === undefined ? undefined : Number(input.ttlMinutes));
+    json(res, 201, { data: { ...result, note: '凭证仅显示一次；请通过学校批准的线下渠道交给对应学生。' } }); return;
+  }
   if (method === 'GET' && path === '/v1/admin/students') { json(res, 200, { data: await listStudents(store, auth) }); return; }
   if (method === 'GET' && path === '/v1/admin/campaigns') { json(res, 200, { data: await listCampaigns(store, auth) }); return; }
   if (method === 'GET' && path === '/v1/admin/scales') { json(res, 200, { data: await listScaleCatalog(store, auth) }); return; }

@@ -58,6 +58,18 @@ export interface Session {
   revokedAt?: string;
 }
 
+/** One-time, short-lived credential for students who cannot use a phone. */
+export interface StudentAccessCredential {
+  id: string;
+  tenantId: string;
+  studentId: string;
+  codeHash: string;
+  expiresAt: string;
+  issuedBy: string;
+  createdAt: string;
+  usedAt?: string;
+}
+
 export interface Student {
   id: string;
   tenantId: string;
@@ -467,6 +479,7 @@ export interface DatabaseState {
   schools: School[];
   users: User[];
   sessions: Session[];
+  studentAccessCredentials: StudentAccessCredential[];
   students: Student[];
   guardianLinks: GuardianLink[];
   consents: ConsentRecord[];

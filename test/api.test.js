@@ -114,6 +114,24 @@ test('enrolled TOTP code completes the named admin MFA challenge', async () => {
   process.env.CAMPMIND_DEMO_MFA = previous;
 });
 
+test('school issues a one-time short-lived credential for a phone-less student', async () => {
+  const admin = await login('admin@campus-mind.demo');
+  const issued = await request('/v1/admin/student-credentials', { method: 'POST', headers: auth(admin), body: JSON.stringify({ studentId: 'student-demo', ttlMinutes: 15 }) });
+  assert.equal(issued.response.status, 201, JSON.stringify(issued.body));
+  assert.match(issued.body.data.code, /^[A-Za-z0-9_-]{40,}$/);
+  const stored = store.snapshot().studentAccessCredentials.find((credential) => credential.id === issued.body.data.id);
+  assert.ok(stored);
+  assert.equal(stored.codeHash.includes(issued.body.data.code), false);
+  const redeemed = await request('/v1/auth/login', { method: 'POST', body: JSON.stringify({ accessCode: issued.body.data.code }) });
+  assert.equal(redeemed.response.status, 200, JSON.stringify(redeemed.body));
+  assert.equal(redeemed.body.data.user.id, 'student-demo');
+  const replay = await request('/v1/auth/login', { method: 'POST', body: JSON.stringify({ accessCode: issued.body.data.code }) });
+  assert.equal(replay.response.status, 401);
+  assert.equal(replay.body.error.code, 'STUDENT_CREDENTIAL_INVALID');
+  const forbiddenIssue = await request('/v1/admin/student-credentials', { method: 'POST', headers: auth(redeemed.body.data.token), body: JSON.stringify({ studentId: 'student-demo' }) });
+  assert.equal(forbiddenIssue.response.status, 403);
+});
+
 test('student assessment lifecycle is durable, revision-safe and idempotent', async () => {
   const token = await login('student@campus-mind.demo');
   const tasks = await request('/v1/me/tasks', { headers: auth(token) });

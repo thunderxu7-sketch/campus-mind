@@ -62,11 +62,12 @@ erDiagram
 
 ## 4. REST 边界
 
-统一返回 `requestId`、稳定错误码；列表使用游标，敏感响应 `Cache-Control: no-store`。浏览器对所有状态变更校验 `Origin`（可通过 `CAMPMIND_ALLOWED_ORIGINS` 配置反向代理域名）；不受信来源返回 `CSRF_ORIGIN_INVALID`。未授权对象返回统一的不泄露存在性的错误。下列接口均在服务端检查身份、租户、角色和数据范围。
+统一返回 `requestId`、稳定错误码；列表使用游标，敏感响应 `Cache-Control: no-store`。浏览器对所有状态变更校验 `Origin`（可通过 `CAMPMIND_ALLOWED_ORIGINS` 配置反向代理域名）；不受信来源返回 `CSRF_ORIGIN_INVALID`。未授权对象返回统一的不泄露存在性的错误。下列接口均在服务端检查身份、租户、角色和数据范围。学生无手机场景可由 `POST /v1/admin/student-credentials` 签发一次性短期凭证，再通过登录接口的 `accessCode` 字段兑换；服务端不保存原码。
 
 | 接口草案 | 用途 | 关键保护 |
 |---|---|---|
-| `POST /v1/auth/login`、`POST /v1/auth/logout` | 具名会话 | 令牌只存 hash；启用 MFA 的职员需 RFC 6238 验证码并拒绝即时重放（生产由 IdP/密钥注册接管）；退登撤销会话 |
+| `POST /v1/auth/login`、`POST /v1/auth/logout` | 具名会话 | 令牌只存 hash；启用 MFA 的职员需 RFC 6238 验证码并拒绝即时重放（生产由 IdP/密钥注册接管）；无手机学生可兑换一次性短期凭证；退登撤销会话 |
+| `POST /v1/admin/student-credentials` | 签发无手机学生登录凭证 | 仅校务授权人员可签发；默认 30 分钟、最长 24 小时，原码仅返回一次，重新签发会使旧码失效并写入审计 |
 | `POST /v1/imports/preview` | 导入预检 | 文件隔离、限额、不执行公式/宏、字段合法性 |
 | `POST /v1/imports/{id}/commit` | 确认导入 | 审批、幂等、校验预览内容 hash；组织映射人工确认 |
 | `POST /v1/guardian-links/verify` | 监护关系核验 | 经确认渠道、限流，不以学号为验证凭据 |

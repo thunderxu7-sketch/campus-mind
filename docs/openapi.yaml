@@ -19,11 +19,13 @@ paths:
   /v1/auth/login:
     post:
       security: []
-      summary: Login with a named account
+      summary: Login with a named account or one-time phone-less student credential
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/Login'}}}
-      responses: {'200': {description: Session}, '401': {description: Invalid credentials or MFA required}}
+      responses: {'200': {description: Session}, '401': {description: Invalid credentials, spent credential or MFA required}}
+  /v1/admin/student-credentials:
+    post: {summary: Issue a one-time short-lived student terminal credential, responses: {'201': {description: Credential shown once}, '403': {description: Organization permission required}}}
   /v1/auth/logout:
     post: {summary: Revoke current session, responses: {'204': {description: Revoked}}}
   /v1/guardian-links:
@@ -117,8 +119,11 @@ components:
   schemas:
     Login:
       type: object
-      required: [email, password]
+      oneOf:
+        - required: [email, password]
+        - required: [accessCode]
       properties:
         email: {type: string, format: email}
         password: {type: string, minLength: 12, writeOnly: true}
         mfaCode: {type: string, pattern: '^[0-9]{6}$', description: Optional RFC 6238 code for enrolled staff accounts}
+        accessCode: {type: string, minLength: 20, writeOnly: true, description: One-time school-issued student credential; do not combine with password login}

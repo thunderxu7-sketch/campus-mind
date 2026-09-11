@@ -5,6 +5,9 @@ import type { AuthenticatedUser, DatabaseState, Role, Session, User } from './ty
 import type { Store } from './store.js';
 
 const SESSION_DAYS = 8;
+const STUDENT_CREDENTIAL_SESSION_HOURS = 8;
+const STUDENT_CREDENTIAL_DEFAULT_MINUTES = 30;
+const STUDENT_CREDENTIAL_MAX_MINUTES = 24 * 60;
 
 export const rolePermissions: Record<Role, readonly string[]> = {
   platform_ops: ['tenant:configure', 'system:metrics', 'analytics:regional'],
@@ -54,6 +57,56 @@ export async function login(store: Store, email: string, password: string, mfaCo
   const user = await store.read((state) => state.users.find((candidate) => candidate.email === normalized));
   if (!user) throw unauthorized();
   return { token, user: safeUser(user), expiresAt };
+}
+
+export interface StudentAccessCodeResult {
+  id: string;
+  studentId: string;
+  code: string;
+  expiresAt: string;
+}
+
+/** Issue a one-time, short-lived credential for a student using a shared or
+ * phone-less school terminal. The raw code is returned exactly once; only a
+ * hash is persisted. */
+export async function issueStudentAccessCode(store: Store, auth: AuthenticatedUser, studentId: string, ttlMinutes = STUDENT_CREDENTIAL_DEFAULT_MINUTES): Promise<StudentAccessCodeResult> {
+  if (!can(auth.user, 'org:manage')) throw forbidden();
+  if (typeof studentId !== 'string' || !studentId.trim() || !Number.isInteger(ttlMinutes) || ttlMinutes < 5 || ttlMinutes > STUDENT_CREDENTIAL_MAX_MINUTES) throw new DomainError('STUDENT_CREDENTIAL_INVALID', '学生凭证对象或有效期无效');
+  const code = randomToken();
+  const createdAt = new Date();
+  const expiresAt = new Date(createdAt.getTime() + ttlMinutes * 60_000).toISOString();
+  return store.transaction((state) => {
+    const student = state.students.find((candidate) => candidate.id === studentId && candidate.tenantId === auth.user.tenantId && candidate.active);
+    const user = state.users.find((candidate) => candidate.id === studentId && candidate.tenantId === auth.user.tenantId && candidate.role === 'student' && candidate.active);
+    if (!student || !user || (auth.user.schoolId && student.schoolId !== auth.user.schoolId)) throw new DomainError('STUDENT_CREDENTIAL_INVALID', '学生凭证对象无效', 404);
+    // Issuing a new printed code invalidates any still-active code for the
+    // same student, avoiding two simultaneous credentials on a shared device.
+    for (const previous of state.studentAccessCredentials.filter((credential) => credential.tenantId === auth.user.tenantId && credential.studentId === studentId && !credential.usedAt && credential.expiresAt > createdAt.toISOString())) previous.usedAt = createdAt.toISOString();
+    const credential = { id: randomUUID(), tenantId: auth.user.tenantId, studentId, codeHash: hashToken(code), expiresAt, issuedBy: auth.user.id, createdAt: createdAt.toISOString() };
+    state.studentAccessCredentials.push(credential);
+    state.auditEvents.push({ id: randomUUID(), tenantId: auth.user.tenantId, actorId: auth.user.id, action: 'student.credential_issued', objectType: 'student_access_credential', objectId: credential.id, purpose: 'student_login', metadata: { studentId, ttlMinutes }, createdAt: createdAt.toISOString() });
+    return { id: credential.id, studentId, code, expiresAt };
+  });
+}
+
+/** Redeem a printed student code once, creating a short session without
+ * requiring an email, phone number or reusable shared password. */
+export async function loginWithStudentAccessCode(store: Store, code: string): Promise<{ token: string; user: Omit<User, 'passwordHash'>; expiresAt: string }> {
+  assertProductionConfig();
+  if (typeof code !== 'string' || code.length < 20 || code.length > 256) throw new DomainError('STUDENT_CREDENTIAL_INVALID', '学生凭证无效或已过期', 401);
+  const token = randomToken();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + STUDENT_CREDENTIAL_SESSION_HOURS * 60 * 60_000).toISOString();
+  return store.transaction((state) => {
+    const credential = state.studentAccessCredentials.find((candidate) => candidate.codeHash === hashToken(code) && !candidate.usedAt && candidate.expiresAt > now.toISOString());
+    const user = credential ? state.users.find((candidate) => candidate.id === credential.studentId && candidate.tenantId === credential.tenantId && candidate.role === 'student' && candidate.active) : undefined;
+    if (!credential || !user) throw new DomainError('STUDENT_CREDENTIAL_INVALID', '学生凭证无效或已过期', 401);
+    credential.usedAt = now.toISOString();
+    state.sessions = state.sessions.filter((session) => session.expiresAt > now.toISOString() && !session.revokedAt);
+    state.sessions.push({ tokenHash: hashToken(token), userId: user.id, tenantId: user.tenantId, expiresAt, createdAt: now.toISOString() });
+    state.auditEvents.push({ id: randomUUID(), tenantId: user.tenantId, actorId: user.id, action: 'student.credential_redeemed', objectType: 'student_access_credential', objectId: credential.id, purpose: 'student_login', metadata: {}, createdAt: now.toISOString() });
+    return { token, user: safeUser(user), expiresAt };
+  });
 }
 
 export async function authenticate(store: Store, authorization: string | undefined): Promise<AuthenticatedUser> {

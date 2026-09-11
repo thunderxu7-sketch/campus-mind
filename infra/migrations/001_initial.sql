@@ -61,6 +61,21 @@ create table if not exists students (
   unique (tenant_id, id),
   foreign key (tenant_id, school_id) references schools(tenant_id, id)
 );
+create table if not exists student_access_credentials (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id),
+  student_id uuid not null,
+  code_hash text not null,
+  expires_at timestamptz not null,
+  issued_by uuid not null,
+  created_at timestamptz not null default now(),
+  used_at timestamptz,
+  unique (tenant_id, id),
+  unique (tenant_id, code_hash),
+  foreign key (tenant_id, student_id) references students(tenant_id, id),
+  foreign key (tenant_id, issued_by) references users(tenant_id, id)
+);
+create index if not exists active_student_credentials on student_access_credentials(tenant_id, student_id, expires_at) where used_at is null;
 create table if not exists guardian_links (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id), student_id uuid not null, guardian_user_id uuid not null,
   status text not null check (status in ('pending','verified','revoked')), verified_by uuid, verified_at timestamptz, created_at timestamptz not null default now(),
@@ -213,6 +228,7 @@ alter table schools enable row level security;
 alter table users enable row level security;
 alter table sessions enable row level security;
 alter table students enable row level security;
+alter table student_access_credentials enable row level security;
 alter table guardian_links enable row level security;
 alter table consents enable row level security;
 alter table assessment_plans enable row level security;
@@ -230,6 +246,7 @@ begin
   execute 'create policy users_isolation on users using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
   execute 'create policy sessions_isolation on sessions using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
   execute 'create policy students_isolation on students using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
+  execute 'create policy student_access_credentials_isolation on student_access_credentials using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
   execute 'create policy guardian_links_isolation on guardian_links using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
   execute 'create policy consents_isolation on consents using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
   execute 'create policy plans_isolation on assessment_plans using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
@@ -245,6 +262,10 @@ end $$;
 -- the core policies created by the block above.
 do $$ begin
   execute 'create policy sessions_isolation on sessions using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  execute 'create policy student_access_credentials_isolation on student_access_credentials using (tenant_id::text = current_setting(''app.tenant_id'', true)) with check (tenant_id::text = current_setting(''app.tenant_id'', true))';
 exception when duplicate_object then null;
 end $$;
 
@@ -391,7 +412,7 @@ end $$;
 do $$
 declare t text;
 begin
-  foreach t in array array['tenants','schools','users','sessions','students','guardian_links','consents','assessment_plans','campaigns','frequency_reservations','audit_events','outbox_events','import_batches','import_rows','assignments','attempts','answer_revisions','submissions','score_runs','reports','risk_signals','risk_cases','risk_reviews','case_acknowledgements','follow_ups','rights_requests','deletion_tombstones','export_jobs','delivery_attempts','availability_slots','appointments','media_assets','content_items','profile_schemas','profile_responses'] loop
+  foreach t in array array['tenants','schools','users','sessions','students','student_access_credentials','guardian_links','consents','assessment_plans','campaigns','frequency_reservations','audit_events','outbox_events','import_batches','import_rows','assignments','attempts','answer_revisions','submissions','score_runs','reports','risk_signals','risk_cases','risk_reviews','case_acknowledgements','follow_ups','rights_requests','deletion_tombstones','export_jobs','delivery_attempts','availability_slots','appointments','media_assets','content_items','profile_schemas','profile_responses'] loop
     execute format('alter table %I force row level security', t);
   end loop;
 end $$;

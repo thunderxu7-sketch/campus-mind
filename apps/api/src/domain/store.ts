@@ -7,7 +7,7 @@ import type { PrivateObjectStore } from '../infra/object-store.js';
 export function emptyState(): DatabaseState {
   return {
     schemaVersion: 1,
-    tenants: [], schools: [], users: [], sessions: [], students: [], consents: [], scales: [], campaigns: [],
+    tenants: [], schools: [], users: [], sessions: [], studentAccessCredentials: [], students: [], consents: [], scales: [], campaigns: [],
     guardianLinks: [], assignments: [], frequencyReservations: [], attempts: [], answerRevisions: [], submissions: [], scoreRuns: [],
     reports: [], riskSignals: [], riskCases: [], riskReviews: [], acknowledgements: [], followUps: [], auditEvents: [],
     outboxEvents: [], importBatches: [], importRows: [], rightsRequests: [], deletionTombstones: [], exportJobs: [], deliveryAttempts: [], availabilitySlots: [], appointments: [], contentItems: [], mediaAssets: [], profileSchemas: [], profileResponses: [],

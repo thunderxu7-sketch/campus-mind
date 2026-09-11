@@ -52,14 +52,14 @@
 
 TypeScript 单仓：React + Vite（管理端 / 学生端）、NestJS API 与 Worker、PostgreSQL、Redis 队列、私有对象存储。核心计分独立纯函数包；从模块化单体起步，不先上微服务、AI 诊断或 Kubernetes。
 
-当前已提供一个**合成数据参考实现**（Node 20+）：加密 JSON 本地适配器、学生/工作人员 API、静态响应式页面、版本化演示计分、人工复核工作流、受控导入/导出、预约、教育内容、媒体安全检查和 PostgreSQL 迁移草案。它不是生产部署，也不能接收真实学生资料。生产环境必须替换存储、密钥、通知和身份接入，并通过 M4 Gate。
+当前已提供一个**合成数据参考实现**（Node 20+）：加密 JSON 本地适配器、学生/工作人员 API、静态响应式页面、版本化演示计分、人工复核工作流、受控导入/导出、预约、教育内容、媒体安全检查、无手机学生一次性短期凭证和 PostgreSQL 迁移草案。它不是生产部署，也不能接收真实学生资料。生产环境必须替换存储、密钥、通知和身份接入，并通过 M4 Gate。
 
 ```sh
 npm install
 CAMPMIND_DEMO_MFA=true CAMPMIND_MASTER_KEY=local-only-key npm start
 # 管理端 http://localhost:8787/admin；学生端 http://localhost:8787/student
 
-npm run check       # TypeScript、39 项行为测试、安全扫描与规划校验
+npm run check       # TypeScript、40 项行为测试、安全扫描与规划校验
 npm run drill:capacity  # 合成并发基线（输出 p50/p95/错误率）
 npm run drill:recovery  # 合成快照与加密私有对象恢复演练
 npm run release:check    # 参考模式边界检查；生产模式需外部证据环境变量
