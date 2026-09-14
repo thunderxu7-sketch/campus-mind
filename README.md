@@ -39,6 +39,8 @@
 | [来源及需求变更记录](docs/09-sources-and-decisions.md) | 官方依据、已调整的危险需求和方案假设 |
 | [GitHub 工作项索引](docs/10-github-tracking.md) | 在线开发任务与 Milestone 入口 |
 | [证据登记册](docs/12-evidence-register.md) | 工程验证、外部准入证据与未决门槛 |
+| [表达与支持助手：营销方向](docs/14-expression-support-marketing.md) | 定位、文案、演示、客户验证与宣传证据门槛（新增规划，未实现） |
+| [表达与支持助手：开发执行规格](docs/15-expression-support-implementation.md) | 数据、API、权限、状态机、开发任务和验收矩阵（新增规划，未实现） |
 
 ## 关键设计决定
 
