@@ -4,7 +4,7 @@
 
 项目说明站点已发布到 [GitHub Pages](https://thunderxu7-sketch.github.io/campus-mind/)。Pages 只托管静态文档与合成数据说明，不运行 API 或接收真实学生资料；发布边界见 [Pages 部署说明](docs/13-github-pages.md)。
 
-> **当前状态：合成数据参考实现 v0.1（开发/验收用途）。** 本仓库不包含真实学生数据、受版权保护的量表题目或生产服务。筛查结果不是医学诊断，系统不能替代专业判断或紧急救助。
+> **当前状态：合成数据参考实现 v0.1（含表达与支持 P0 基线，开发/验收用途）。** 本仓库不包含真实学生数据、受版权保护的量表题目或生产服务。筛查结果不是医学诊断，系统不能替代专业判断或紧急救助。
 
 ## 产品范围
 
@@ -39,8 +39,9 @@
 | [来源及需求变更记录](docs/09-sources-and-decisions.md) | 官方依据、已调整的危险需求和方案假设 |
 | [GitHub 工作项索引](docs/10-github-tracking.md) | 在线开发任务与 Milestone 入口 |
 | [证据登记册](docs/12-evidence-register.md) | 工程验证、外部准入证据与未决门槛 |
-| [表达与支持助手：营销方向](docs/14-expression-support-marketing.md) | 定位、文案、演示、客户验证与宣传证据门槛（新增规划，未实现） |
-| [表达与支持助手：开发执行规格](docs/15-expression-support-implementation.md) | 数据、API、权限、状态机、开发任务和验收矩阵（新增规划，未实现） |
+| [表达与支持助手：营销方向](docs/14-expression-support-marketing.md) | 定位、文案、演示、客户验证与宣传证据门槛（参考实现基线；生产未启用） |
+| [表达与支持助手：开发执行规格](docs/15-expression-support-implementation.md) | 数据、API、权限、状态机、开发任务和验收矩阵（P0 已落地；真实视觉/生产适配待证据） |
+| [表达与支持助手：执行状态](docs/16-expression-support-implementation-status.md) | 已完成项、可复现验证和不得营销为已实现的阻断项 |
 
 ## 关键设计决定
 
@@ -65,7 +66,7 @@ npm install
 CAMPMIND_DEMO_MFA=true CAMPMIND_MASTER_KEY=local-only-key npm start
 # 管理端 http://localhost:8787/admin；学生端 http://localhost:8787/student
 
-npm run check       # TypeScript、52 项行为测试、安全扫描与规划校验
+npm run check       # TypeScript、54 项行为测试、安全扫描与规划校验
 npm run drill:capacity  # 合成并发基线（输出 p50/p95/错误率）
 npm run drill:recovery  # 合成快照与加密私有对象恢复演练
 npm run drill:crisis    # 合成危机线索、人工接续与死信恢复演练

@@ -1,8 +1,10 @@
 # 表达与支持助手：开发执行规格
 
-版本：1.0 · 日期：2026-09-14 · 基线：`ff051b6` · 状态：**新增能力设计稿，未实现、未试点**。
+版本：1.1 · 日期：2026-09-14 · 基线：当前实现分支 · 状态：**P0 参考实现已落地；未试点、生产未启用**。
 
-配套：[营销定位与执行手册](14-expression-support-marketing.md)。本文件是本扩展的需求与任务事实源；原有 `planning/backlog.json` 的 48 项任务不因此自动新增、完成或改变准入状态。ES-* 是待排期的扩展任务，不冒充已创建的 GitHub Issue。
+配套：[营销定位与执行手册](14-expression-support-marketing.md)。本文件是本扩展的需求与任务事实源；原有 `planning/backlog.json` 的 48 项任务不因此自动新增、完成或改变准入状态。ES-* 是扩展任务编号，完成度以执行状态文档为准，不冒充已创建的 GitHub Issue。
+
+> **当前执行状态（2026-09-14）**：用户已授权按依赖顺序实现。P0 ES-01–ES-12 已落地到本地参考栈（合成配置、加密记录/分享/支持请求、专业收件箱、迁移、幂等/撤回/保留测试）；P1 ES-14 与 ES-16 已提供安全开关、生命周期控制器和 Pages 合成演示。ES-13 的真实 SDK/模型许可与 ES-15 的实机/供应链证据仍是上线前阻断项；P2 真实指标、更多学段和校园试点未启用。可复现证据见 [执行状态与证据](16-expression-support-implementation-status.md)。
 
 ## 1. 目标、范围和不可变约束
 
@@ -139,7 +141,7 @@
 
 ### 5.1 五个新增集合/表
 
-时间一律 UTC ISO 8601 / `timestamptz`；ID 为服务端生成 UUID。TS 用 camelCase，SQL 用 snake_case。以下字段是开发合约，不是迁移已执行的声明。
+时间一律 UTC ISO 8601 / `timestamptz`；ID 为服务端生成 UUID。TS 用 camelCase，SQL 用 snake_case。以下字段是开发合约，并由 `002_expression_support.sql` 对齐到参考数据库。
 
 | TS / SQL | 必要字段与含义 |
 |---|---|
@@ -171,11 +173,11 @@
 7. support_requests 对同学生、同 recipient、非终态有部分唯一约束；即使换幂等键也不能无限制造同一接收人的未结束请求。
 8. 严格限制 note/主题、请求总长度和允许字段。新接口 body 上限 8 KiB，正文码点限制另算，超过直接 413，不按旧全局 3 MB 上限读取完才判断。
 9. 所有新增集合纳入 emptyState、旧 JSON 快照载入、种子、清理和恢复。兼容旧快照不代表旧库具备生产能力。
-10. 追加迁移先新建五表、索引/策略，再扩展 consents/outbox CHECK；对回滚使用关闭功能而非删表。旧应用兼容性必须实测，不假设旧 worker 理解新事件。
+10. 追加迁移先新建五张运行数据表、索引/策略，再扩展 consents/outbox CHECK；受控策略与告知版本由部署配置/版本化注册表提供，不能由客户端提交。对回滚使用关闭功能而非删表。旧应用兼容性必须实测，不假设旧 worker 理解新事件。
 
 枚举固定：SupportRequest.state 为 requested/acknowledged/in_contact/follow_up/completed/cancelled；cancellationReason 仅 user_requested/consent_withdrawn 或 null。撤销台账只允许 `(entry,delete)`、`(share,revoke)`、`(consent,revoke)`，不允许其他组合。接收人停用不自动伪记“学生取消”，保留请求并提示学生重新选择，备援收到最小异常元数据。
 
-现有 36 表 + 本版 5 表 = 41 表；CI 同时断言五张新增表的 RLS、FK、索引和权限，不只改数字。禁止为通过数量测试而删除已有表。
+现有 36 表 + 本版 5 表 = 41 表；CI 同时断言五张新增表的 RLS、FK、索引和权限，不只改数字。策略与告知注册表不落入运行库表计数，生产适配器必须在启用前加载并审批它们。禁止为通过数量测试而删除已有表。
 
 ## 6. API 合约
 
@@ -213,7 +215,7 @@
 | GET `/v1/professional/support-requests/:id` | 请求状态 + 必要联系身份 + 自述可访问性标记 | 不直接内嵌原文；对象/学校/收件人当前有效 |
 | POST `/v1/professional/support-requests/:id/transitions` | `{action,expectedVersion,nextFollowUpAt?}` → 新状态 | 事务锁/version，action 白名单与状态机 |
 | GET `/v1/professional/support-requests/:id/notes` | 已授权请求的专业备注列表 | 仅指定处理人；不返回给学生普通状态接口 |
-| POST `/v1/professional/support-requests/:id/notes` | `{note,expectedVersion}` → `{id,createdAt}` | 1–2000 码点，活动请求、当前处理授权；幂等，写入同时递增 version |
+| POST `/v1/professional/support-requests/:id/notes` | `{note}` → `{id,createdAt}`（首次 201、同键重试 200） | 1–2000 码点，活动请求、当前处理授权；幂等，写入同时递增 version |
 | GET `/v1/professional/support-escalations` | `{requestId,recipientId,createdAt,ackDueAt,reasonCode}` | 仅备援负责人，限逾期/失去接收能力的请求，无姓名/正文 |
 
 记录/分享/请求详情不得直接返回 Store 实体或密文字段。主档案 `getStudentArchive` 首版不嵌入自述；即使用户有 `report:read`，也必须走分享详情或依法核验的权利包。
@@ -385,7 +387,7 @@ Content-Type: application/json
 
 ## 11. 可执行任务拆分与依赖
 
-每项开始前建 `codex/` 分支，标记涉及现有模块；每项完成后提交可复现测试证据。当前下表状态全部为 TODO，不是已完成功能。
+每项开始前建 `codex/` 分支，标记涉及现有模块；每项完成后提交可复现测试证据。下表是执行基线，当前完成度与阻断项见 [执行状态与证据](16-expression-support-implementation-status.md)。
 
 ### 11.1 P0：必须先完成的非视觉业务与保护
 
@@ -490,7 +492,7 @@ npm run test:e2e:visual
 
 ## 13. 开发启动顺序与未决事项
 
-拿到本文件后可直接启动 ES-01/02 的合成配置与契约实现，再按依赖推进；本次文档请求不授权立刻编写功能、联系学校或部署真实服务。
+拿到本文件后可直接启动 ES-01/02 的合成配置与契约实现，再按依赖推进；文档初始请求本身不授权联系学校或部署真实服务。本轮用户已明确授权在仓库内实现合成参考功能，但不改变真实服务准入要求。
 
 | 必须明确的生产事项 | 责任人 | 未明确时允许做什么 / 不允许做什么 |
 |---|---|---|

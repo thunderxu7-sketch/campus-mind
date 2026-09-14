@@ -35,7 +35,7 @@
     <h2 id="tasks-title">我的任务</h2>
     <div id="taskList" aria-live="polite"></div>
     <div class="actions">
-      <button id="help" type="button" class="secondary">我想找人聊聊</button>
+      <button id="help" type="button" class="secondary">需要立即帮助</button>
       <button id="logout" type="button" class="secondary">退出并清除</button>
     </div>
     <div id="questions" aria-live="polite"></div>
@@ -58,9 +58,60 @@
     <p id="selfScreeningStatus" class="status" role="status" aria-live="polite"></p>
   </section>
 
+  <section id="expression" hidden aria-labelledby="expression-title">
+    <h2 id="expression-title">表达与支持</h2>
+    <p class="muted">你可以先把想法留在自己的记录中，再自主选择是否分享给学校心理支持人员并发起支持请求。这里不做诊断，不上传视频，也不会因为写下内容自动生成危机线索。</p>
+    <div id="expressionNotice" class="notice" aria-live="polite"><p class="muted">正在读取当前说明…</p></div>
+    <form id="expressionForm">
+      <label for="expression-topic">主题（可选）</label>
+      <select id="expression-topic" name="topic">
+        <option value="">不指定</option><option value="study">学习</option><option value="peers">同伴关系</option><option value="family">家庭</option><option value="school_life">校园生活</option><option value="general">其他</option>
+      </select>
+      <label for="expression-note">想记录的内容</label>
+      <textarea id="expression-note" name="note" rows="4" maxlength="1000" placeholder="写下你愿意保留的内容（可只选主题）"></textarea>
+      <label><input id="expressionAck" type="checkbox" required> 我已阅读当前说明，并确认这是我主动记录的内容。</label>
+      <button id="expressionSubmit" type="submit">保存我的记录</button>
+    </form>
+    <p id="expressionStatus" class="status" role="status" aria-live="polite"></p>
+    <h3>我的记录</h3>
+    <div id="expressionEntries" aria-live="polite"><p class="muted">暂无记录。</p></div>
+    <h3>分享给支持人员</h3>
+    <p class="muted">分享默认限时，到期后自动失效；你也可以随时撤回。分享内容只对选定接收人可见。</p>
+    <form id="expressionShareForm">
+      <label for="expression-share-entry">选择记录</label>
+      <select id="expression-share-entry" required><option value="">请先保存一条记录</option></select>
+      <label for="expression-share-recipient">接收人</label>
+      <select id="expression-share-recipient" required><option value="">正在读取支持人员…</option></select>
+      <label for="expression-share-ttl">有效期</label>
+      <select id="expression-share-ttl"><option value="1">1 小时</option><option value="24" selected>24 小时</option><option value="168">7 天</option></select>
+      <label><input id="expressionShareAck" type="checkbox" required> 我确认将这条记录分享给选定的学校支持人员。</label>
+      <button id="expressionShareSubmit" type="submit">创建限时分享</button>
+    </form>
+    <div id="expressionShares" aria-live="polite"><p class="muted">暂无分享。</p></div>
+    <h3>我的支持请求</h3>
+    <p class="muted">支持请求不是即时咨询或紧急救助；页面会显示请求状态和预计响应目标。</p>
+    <form id="supportRequestForm">
+      <label for="support-recipient">联系谁</label>
+      <select id="support-recipient" required><option value="">正在读取支持人员…</option></select>
+      <label for="support-share">可选：附带一条已分享记录</label>
+      <select id="support-share"><option value="">不附带记录</option></select>
+      <label><input id="supportRequestAck" type="checkbox" required> 我知道这是主动发起的支持请求，并已阅读联系说明。</label>
+      <button id="supportRequestSubmit" type="submit">发起支持请求</button>
+    </form>
+    <div id="supportRequests" aria-live="polite"><p class="muted">暂无支持请求。</p></div>
+    <div id="visualInteraction" hidden aria-labelledby="visual-interaction-title" data-enabled="false">
+      <h3 id="visual-interaction-title">可选视觉互动</h3>
+      <p class="muted">当前演示策略未启用。若学校另行批准，摄像头只用于设备内的中性界面互动：不上传视频、照片或面部关键点，不推断情绪，也不写入心理档案。</p>
+      <div class="actions"><button id="visualStart" type="button" disabled>开启本地互动</button><button id="visualStop" type="button" class="secondary" disabled>停止并释放摄像头</button></div>
+      <video id="visualPreview" muted autoplay playsinline hidden style="max-width:100%;border-radius:8px" aria-label="仅本地预览，不上传"></video>
+      <div id="visualAvatar" class="task" aria-live="polite">中性互动待机</div>
+      <p id="visualStatus" class="status" role="status" aria-live="polite"></p>
+    </div>
+  </section>
+
   <section id="appointments" hidden aria-labelledby="appointments-title">
     <h2 id="appointments-title">咨询预约</h2>
-    <p class="muted">预约不是即时咨询或紧急救助。如需立即帮助，请使用“我想找人聊聊”或联系学校提供的人工支持渠道。</p>
+    <p class="muted">预约不是即时咨询或紧急救助。如有立即危险，请使用“需要立即帮助”或联系学校提供的人工支持渠道。</p>
     <label for="appointment-note">预约说明（可选，不要填写紧急或隐私细节）</label>
     <textarea id="appointment-note" rows="3" maxlength="1000" placeholder="例如：希望了解可用的支持时段"></textarea>
     <h3>可预约时段</h3>
@@ -101,6 +152,11 @@
     let attempt = null;
     let revision = 0;
     let currentNoticeVersion = 'notice-demo-v1';
+    let expressionNoticeVersion = '';
+    let expressionRecipients = [];
+    let expressionShares = [];
+    let expressionEntries = [];
+    let supportRequests = [];
     let saveTimer = null;
     let saveInFlight = false;
     let dirty = false;
@@ -249,6 +305,7 @@
 
     function clearClient() {
       sessionEpoch += 1;
+      window.CampusMindVisual?.stop?.('已退出并释放视觉互动资源。');
       token = '';
       currentUserId = '';
       attempt = null;
@@ -261,12 +318,21 @@
       $('#tasks').hidden = true;
       $('#participation').hidden = true;
       $('#selfScreening').hidden = true;
+      $('#expression').hidden = true;
       $('#appointments').hidden = true;
       $('#reports').hidden = true;
       $('#rights').hidden = true;
       $('#taskList').replaceChildren();
       $('#questions').replaceChildren();
       $('#selfScaleList').replaceChildren();
+      $('#expressionNotice').replaceChildren();
+      $('#expressionEntries').replaceChildren();
+      $('#expressionShares').replaceChildren();
+      $('#supportRequests').replaceChildren();
+      $('#expressionForm').reset();
+      $('#expressionShareForm').reset();
+      $('#supportRequestForm').reset();
+      $('#expressionStatus').textContent = '';
       $('#reportList').replaceChildren();
       $('#rightsList').replaceChildren();
       $('#selfScreeningStatus').textContent = '';
@@ -276,12 +342,17 @@
       $('#appointmentStatus').textContent = '';
       $('#rightsStatus').textContent = '';
       $('#help').disabled = false;
-      $('#help').textContent = '我想找人聊聊';
+      $('#help').textContent = '需要立即帮助';
       $('#help').removeAttribute('aria-busy');
       $('#consentForm').hidden = false;
       $('#consentForm').reset();
       $('#consentStatus').textContent = '';
       currentNoticeVersion = 'notice-demo-v1';
+      expressionNoticeVersion = '';
+      expressionRecipients = [];
+      expressionShares = [];
+      expressionEntries = [];
+      supportRequests = [];
       appointmentKeys.clear();
       $('#login').reset();
     }
@@ -395,6 +466,177 @@
       } catch (error) { if (isActiveSession(epoch)) { $('#selfScreeningStatus').textContent = error.code === 'FREQUENCY_REVIEW_REQUIRED' ? '本学年已有测评场次，需要学校专业人员复核后才能再次申请。' : error.message || '自选筛查申请失败'; button.disabled = false; } }
     }
 
+    const supportStateLabel = { requested: '待接收人确认', acknowledged: '已确认', in_contact: '沟通中', follow_up: '待跟进', completed: '已完成', cancelled: '已取消' };
+    const shareStateLabel = { active: '分享中', revoked: '已撤回', expired: '已到期', none: '未分享' };
+    const topicLabel = { study: '学习', peers: '同伴关系', family: '家庭', school_life: '校园生活', general: '其他' };
+    function renderExpressionSelects() {
+      const entrySelect = $('#expression-share-entry');
+      const supportShareSelect = $('#support-share');
+      const activeEntries = expressionEntries.filter((entry) => !entry.deletedAt);
+      entrySelect.innerHTML = activeEntries.length ? activeEntries.map((entry) => `<option value="${esc(entry.id)}">${esc(formatWhen(entry.createdAt))} · ${esc(shareStateLabel[entry.shareStatus] || entry.shareStatus)}</option>`).join('') : '<option value="">请先保存一条记录</option>';
+      entrySelect.disabled = !activeEntries.length;
+      $('#expressionShareSubmit').disabled = !activeEntries.length || !expressionRecipients.length;
+      const activeShares = expressionShares.filter((share) => share.status === 'active');
+      supportShareSelect.innerHTML = '<option value="">不附带记录</option>' + activeShares.map((share) => `<option value="${esc(share.id)}">记录 ${esc(share.entryId.slice(0, 8))} · ${esc(formatWhen(share.expiresAt))} 到期</option>`).join('');
+      const recipientOptions = expressionRecipients.length ? expressionRecipients.map((recipient) => `<option value="${esc(recipient.id)}">${esc(recipient.displayName)} · ${esc(recipient.role === 'professional_lead' ? '专业负责人' : '心理咨询师')}</option>`).join('') : '<option value="">当前没有可用支持人员</option>';
+      $('#expression-share-recipient').innerHTML = recipientOptions;
+      $('#support-recipient').innerHTML = recipientOptions;
+      $('#expression-share-recipient').disabled = !expressionRecipients.length;
+      $('#support-recipient').disabled = !expressionRecipients.length;
+    }
+
+    function renderExpressionEntries() {
+      const target = $('#expressionEntries');
+      if (!expressionEntries.length) { target.innerHTML = '<p class="muted">暂无记录。你可以先写下一小段想法，内容只会保存在你的记录中。</p>'; return; }
+      target.innerHTML = expressionEntries.map((entry) => `<article class="task"><b>${esc(formatWhen(entry.createdAt))}</b> · ${esc(shareStateLabel[entry.shareStatus] || entry.shareStatus)}<br><span class="muted">${esc(topicLabel[entry.topic] || '自我记录')} · ${esc(formatWhen(entry.expiresAt))} 到期</span><br><div class="actions"><button type="button" data-view-expression="${esc(entry.id)}">查看内容</button><button type="button" class="secondary" data-delete-expression="${esc(entry.id)}">删除记录</button></div></article>`).join('');
+      document.querySelectorAll('[data-view-expression]').forEach((button) => { button.onclick = () => viewExpressionEntry(button.dataset.viewExpression); });
+      document.querySelectorAll('[data-delete-expression]').forEach((button) => { button.onclick = () => deleteExpressionEntry(button.dataset.deleteExpression, button); });
+    }
+
+    function renderExpressionShares() {
+      const target = $('#expressionShares');
+      if (!expressionShares.length) { target.innerHTML = '<p class="muted">暂无分享。</p>'; return; }
+      target.innerHTML = expressionShares.map((share) => {
+        const recipient = expressionRecipients.find((candidate) => candidate.id === share.recipientId);
+        const revoke = share.status === 'active' ? `<button type="button" class="secondary" data-revoke-expression-share="${esc(share.id)}">撤回分享</button>` : '';
+        return `<article class="task"><b>${esc(shareStateLabel[share.status] || share.status)}</b> · ${esc(recipient?.displayName || '学校支持人员')}<br><span class="muted">记录 ${esc(share.entryId.slice(0, 8))} · 到期 ${esc(formatWhen(share.expiresAt))}</span>${revoke ? `<br>${revoke}` : ''}</article>`;
+      }).join('');
+      document.querySelectorAll('[data-revoke-expression-share]').forEach((button) => { button.onclick = () => revokeExpressionShare(button.dataset.revokeExpressionShare, button); });
+    }
+
+    function renderSupportRequests() {
+      const target = $('#supportRequests');
+      if (!supportRequests.length) { target.innerHTML = '<p class="muted">暂无支持请求。</p>'; return; }
+      target.innerHTML = supportRequests.map((request) => {
+        const recipient = expressionRecipients.find((candidate) => candidate.id === request.recipientId);
+        const cancellable = ['requested', 'acknowledged', 'in_contact', 'follow_up'].includes(request.state);
+        const cancel = cancellable ? `<button type="button" class="secondary" data-cancel-support="${esc(request.id)}" data-version="${esc(request.version)}">取消请求</button>` : '';
+        return `<article class="task"><b>${esc(supportStateLabel[request.state] || request.state)}</b> · ${esc(recipient?.displayName || '学校支持人员')}<br><span class="muted">提交于 ${esc(formatWhen(request.createdAt))} · 预计响应目标 ${esc(formatWhen(request.ackDueAt))}</span>${request.nextFollowUpAt ? `<br><span class="muted">下次跟进 ${esc(formatWhen(request.nextFollowUpAt))}</span>` : ''}${request.cancellationReason ? `<br><span class="muted">原因：${esc(request.cancellationReason)}</span>` : ''}${cancel ? `<br>${cancel}` : ''}</article>`;
+      }).join('');
+      document.querySelectorAll('[data-cancel-support]').forEach((button) => { button.onclick = () => cancelSupportRequest(button.dataset.cancelSupport, Number(button.dataset.version), button); });
+    }
+
+    async function loadExpression() {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
+      try {
+        const capabilities = await api('/v1/me/expression-capabilities');
+        if (!isActiveSession(epoch)) return;
+        configureVisualInteraction(capabilities);
+        $('#expression').hidden = !capabilities.expressionEnabled;
+        if (!capabilities.expressionEnabled) { $('#expressionNotice').innerHTML = '<p class="muted">学校当前未启用表达与支持功能。</p>'; return; }
+        expressionNoticeVersion = capabilities.noticeVersions.selfExpression || '';
+        const [notice, consents, recipients, entries, shares, requests] = await Promise.all([
+          api('/v1/me/expression-notices/self_expression'),
+          api('/v1/me/consents?purpose=self_expression'),
+          api('/v1/me/support-recipients'),
+          api('/v1/me/expression-entries'),
+          api('/v1/me/expression-shares'),
+          api('/v1/me/support-requests'),
+        ]);
+        if (!isActiveSession(epoch)) return;
+        expressionRecipients = recipients;
+        expressionEntries = entries;
+        expressionShares = shares;
+        supportRequests = requests;
+        $('#expressionNotice').innerHTML = `<b>${esc(notice.title)}</b><p>${esc(notice.body)}</p><p class="muted">当前版本：${esc(notice.version)} · ${capabilities.serviceHoursText ? esc(capabilities.serviceHoursText) : ''}</p>`;
+        const activeConsent = consents.find((consent) => consent.status === 'active' && consent.noticeVersion === expressionNoticeVersion);
+        // Keep the personal-entry form visible even before a consent record so
+        // the first submission can create the explicit self-expression record.
+        $('#expressionForm').hidden = false;
+        $('#expressionShareForm').hidden = !activeConsent;
+        $('#supportRequestForm').hidden = !activeConsent;
+        $('#expressionStatus').textContent = activeConsent ? '已记录表达用途参与；是否保存、分享或发起支持请求由你决定。' : '请先阅读说明并勾选确认，然后记录表达用途参与。';
+        renderExpressionSelects(); renderExpressionEntries(); renderExpressionShares(); renderSupportRequests();
+      } catch (error) { if (isActiveSession(epoch)) { $('#expression').hidden = false; $('#expressionStatus').textContent = error.message || '表达与支持暂时不可用'; } }
+    }
+
+    async function ensureExpressionConsent(epoch) {
+      const consents = await api('/v1/me/consents?purpose=self_expression');
+      if (!isActiveSession(epoch)) return false;
+      const active = consents.find((consent) => consent.status === 'active' && consent.noticeVersion === expressionNoticeVersion);
+      if (active) return true;
+      const confirmed = window.confirm('请确认已阅读表达与支持说明，并记录本人参与。');
+      if (!confirmed) return false;
+      await api('/v1/me/consents', { method: 'POST', body: JSON.stringify({ studentId: currentUserId, actorType: 'student', purpose: 'self_expression', noticeVersion: expressionNoticeVersion }) });
+      return true;
+    }
+
+    async function ensureVisualConsent(epoch, noticeVersion) {
+      const consents = await api('/v1/me/consents?purpose=visual_interaction');
+      if (!isActiveSession(epoch)) return false;
+      if (consents.some((consent) => consent.status === 'active' && consent.noticeVersion === noticeVersion)) return true;
+      const notice = await api('/v1/me/expression-notices/visual_interaction');
+      if (!isActiveSession(epoch)) return false;
+      if (!window.confirm(`${notice.title}\n\n${notice.body}\n\n确认后才会请求摄像头权限。`)) return false;
+      await api('/v1/me/consents', { method: 'POST', body: JSON.stringify({ studentId: currentUserId, actorType: 'student', purpose: 'visual_interaction', noticeVersion }) });
+      return true;
+    }
+
+    function configureVisualInteraction(capabilities) {
+      if (!window.CampusMindVisual) return;
+      window.CampusMindVisual.configure({ enabled: capabilities.visualEnabled === true, beforeStart: async () => ensureVisualConsent(sessionEpoch, capabilities.noticeVersions.visualInteraction) });
+    }
+
+    $('#expressionForm').onsubmit = async (event) => {
+      event.preventDefault();
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch) || !$('#expressionAck').checked) return;
+      const button = $('#expressionSubmit'); button.disabled = true;
+      try {
+        if (!await ensureExpressionConsent(epoch)) return;
+        await api('/v1/me/expression-entries', { method: 'POST', headers: { 'idempotency-key': crypto.randomUUID() }, body: JSON.stringify({ topic: $('#expression-topic').value || undefined, note: $('#expression-note').value.trim() || undefined, noticeVersion: expressionNoticeVersion, acknowledged: true }) });
+        if (!isActiveSession(epoch)) return;
+        event.target.reset(); $('#expressionStatus').textContent = '已保存到你的表达记录。是否分享由你决定。'; await loadExpression();
+      } catch (error) { if (isActiveSession(epoch)) $('#expressionStatus').textContent = error.message || '保存记录失败'; }
+      finally { if (isActiveSession(epoch)) button.disabled = false; }
+    };
+
+    async function viewExpressionEntry(entryId) {
+      const epoch = sessionEpoch; if (!isActiveSession(epoch) || !entryId) return;
+      try { const entry = await api('/v1/me/expression-entries/' + encodeURIComponent(entryId)); if (isActiveSession(epoch)) $('#expressionStatus').textContent = `${entry.topic ? `主题：${topicLabel[entry.topic] || entry.topic} · ` : ''}${entry.note || '仅记录了主题。'}`; }
+      catch (error) { if (isActiveSession(epoch)) $('#expressionStatus').textContent = error.message || '记录暂时不可用'; }
+    }
+
+    async function deleteExpressionEntry(entryId, button) {
+      const epoch = sessionEpoch; if (!isActiveSession(epoch) || !entryId) return;
+      button.disabled = true;
+      try { await api('/v1/me/expression-entries/' + encodeURIComponent(entryId), { method: 'DELETE' }); if (isActiveSession(epoch)) { $('#expressionStatus').textContent = '记录已删除。'; await loadExpression(); } }
+      catch (error) { if (isActiveSession(epoch)) { $('#expressionStatus').textContent = error.message || '删除失败'; button.disabled = false; } }
+    }
+
+    $('#expressionShareForm').onsubmit = async (event) => {
+      event.preventDefault();
+      const epoch = sessionEpoch; if (!isActiveSession(epoch) || !$('#expressionShareAck').checked) return;
+      const button = $('#expressionShareSubmit'); button.disabled = true;
+      try { await api('/v1/me/expression-entries/' + encodeURIComponent($('#expression-share-entry').value) + '/shares', { method: 'POST', headers: { 'idempotency-key': crypto.randomUUID() }, body: JSON.stringify({ recipientId: $('#expression-share-recipient').value, ttlHours: Number($('#expression-share-ttl').value), noticeVersion: expressionNoticeVersion, acknowledged: true }) }); if (isActiveSession(epoch)) { event.target.reset(); $('#expressionStatus').textContent = '限时分享已创建。'; await loadExpression(); } }
+      catch (error) { if (isActiveSession(epoch)) $('#expressionStatus').textContent = error.message || '创建分享失败'; }
+      finally { if (isActiveSession(epoch)) button.disabled = false; }
+    };
+
+    async function revokeExpressionShare(shareId, button) {
+      const epoch = sessionEpoch; if (!isActiveSession(epoch) || !shareId) return;
+      button.disabled = true;
+      try { await api('/v1/me/expression-shares/' + encodeURIComponent(shareId) + '/revoke', { method: 'POST', body: '{}' }); if (isActiveSession(epoch)) { $('#expressionStatus').textContent = '分享已撤回。'; await loadExpression(); } }
+      catch (error) { if (isActiveSession(epoch)) { $('#expressionStatus').textContent = error.message || '撤回失败'; button.disabled = false; } }
+    }
+
+    $('#supportRequestForm').onsubmit = async (event) => {
+      event.preventDefault();
+      const epoch = sessionEpoch; if (!isActiveSession(epoch) || !$('#supportRequestAck').checked) return;
+      const button = $('#supportRequestSubmit'); button.disabled = true;
+      try { await api('/v1/me/support-requests', { method: 'POST', headers: { 'idempotency-key': crypto.randomUUID() }, body: JSON.stringify({ recipientId: $('#support-recipient').value, shareId: $('#support-share').value || undefined, noticeVersion: expressionNoticeVersion, acknowledged: true }) }); if (isActiveSession(epoch)) { event.target.reset(); $('#expressionStatus').textContent = '支持请求已发出，请留意状态更新。'; await loadExpression(); } }
+      catch (error) { if (isActiveSession(epoch)) $('#expressionStatus').textContent = error.message || '支持请求提交失败'; }
+      finally { if (isActiveSession(epoch)) button.disabled = false; }
+    };
+
+    async function cancelSupportRequest(requestId, expectedVersion, button) {
+      const epoch = sessionEpoch; if (!isActiveSession(epoch) || !requestId) return;
+      button.disabled = true;
+      try { await api('/v1/me/support-requests/' + encodeURIComponent(requestId) + '/cancel', { method: 'POST', body: JSON.stringify({ expectedVersion }) }); if (isActiveSession(epoch)) { $('#expressionStatus').textContent = '支持请求已取消。'; await loadExpression(); } }
+      catch (error) { if (isActiveSession(epoch)) { $('#expressionStatus').textContent = error.message || '取消请求失败'; button.disabled = false; } }
+    }
+
     $('#login').onsubmit = async (event) => {
       event.preventDefault();
       let loginEpoch = sessionEpoch;
@@ -415,13 +657,14 @@
         $('#tasks').hidden = false;
         $('#participation').hidden = false;
         $('#selfScreening').hidden = false;
+        $('#expression').hidden = false;
         $('#appointments').hidden = false;
         $('#reports').hidden = false;
         $('#rights').hidden = false;
         const tasks = await api('/v1/me/tasks');
         if (!isActiveSession(loginEpoch)) return;
         renderTasks(tasks);
-        await Promise.all([loadConsent(), loadSelfScales(), loadAppointments(), loadReports(), loadRights()]);
+        await Promise.all([loadConsent(), loadSelfScales(), loadExpression(), loadAppointments(), loadReports(), loadRights()]);
       } catch (error) { if (loginEpoch === sessionEpoch) setStatus(error.message); }
     };
 
@@ -465,8 +708,8 @@
         await api('/v1/risk-signals', { method: 'POST', body: JSON.stringify({ studentId: me.id, level: 'attention', reason: '学生主动申请人工支持' }) });
         if (!isActiveSession(epoch)) return;
         helpSubmitted = true;
-        $('#help').textContent = '求助已提交';
-        setStatus('求助请求已提交给学校支持流程。');
+        $('#help').textContent = '立即帮助请求已提交';
+        setStatus('立即帮助请求已提交给危机线索人工复核流程；这不是自动诊断。');
       } catch (error) {
         if (!isActiveSession(epoch)) return;
         helpSubmitted = false;
@@ -521,5 +764,6 @@
 
     loadEducation();
   </script>
+  <script src="/student/visual-interaction.js" defer></script>
 </body>
 </html>

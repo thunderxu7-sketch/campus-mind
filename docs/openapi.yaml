@@ -55,6 +55,48 @@ paths:
     post: {summary: Record a purpose-bound student, guardian or school legal-basis participation record; a changed notice creates a new active version, responses: {'201': {description: Safe consent metadata without student, tenant or actor identifiers}, '400': {description: Age, notice or purpose validation failure}}}
   /v1/me/consents/{consentId}/withdraw:
     post: {summary: Withdraw a consent record and stop related assessment processing, parameters: [{$ref: '#/components/parameters/consentId'}], responses: {'204': {description: Withdrawn}, '403': {description: Subject or authorized guardian required}}}
+  /v1/me/expression-capabilities:
+    get: {summary: Read the school policy and consent requirements for student-led expression support, responses: {'200': {description: Capability metadata without student content}, '403': {description: Student role required}}}
+  /v1/me/expression-notices/{purpose}:
+    get: {summary: Read the approved self-expression or optional visual-interaction notice, parameters: [{name: purpose, in: path, required: true, schema: {type: string, enum: [self_expression, visual_interaction]}}], responses: {'200': {description: Approved notice}, '403': {description: Age or policy restriction}}}
+  /v1/me/support-recipients:
+    get: {summary: List explicitly configured professional recipients for student support requests, responses: {'200': {description: Recipient metadata}, '503': {description: Recipient policy unavailable}}}
+  /v1/me/expression-entries:
+    get: {summary: List the authenticated student's expression metadata without plaintext notes, responses: {'200': {description: Entry metadata}}}
+    post: {summary: Create an encrypted student-led expression entry after the current notice and consent are acknowledged, responses: {'201': {description: Created entry}, '200': {description: Idempotent retry}, '409': {description: Notice or idempotency conflict}, '413': {description: 8 KiB body limit}}}
+  /v1/me/expression-entries/{entryId}:
+    get: {summary: Read one own expression entry, parameters: [{$ref: '#/components/parameters/entryId'}], responses: {'200': {description: Decrypted own entry}, '404': {description: Outside owner scope}, '410': {description: Deleted or expired}}}
+    delete: {summary: Delete one own expression entry, parameters: [{$ref: '#/components/parameters/entryId'}], responses: {'204': {description: Deleted}}}
+  /v1/me/expression-entries/{entryId}/shares:
+    post: {summary: Create one explicit, time-limited share for a configured professional recipient, parameters: [{$ref: '#/components/parameters/entryId'}], responses: {'201': {description: Share receipt}, '409': {description: Existing active share, stale notice or idempotency conflict}}}
+  /v1/me/expression-shares:
+    get: {summary: List own expression-share metadata, responses: {'200': {description: Share metadata}}}
+  /v1/me/expression-shares/{shareId}/revoke:
+    post: {summary: Revoke an active expression share, parameters: [{$ref: '#/components/parameters/shareId'}], responses: {'204': {description: Revoked}}}
+  /v1/professional/expression-shares:
+    get: {summary: List active shares addressed to the authenticated professional, responses: {'200': {description: Share metadata with student references}, '403': {description: Professional recipient permission required}}}
+  /v1/professional/expression-shares/{shareId}:
+    get: {summary: Read one explicitly shared expression entry, parameters: [{$ref: '#/components/parameters/shareId'}], responses: {'200': {description: Decrypted shared entry}, '404': {description: Share unavailable or outside recipient scope}}}
+  /v1/me/support-requests:
+    get: {summary: List own support-request lifecycle metadata, responses: {'200': {description: Request metadata}}}
+    post: {summary: Create an explicit support request addressed to one configured professional recipient, responses: {'201': {description: Requested}, '200': {description: Idempotent retry}, '409': {description: Stale notice, invalid share or idempotency conflict}}}
+  /v1/me/support-requests/{requestId}:
+    get: {summary: Read one own support-request state, parameters: [{$ref: '#/components/parameters/requestId'}], responses: {'200': {description: Request state}, '404': {description: Outside owner scope}}}
+  /v1/me/support-requests/{requestId}/cancel:
+    post: {summary: Cancel an open own support request with optimistic version checking, parameters: [{$ref: '#/components/parameters/requestId'}], responses: {'200': {description: Cancelled}, '409': {description: Version conflict}}}
+  /v1/professional/support-requests:
+    get: {summary: List assigned support requests for the authenticated professional, responses: {'200': {description: Support inbox}, '403': {description: Professional support permission required}}}
+  /v1/professional/support-requests/{requestId}:
+    get: {summary: Read one assigned support request, parameters: [{$ref: '#/components/parameters/requestId'}], responses: {'200': {description: Request state}, '404': {description: Outside recipient scope}}}
+  /v1/professional/support-requests/{requestId}/transitions:
+    post: {summary: Acknowledge, start, schedule follow-up or complete an assigned support request with optimistic version checking, parameters: [{$ref: '#/components/parameters/requestId'}], responses: {'200': {description: Updated request}, '409': {description: Version or state conflict}}}
+  /v1/professional/support-requests/{requestId}/notes:
+    get: {summary: List encrypted support notes after recipient authorization, parameters: [{$ref: '#/components/parameters/requestId'}], responses: {'200': {description: Decrypted notes for assigned professional only}}}
+    post: {summary: Add an encrypted minimum-necessary support note, parameters: [{$ref: '#/components/parameters/requestId'}], responses: {'201': {description: Note receipt}, '409': {description: Idempotency conflict}}}
+  /v1/professional/support-escalations:
+    get: {summary: Read metadata-only overdue support reminders, responses: {'200': {description: Escalation metadata}, '403': {description: Professional escalation permission required}}}
+  /v1/admin/operations/support-escalate:
+    post: {summary: Queue redacted reminders for support requests past their acknowledgement target, responses: {'200': {description: Escalation result}, '403': {description: Operations permission required}}}
   /v1/rights-requests/{requestId}/result:
     get: {summary: Download an approved access or correction result after authorization, parameters: [{$ref: '#/components/parameters/requestId'}], responses: {'200': {description: Rights result}, '403': {description: Not the requester or privacy role}}}
   /v1/me/rights-requests:
@@ -226,6 +268,8 @@ components:
     contentId: {name: contentId, in: path, required: true, schema: {type: string}}
     slotId: {name: slotId, in: path, required: true, schema: {type: string}}
     appointmentId: {name: appointmentId, in: path, required: true, schema: {type: string}}
+    entryId: {name: entryId, in: path, required: true, schema: {type: string}}
+    shareId: {name: shareId, in: path, required: true, schema: {type: string}}
   schemas:
     Login:
       type: object

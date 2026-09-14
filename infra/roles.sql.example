@@ -1,6 +1,7 @@
 -- Example role boundary for a PostgreSQL deployment.
 -- Replace passwords with a secret manager reference; never commit real values.
--- Run after 001_initial.sql as a migration/bootstrap identity.
+-- Run after all numbered migrations (001_initial.sql, 002_expression_support.sql)
+-- as a migration/bootstrap identity.
 
 do $$
 begin

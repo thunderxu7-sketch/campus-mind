@@ -12,10 +12,10 @@ const STUDENT_CREDENTIAL_MAX_MINUTES = 24 * 60;
 export const rolePermissions: Record<Role, readonly string[]> = {
   platform_ops: ['tenant:configure', 'system:metrics', 'analytics:regional'],
   school_admin: ['org:read', 'org:manage', 'import:write', 'campaign:write', 'campaign:read', 'analytics:read', 'export:request', 'appointment:manage', 'content:write'],
-  professional_lead: ['org:read', 'campaign:read', 'frequency:approve', 'scale:write', 'scale:approve', 'report:read', 'report:approve', 'case:read', 'case:review', 'case:assign', 'case:ack', 'care:write', 'analytics:read', 'export:request', 'export:approve', 'rights:manage', 'appointment:manage', 'content:write', 'content:approve', 'profile:write', 'profile:approve'],
-  counselor: ['org:read', 'campaign:read', 'report:read', 'case:read', 'case:review', 'case:ack', 'care:write'],
+  professional_lead: ['org:read', 'campaign:read', 'frequency:approve', 'scale:write', 'scale:approve', 'report:read', 'report:approve', 'case:read', 'case:review', 'case:assign', 'case:ack', 'care:write', 'analytics:read', 'export:request', 'export:approve', 'rights:manage', 'appointment:manage', 'content:write', 'content:approve', 'profile:write', 'profile:approve', 'expression:shared-read', 'support:assigned-manage', 'support:escalation-metadata'],
+  counselor: ['org:read', 'campaign:read', 'report:read', 'case:read', 'case:review', 'case:ack', 'care:write', 'expression:shared-read', 'support:assigned-manage'],
   teacher: ['org:read', 'campaign:read', 'campaign:progress'],
-  student: ['self:read', 'self:assessment', 'self:help', 'self:appointment'],
+  student: ['self:read', 'self:assessment', 'self:help', 'self:appointment', 'self:expression'],
   guardian: ['self:read', 'rights:request'],
   privacy_auditor: ['audit:read', 'rights:read', 'rights:manage', 'analytics:read', 'export:approve'],
 };

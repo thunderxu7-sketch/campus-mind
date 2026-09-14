@@ -17,6 +17,13 @@ export type RightsKind = 'access' | 'correct' | 'delete' | 'withdraw';
 export type AppointmentState = 'requested' | 'confirmed' | 'completed' | 'cancelled' | 'no_show';
 export type ContentState = 'draft' | 'professional_review' | 'published' | 'retired';
 export type MediaKind = 'image' | 'audio' | 'video' | 'subtitle';
+export type ExpressionPurpose = 'self_expression' | 'visual_interaction';
+export type ExpressionTopic = 'study' | 'peers' | 'family' | 'school_life' | 'general';
+export type ExpressionEntrySource = 'student_self_report';
+export type ExpressionShareState = 'active' | 'revoked' | 'expired';
+export type SupportRequestState = 'requested' | 'acknowledged' | 'in_contact' | 'follow_up' | 'completed' | 'cancelled';
+export type SupportTransition = 'acknowledge' | 'start' | 'follow_up' | 'complete';
+export type SupportCancellationReason = 'user_requested' | 'consent_withdrawn';
 
 export interface Tenant {
   id: string;
@@ -87,7 +94,7 @@ export interface ConsentRecord {
   id: string;
   tenantId: string;
   studentId: string;
-  purpose: 'assessment' | 'support' | 'research';
+  purpose: 'assessment' | 'support' | 'research' | ExpressionPurpose;
   noticeVersion: string;
   actorType: 'student' | 'guardian' | 'school_legal_basis';
   actorId: string;
@@ -323,10 +330,133 @@ export interface OutboxEvent {
   type: string;
   aggregateId: string;
   payload: Record<string, string | number | boolean | null>;
-  status: 'pending' | 'published' | 'dead_letter';
+  status: 'pending' | 'published' | 'dead_letter' | 'cancelled';
   attempts: number;
   availableAt: string;
   createdAt: string;
+  cancelledAt?: string;
+  cancelReasonCode?: 'request_cancelled' | 'consent_revoked' | 'already_acknowledged' | 'schedule_replaced' | 'recipient_unavailable';
+}
+
+/** Versioned policy for the optional expression/support extension. */
+export interface ExpressionPolicy {
+  id: string;
+  tenantId: string;
+  schoolId: string;
+  enabled: boolean;
+  visualEnabled: boolean;
+  policyVersion: string;
+  selfExpressionNoticeVersion: string;
+  visualNoticeVersion: string;
+  counselorIds: string[];
+  backupProfessionalLeadId?: string;
+  serviceHoursText: string;
+  contactInstructions: string;
+  ackTargetMinutes: number;
+  entryRetentionDays: number;
+  closedRequestRetentionDays: number;
+  accessLedgerRetentionDays: number;
+  maxShareHours: number;
+  maxOpenRequestsPerStudent: number;
+  minAge: number;
+  maxAge: number;
+  createdAt: string;
+  approvedAt?: string;
+}
+
+export interface ExpressionNotice {
+  id: string;
+  tenantId: string;
+  schoolId: string;
+  purpose: ExpressionPurpose;
+  version: string;
+  title: string;
+  body: string;
+  approved: boolean;
+  createdAt: string;
+}
+
+export interface ExpressionEntry {
+  id: string;
+  tenantId: string;
+  schoolId: string;
+  studentId: string;
+  source: ExpressionEntrySource;
+  payloadCiphertext?: string;
+  consentId: string;
+  noticeVersion: string;
+  createdAt: string;
+  expiresAt: string;
+  deletedAt?: string;
+  idempotencyKey: string;
+  requestDigest: string;
+  digestKeyVersion: string;
+}
+
+export interface ExpressionShare {
+  id: string;
+  tenantId: string;
+  schoolId: string;
+  studentId: string;
+  entryId: string;
+  recipientId: string;
+  consentId: string;
+  noticeVersion: string;
+  status: ExpressionShareState;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt?: string;
+  idempotencyKey: string;
+  requestDigest: string;
+  digestKeyVersion: string;
+}
+
+export interface SupportRequest {
+  id: string;
+  tenantId: string;
+  schoolId: string;
+  studentId: string;
+  recipientId: string;
+  shareId?: string;
+  consentId: string;
+  noticeVersion: string;
+  state: SupportRequestState;
+  version: number;
+  policyVersion: string;
+  createdAt: string;
+  updatedAt: string;
+  ackDueAt: string;
+  firstAcknowledgedAt?: string;
+  nextFollowUpAt?: string;
+  closedAt?: string;
+  cancellationReason?: SupportCancellationReason;
+  idempotencyKey: string;
+  requestDigest: string;
+  digestKeyVersion: string;
+}
+
+export interface SupportNote {
+  id: string;
+  tenantId: string;
+  schoolId: string;
+  requestId: string;
+  authorId: string;
+  noteCiphertext: string;
+  createdAt: string;
+  idempotencyKey: string;
+  requestDigest: string;
+  digestKeyVersion: string;
+}
+
+export interface ExpressionRevocation {
+  id: string;
+  tenantId: string;
+  schoolId: string;
+  studentId: string;
+  targetType: 'entry' | 'share' | 'consent';
+  targetId: string;
+  effect: 'delete' | 'revoke';
+  recordedAt: string;
 }
 
 export interface ImportBatch {
@@ -497,6 +627,13 @@ export interface DatabaseState {
   students: Student[];
   guardianLinks: GuardianLink[];
   consents: ConsentRecord[];
+  expressionPolicies: ExpressionPolicy[];
+  expressionNotices: ExpressionNotice[];
+  expressionEntries: ExpressionEntry[];
+  expressionShares: ExpressionShare[];
+  supportRequests: SupportRequest[];
+  supportNotes: SupportNote[];
+  expressionRevocations: ExpressionRevocation[];
   scales: ScaleVersion[];
   campaigns: Campaign[];
   assignments: Assignment[];

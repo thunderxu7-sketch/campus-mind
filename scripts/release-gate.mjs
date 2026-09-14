@@ -27,6 +27,17 @@ const productionEvidence = [
 ].map(([env, label]) => ({ id: env.replace(/^CAMPMIND_/, '').toLowerCase(), label, pass: process.env[env] === 'true' }));
 
 if (mode === 'production') checks.push(...productionEvidence, { id: 'postgres-backend', label: '生产使用 PostgreSQL 适配器', pass: process.env.CAMPMIND_DATA_BACKEND === 'postgres' && process.env.CAMPMIND_POSTGRES_ADAPTER_READY === 'true' }, { id: 'object-store-adapter', label: '生产使用私有对象存储适配器', pass: process.env.CAMPMIND_OBJECT_STORE_ADAPTER_READY === 'true' }, { id: 'demo-mfa-disabled', label: '生产未启用演示 MFA 绕过', pass: process.env.CAMPMIND_DEMO_MFA !== 'true' });
+const expressionEnabled = process.env.CAMPMIND_EXPRESSION_ENABLED === 'true';
+const visualEnabled = process.env.CAMPMIND_VISUAL_DEPLOYMENT_ENABLED === 'true';
+if (mode === 'production' && expressionEnabled) {
+  checks.push(
+    { id: 'expression-governance', label: '表达用途、适龄、拒绝路径与危机边界证据', pass: process.env.CAMPMIND_EXPRESSION_GOVERNANCE_EVIDENCE === 'true' },
+    { id: 'expression-privacy', label: '表达最小采集、权限、撤回、留存与恢复证据', pass: process.env.CAMPMIND_EXPRESSION_PRIVACY_EVIDENCE === 'true' },
+    { id: 'expression-flow', label: '表达流程、并发、越权、无摄像头回归证据', pass: process.env.CAMPMIND_EXPRESSION_FLOW_EVIDENCE === 'true' },
+    { id: 'expression-ops', label: '表达接续人员、服务时段、备援与通知演练证据', pass: process.env.CAMPMIND_EXPRESSION_OPS_EVIDENCE === 'true' },
+  );
+}
+if (mode === 'production' && visualEnabled) checks.push({ id: 'expression-visual', label: '视觉模型/SDK许可、端侧网络、资源释放与设备证据', pass: process.env.CAMPMIND_EXPRESSION_VISUAL_EVIDENCE === 'true' });
 const failed = checks.filter((check) => !check.pass);
 const result = { mode, status: failed.length === 0 ? 'pass' : 'blocked', checks, note: mode === 'reference' ? '参考模式只验证仓库边界；不代表真实试点获准。' : '生产模式必须由责任人提供所有外部签署证据。' };
 console.log(JSON.stringify(result));

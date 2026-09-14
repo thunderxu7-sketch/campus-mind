@@ -4,6 +4,7 @@ import { contentHash, decrypt, encrypt } from './crypto.js';
 import { DomainError, forbidden, notFound } from './errors.js';
 import { assertUsableScale, score } from './scoring.js';
 import type { Store } from './store.js';
+import { assertExpressionConsentAllowed, markExpressionEntryDeleted, revokeExpressionProcessing } from './expression-support.js';
 import type {
   Appointment, AppointmentState, Assignment, Attempt, AuthenticatedUser, AvailabilitySlot, Campaign, CaseAcknowledgement, CaseState, ConsentRecord,
   ContentItem, DatabaseState, DeletionTombstone, ExportJob, FollowUp, FrequencyReservation, GuardianLink, ImportBatch, ImportRowResult, MediaAsset, MediaKind, ProfileSchemaVersion, RightsRequest, RiskCase, RiskReview, RiskSignal,
@@ -166,9 +167,16 @@ function purgeStudentData(state: DatabaseState, tenantId: string, studentId: str
   state.followUps = state.followUps.filter((followUp) => !(followUp.tenantId === tenantId && deletedCaseIds.has(followUp.caseId)));
   state.profileResponses = state.profileResponses.filter((response) => !(response.tenantId === tenantId && response.studentId === studentId));
   state.appointments = state.appointments.filter((appointment) => !(appointment.tenantId === tenantId && appointment.studentId === studentId));
+  const expressionEntryIds = new Set(state.expressionEntries.filter((entry) => entry.tenantId === tenantId && entry.studentId === studentId).map((entry) => entry.id));
+  const supportRequestIds = new Set(state.supportRequests.filter((request) => request.tenantId === tenantId && request.studentId === studentId).map((request) => request.id));
+  state.expressionEntries = state.expressionEntries.filter((entry) => !(entry.tenantId === tenantId && entry.studentId === studentId));
+  state.expressionShares = state.expressionShares.filter((share) => !(share.tenantId === tenantId && (share.studentId === studentId || expressionEntryIds.has(share.entryId))));
+  state.supportNotes = state.supportNotes.filter((note) => !(note.tenantId === tenantId && supportRequestIds.has(note.requestId)));
+  state.supportRequests = state.supportRequests.filter((request) => !(request.tenantId === tenantId && request.studentId === studentId));
+  state.expressionRevocations = state.expressionRevocations.filter((record) => !(record.tenantId === tenantId && record.studentId === studentId));
   for (const rights of state.rightsRequests.filter((rights) => rights.tenantId === tenantId && rights.studentId === studentId)) { rights.resultCiphertext = undefined; rights.reasonCiphertext = undefined; rights.reason = undefined; }
   for (const job of state.exportJobs.filter((job) => job.tenantId === tenantId && job.studentId === studentId)) { job.status = 'revoked'; job.payloadCiphertext = undefined; }
-  state.outboxEvents = state.outboxEvents.filter((event) => event.tenantId !== tenantId || (!(event.type === 'assessment.submitted' && deletedSubmissionIds.has(String(event.payload.submissionId))) && !(event.type === 'risk.triage' && deletedSubmissionIds.has(String(event.payload.submissionId))) && !(['risk.signal_created', 'risk.escalation'].includes(event.type) && deletedCaseIds.has(event.aggregateId))));
+  state.outboxEvents = state.outboxEvents.filter((event) => event.tenantId !== tenantId || (!(event.type === 'assessment.submitted' && deletedSubmissionIds.has(String(event.payload.submissionId))) && !(event.type === 'risk.triage' && deletedSubmissionIds.has(String(event.payload.submissionId))) && !(['risk.signal_created', 'risk.escalation'].includes(event.type) && deletedCaseIds.has(event.aggregateId)) && !(['support.request_created', 'support.request_overdue', 'support.follow_up_due'].includes(event.type) && supportRequestIds.has(event.aggregateId))));
   state.deliveryAttempts = state.deliveryAttempts.filter((delivery) => state.outboxEvents.some((event) => event.tenantId === delivery.tenantId && event.id === delivery.outboxEventId));
   return { deletedAttemptIds, deletedSubmissionIds, deletedCaseIds };
 }
@@ -268,9 +276,11 @@ export async function createConsent(store: Store, auth: AuthenticatedUser, input
   if (!isStudent(auth.user) && !can(auth.user, 'org:manage') && !can(auth.user, 'rights:request')) throw forbidden();
   const purpose = input.purpose ?? 'assessment';
   const noticeVersion = typeof input.noticeVersion === 'string' ? input.noticeVersion.trim() : '';
-  if (!['student', 'guardian', 'school_legal_basis'].includes(input.actorType) || !['assessment', 'support', 'research'].includes(purpose) || !noticeVersion || noticeVersion.length > 80 || /[\0\r\n]/.test(noticeVersion)) throw new DomainError('CONSENT_INVALID', '参与记录类型、用途或告知版本无效');
+  if (!['student', 'guardian', 'school_legal_basis'].includes(input.actorType) || !['assessment', 'support', 'research', 'self_expression', 'visual_interaction'].includes(purpose) || !noticeVersion || noticeVersion.length > 80 || /[\0\r\n]/.test(noticeVersion)) throw new DomainError('CONSENT_INVALID', '参与记录类型、用途或告知版本无效');
   return store.transaction((state) => {
     const student = studentFor(state, auth.user, input.studentId);
+    if (purpose === 'self_expression' || purpose === 'visual_interaction') assertExpressionConsentAllowed(state, student, purpose, noticeVersion);
+    if ((purpose === 'self_expression' || purpose === 'visual_interaction') && input.actorType === 'school_legal_basis') throw new DomainError('CONSENT_INVALID', '表达用途必须由本人或已核验监护人明确参与', 403);
     if (input.actorType === 'student' && (!isStudent(auth.user) || auth.user.id !== student.id)) throw forbidden('学生参与记录必须由本人提交');
     if (input.actorType === 'guardian' && (auth.user.role !== 'guardian' || !state.guardianLinks.some((link) => link.tenantId === auth.user.tenantId && link.studentId === student.id && link.guardianUserId === auth.user.id && link.status === 'verified'))) throw forbidden('监护人参与记录必须由已核验监护账号提交');
     if (input.actorType === 'school_legal_basis' && !can(auth.user, 'org:manage')) throw forbidden('学校合法依据记录需要校务授权');
@@ -285,6 +295,7 @@ export async function createConsent(store: Store, auth: AuthenticatedUser, input
     // terms while preserving the historical evidence of what was shown.
     if (existing) {
       existing.status = 'expired';
+      if (purpose === 'self_expression' || purpose === 'visual_interaction') revokeExpressionProcessing(state, auth.user.tenantId, student.id, purpose, existing.id);
       audit(state, auth.user, 'consent.superseded', 'consent', existing.id, { purpose });
     }
     const consent: ConsentRecord = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, purpose, noticeVersion, actorType: input.actorType, actorId: auth.user.id, status: 'active', recordedAt: now() };
@@ -299,7 +310,7 @@ export async function createConsent(store: Store, auth: AuthenticatedUser, input
  * intentionally omitted; the endpoint only renders participation state. */
 export async function listMyConsents(store: Store, auth: AuthenticatedUser, purpose?: string): Promise<Array<Record<string, unknown>>> {
   if (!isStudent(auth.user) && auth.user.role !== 'guardian') throw forbidden();
-  if (purpose !== undefined && !['assessment', 'support', 'research'].includes(purpose)) throw new DomainError('CONSENT_INVALID', '参与记录用途无效');
+  if (purpose !== undefined && !['assessment', 'support', 'research', 'self_expression', 'visual_interaction'].includes(purpose)) throw new DomainError('CONSENT_INVALID', '参与记录用途无效');
   return store.transaction((state) => {
     const studentIds = isStudent(auth.user)
       ? new Set([auth.user.id])
@@ -322,6 +333,7 @@ export async function withdrawConsent(store: Store, auth: AuthenticatedUser, con
     consent.status = 'withdrawn';
     consent.withdrawnAt = now();
     if (consent.purpose === 'assessment') revokeStudentAssessmentProcessing(state, auth.user.tenantId, student.id);
+    if (consent.purpose === 'self_expression' || consent.purpose === 'visual_interaction') revokeExpressionProcessing(state, auth.user.tenantId, student.id, consent.purpose, consent.id);
     audit(state, auth.user, 'consent.withdrawn', 'consent', consent.id, { purpose: consent.purpose });
     state.outboxEvents.push({ id: id(), tenantId: auth.user.tenantId, type: 'consent.withdrawn', aggregateId: consent.id, payload: { studentId: student.id }, status: 'pending', attempts: 0, availableAt: now(), createdAt: now() });
   });
@@ -753,6 +765,36 @@ async function processOutboxEvent(store: Store, eventId: string): Promise<void> 
         state.deliveryAttempts.push({ id: id(), tenantId: event.tenantId, outboxEventId: event.id, channel: 'in_app', status: 'sent', attemptedAt: now() });
       }
     }
+    if (event.type === 'support.request_created' || event.type === 'support.request_overdue' || event.type === 'support.follow_up_due') {
+      const request = state.supportRequests.find((candidate) => candidate.tenantId === event.tenantId && candidate.id === event.aggregateId);
+      if (!request) throw new Error('SUPPORT_REQUEST_REFERENCE_MISSING');
+      const stale = event.type === 'support.request_created'
+        ? request.state !== 'requested'
+        : event.type === 'support.request_overdue'
+          ? request.state !== 'requested'
+          : request.state !== 'follow_up' || request.nextFollowUpAt !== event.availableAt;
+      if (stale) {
+        event.status = 'cancelled'; event.cancelledAt = now(); event.cancelReasonCode = request.state === 'requested' ? 'schedule_replaced' : 'already_acknowledged';
+        audit(state, undefined, 'support.notification_cancelled', 'outbox', event.id, { reason: event.cancelReasonCode }, 'support', event.tenantId);
+        return;
+      }
+      const existingDelivery = state.deliveryAttempts.find((attempt) => attempt.tenantId === event.tenantId && attempt.outboxEventId === event.id && attempt.channel === 'in_app' && attempt.status === 'sent');
+      if (!existingDelivery) {
+        if (process.env.NODE_ENV === 'production' && process.env.CAMPMIND_NOTIFICATION_ADAPTER_READY !== 'true') throw new Error('NOTIFICATION_PROVIDER_NOT_CONFIGURED');
+        let delivery: { status: 'sent' | 'failed'; provider: string; errorCode?: string };
+        try {
+          delivery = store.notificationDispatcher ? await store.notificationDispatcher.deliver({ eventId: event.id, tenantId: event.tenantId, eventType: event.type, aggregateId: event.aggregateId, priority: 'routine' }) : { status: 'sent', provider: 'local-reference' };
+        } catch {
+          throw new Error('NOTIFICATION_PROVIDER_UNAVAILABLE');
+        }
+        if (!delivery || !['sent', 'failed'].includes(delivery.status) || typeof delivery.provider !== 'string' || !delivery.provider.trim()) throw new Error('NOTIFICATION_PROVIDER_INVALID');
+        if (delivery.status === 'failed') {
+          const providerCode = typeof delivery.errorCode === 'string' && /^[A-Z][A-Z0-9_:-]{0,63}$/.test(delivery.errorCode) ? delivery.errorCode : 'NOTIFICATION_DELIVERY_FAILED';
+          throw new Error(providerCode);
+        }
+        state.deliveryAttempts.push({ id: id(), tenantId: event.tenantId, outboxEventId: event.id, channel: 'in_app', status: 'sent', attemptedAt: now() });
+      }
+    }
     // Notification delivery is recorded separately; case acknowledgement remains a human action.
     event.status = 'published';
   });
@@ -1005,7 +1047,10 @@ export async function listMyRightsRequests(store: Store, auth: AuthenticatedUser
 function rightsAccessPackage(state: DatabaseState, request: RightsRequest): Record<string, unknown> {
   const student = state.students.find((candidate) => candidate.id === request.studentId && candidate.tenantId === request.tenantId);
   const reports = state.reports.filter((report) => report.tenantId === request.tenantId && report.studentId === request.studentId && report.state === 'released').map((report) => ({ id: report.id, title: report.title, createdAt: report.createdAt, releasedAt: report.releasedAt, summary: decrypt(report.summaryCiphertext), limitations: decrypt(report.limitationsCiphertext) }));
-  return { requestId: request.id, studentId: request.studentId, basic: student ? { schoolId: student.schoolId, classId: student.classId, age: student.age } : undefined, reports, note: '这是经身份核验的查阅副本，不包含原始答卷或未发布专业记录。' };
+  const expressionEntries = state.expressionEntries.filter((entry) => entry.tenantId === request.tenantId && entry.studentId === request.studentId && entry.payloadCiphertext && !entry.deletedAt && validDate(entry.expiresAt) && new Date(entry.expiresAt) > new Date()).map((entry) => ({ id: entry.id, createdAt: entry.createdAt, expiresAt: entry.expiresAt, payload: decrypt(entry.payloadCiphertext!) }));
+  const expressionShares = state.expressionShares.filter((share) => share.tenantId === request.tenantId && share.studentId === request.studentId).map((share) => ({ id: share.id, entryId: share.entryId, recipientId: share.recipientId, status: share.status, createdAt: share.createdAt, expiresAt: share.expiresAt }));
+  const supportRequests = state.supportRequests.filter((support) => support.tenantId === request.tenantId && support.studentId === request.studentId).map((support) => ({ id: support.id, recipientId: support.recipientId, shareId: support.shareId, state: support.state, createdAt: support.createdAt, updatedAt: support.updatedAt, closedAt: support.closedAt }));
+  return { requestId: request.id, studentId: request.studentId, basic: student ? { schoolId: student.schoolId, classId: student.classId, age: student.age } : undefined, reports, expressionEntries, expressionShares, supportRequests, note: '这是经身份核验的查阅副本，不包含原始答卷或未发布专业记录。' };
 }
 
 export async function completeRightsRequest(store: Store, auth: AuthenticatedUser, requestId: string, decision: 'complete' | 'reject', decisionReason?: string): Promise<PublicRightsRequest> {
@@ -1075,6 +1120,54 @@ export async function processRetention(store: Store, auth: AuthenticatedUser, as
         expiredExports += 1;
       }
     }
+    let expiredExpressionEntries = 0;
+    let expiredExpressionShares = 0;
+    let purgedSupportRequests = 0;
+    let purgedSupportNotes = 0;
+    const asOfMs = new Date(asOf).getTime();
+    for (const entry of state.expressionEntries) {
+      const policy = state.expressionPolicies.find((candidate) => candidate.tenantId === entry.tenantId && candidate.schoolId === entry.schoolId);
+      const policyCutoff = policy ? asOfMs - policy.entryRetentionDays * 24 * 60 * 60_000 : asOfMs;
+      const expiresAt = validDate(entry.expiresAt) ? new Date(entry.expiresAt).getTime() : Number.POSITIVE_INFINITY;
+      const retentionDue = Boolean(policy && validDate(entry.createdAt) && new Date(entry.createdAt).getTime() <= policyCutoff);
+      if (!entry.deletedAt && (expiresAt <= asOfMs || retentionDue)) {
+        markExpressionEntryDeleted(state, entry, asOf);
+        expiredExpressionEntries += 1;
+        for (const share of state.expressionShares.filter((candidate) => candidate.tenantId === entry.tenantId && candidate.entryId === entry.id && candidate.status === 'active')) {
+          share.status = 'expired';
+          expiredExpressionShares += 1;
+        }
+      }
+    }
+    for (const share of state.expressionShares) {
+      if (share.status === 'active' && validDate(share.expiresAt) && new Date(share.expiresAt).getTime() <= asOfMs) {
+        share.status = 'expired';
+        expiredExpressionShares += 1;
+      }
+    }
+    const purgeRequestIds = new Set(state.supportRequests.filter((request) => {
+      if (!['completed', 'cancelled'].includes(request.state) || !request.closedAt) return false;
+      const policy = state.expressionPolicies.find((candidate) => candidate.tenantId === request.tenantId && candidate.schoolId === request.schoolId);
+      const cutoff = asOfMs - (policy?.closedRequestRetentionDays ?? 90) * 24 * 60 * 60_000;
+      return validDate(request.closedAt) && new Date(request.closedAt).getTime() <= cutoff;
+    }).map((request) => request.id));
+    if (purgeRequestIds.size) {
+      state.supportRequests = state.supportRequests.filter((request) => !purgeRequestIds.has(request.id));
+      const beforeNotes = state.supportNotes.length;
+      state.supportNotes = state.supportNotes.filter((note) => !purgeRequestIds.has(note.requestId));
+      state.outboxEvents = state.outboxEvents.filter((event) => !(event.tenantId && purgeRequestIds.has(event.aggregateId) && ['support.request_created', 'support.request_overdue', 'support.follow_up_due'].includes(event.type)));
+      state.deliveryAttempts = state.deliveryAttempts.filter((delivery) => state.outboxEvents.some((event) => event.tenantId === delivery.tenantId && event.id === delivery.outboxEventId));
+      purgedSupportRequests = purgeRequestIds.size;
+      purgedSupportNotes = beforeNotes - state.supportNotes.length;
+    }
+    let purgedExpressionRevocations = 0;
+    state.expressionRevocations = state.expressionRevocations.filter((record) => {
+      const policy = state.expressionPolicies.find((candidate) => candidate.tenantId === record.tenantId && candidate.schoolId === record.schoolId);
+      const cutoff = asOfMs - (policy?.accessLedgerRetentionDays ?? 180) * 24 * 60 * 60_000;
+      const keep = !validDate(record.recordedAt) || new Date(record.recordedAt).getTime() > cutoff;
+      if (!keep) purgedExpressionRevocations += 1;
+      return keep;
+    });
     let replayedDeletions = 0;
     for (const tombstone of state.deletionTombstones) {
       const hadRecoverableData = state.students.some((student) => student.tenantId === tombstone.tenantId && student.id === tombstone.studentId && student.active)
@@ -1092,7 +1185,13 @@ export async function processRetention(store: Store, auth: AuthenticatedUser, as
       }
     }
     if (expiredExports > 0) audit(state, auth.user, 'retention.exports_expired', 'export_job', 'batch', { count: expiredExports });
-    return { expiredExports, expiredImportPreviews: expiredImportBatchIds.size, replayedDeletions };
+    if (expiredExpressionEntries > 0 || expiredExpressionShares > 0 || purgedSupportRequests > 0 || purgedSupportNotes > 0 || purgedExpressionRevocations > 0) audit(state, auth.user, 'retention.expression_processed', 'expression_support', 'batch', { expiredExpressionEntries, expiredExpressionShares, purgedSupportRequests, purgedSupportNotes, purgedExpressionRevocations });
+    return {
+      expiredExports,
+      expiredImportPreviews: expiredImportBatchIds.size,
+      replayedDeletions,
+      ...(expiredExpressionEntries || expiredExpressionShares || purgedSupportRequests || purgedSupportNotes || purgedExpressionRevocations ? { expiredExpressionEntries, expiredExpressionShares, purgedSupportRequests, purgedSupportNotes, purgedExpressionRevocations } : {}),
+    };
   });
 }
 

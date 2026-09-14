@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>校园心晴｜表达与支持合成演示</title>
+  <style>
+    :root{color-scheme:light}body{font:16px system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;color:#172033;line-height:1.6}section{background:#f5f7fb;padding:1rem;margin:1rem 0;border-radius:12px}.card{background:#fff;border-radius:10px;padding:.8rem;margin:.6rem 0}.notice{border-left:4px solid #2854d7;padding-left:.8rem}.muted{color:#5f6b82}button{padding:.65rem 1rem;border:0;border-radius:8px;background:#2854d7;color:#fff;font:inherit;cursor:pointer}button.secondary{background:#57657d}.avatar{width:120px;height:120px;border-radius:50%;background:linear-gradient(145deg,#c7d7ff,#829bf5);display:grid;place-items:center;font-size:3rem;margin:1rem 0;transition:transform .35s ease,filter .35s ease}.avatar.active{animation:breath 2.4s ease-in-out infinite}.status{min-height:1.6em}@keyframes breath{50%{transform:scale(1.08);filter:saturate(1.12)}}
+  </style>
+</head>
+<body>
+  <h1>校园心晴 · 表达与支持</h1>
+  <p class="notice">固定合成演示：不会申请摄像头、不会输入真实文本、不会登录、不会调用生产 API，也不会把数据提交给老师。</p>
+  <section>
+    <h2>学生主动表达（固定状态）</h2>
+    <div class="card"><b>记录</b> · 主题：学习 · “合成演示：想和可信任的人聊聊。”</div>
+    <div class="card"><b>分享</b> · 接收人：合成心理咨询师 · 有效期：24 小时 · 状态：分享中</div>
+    <div class="card"><b>支持请求</b> · 状态：已确认 · 预计响应：演示服务时段内</div>
+    <p class="muted">真实系统中，记录、分享和支持请求是三个独立动作；普通支持不是即时救助，也不等于危机诊断。</p>
+  </section>
+  <section>
+    <h2>可选中性互动（预设动画）</h2>
+    <p class="muted">动画只展示“待机/互动中”两种固定界面状态，不读取摄像头，不识别微表情，不生成心理标签。</p>
+    <div id="avatar" class="avatar" aria-label="固定合成形象">🙂</div>
+    <button id="toggle" type="button">播放预设互动</button>
+    <button id="reset" type="button" class="secondary">停止</button>
+    <p id="status" class="status" role="status" aria-live="polite">待机中（仅演示）</p>
+  </section>
+  <p><a href="../index.html">返回项目说明</a></p>
+  <script>
+    const avatar = document.querySelector('#avatar');
+    const status = document.querySelector('#status');
+    document.querySelector('#toggle').onclick = () => { avatar.classList.add('active'); status.textContent = '预设互动中（不采集、不上传）'; };
+    document.querySelector('#reset').onclick = () => { avatar.classList.remove('active'); status.textContent = '已停止（仅演示）'; };
+  </script>
+</body>
+</html>

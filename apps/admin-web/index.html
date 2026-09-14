@@ -132,6 +132,14 @@
     <label for="case-note">复核/支持说明</label><textarea id="case-note" rows="3" maxlength="4000" placeholder="请记录最小必要的人工依据"></textarea>
     <label for="case-assignee">指派给（专业用户编号）</label><input id="case-assignee" value="user-counselor-demo">
     <div id="caseList" aria-live="polite"><p class="muted">暂无待处理线索，或当前账号没有专业权限。</p></div>
+    <h2>表达与支持收件箱（心理专业角色）</h2>
+    <p class="muted">这里仅处理学生主动发起的表达分享和支持请求，与危机线索工作台分开。内容只对指定接收人可见；处理记录不会自动改变危机等级，也不会自动结案。</p>
+    <div class="actions"><button id="supportInboxRefresh" type="button" class="secondary">刷新支持请求</button><button id="supportEscalationsRefresh" type="button" class="secondary">查看逾期提醒</button></div>
+    <p id="supportInboxStatus" class="status" role="status" aria-live="polite"></p>
+    <label for="support-note">支持记录（可选，写入指定请求的加密工作记录）</label><textarea id="support-note" rows="2" maxlength="2000" placeholder="只记录最小必要的沟通与跟进事实"></textarea>
+    <div id="supportEscalations" aria-live="polite"><p class="muted">尚未读取逾期提醒。</p></div>
+    <div id="supportInbox" aria-live="polite"><p class="muted">暂无主动支持请求，或当前账号没有接收权限。</p></div>
+    <pre id="supportSharedView" hidden style="white-space:pre-wrap;background:#fff;padding:.75rem;border-radius:8px;max-height:16rem;overflow:auto"></pre>
     <h2>专业报告与心理档案</h2>
     <p class="muted">仅获批心理专业角色可按用途读取个案档案；校务、班主任和运维账号会被服务端拒绝。</p>
     <form id="archiveForm">
@@ -171,6 +179,10 @@
     let currentRole = '';
     let pendingImport = null;
     let sessionEpoch = 0;
+    let sharedViewTimer = null;
+    let sharedViewShareId = '';
+    let sharedViewLastVerifiedAt = 0;
+    let sharedViewFailures = 0;
     const $ = (selector) => document.querySelector(selector);
     const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     const setStatus = (message) => { $('#status').textContent = message; };
@@ -182,15 +194,19 @@
     function clearDashboard() {
       sessionEpoch += 1;
       pendingImport = null;
-      const empty = ['metrics', 'campaigns', 'scale', 'scaleCatalog', 'importPreview', 'campaignProgress', 'analyticsView', 'slotList', 'appointmentList', 'contentList', 'caseList', 'professionalReports', 'rightsAdminList', 'operationsView'];
+      clearSharedView();
+      const empty = ['metrics', 'campaigns', 'scale', 'scaleCatalog', 'importPreview', 'campaignProgress', 'analyticsView', 'slotList', 'appointmentList', 'contentList', 'caseList', 'supportInbox', 'supportEscalations', 'professionalReports', 'rightsAdminList', 'operationsView'];
       for (const id of empty) document.getElementById(id)?.replaceChildren();
-      for (const id of ['campaignStatus', 'scaleCatalogStatus', 'importStatus', 'frequencyStatus', 'analyticsStatus', 'contentStatus', 'archiveStatus', 'operationsStatus']) {
+      for (const id of ['campaignStatus', 'scaleCatalogStatus', 'importStatus', 'frequencyStatus', 'analyticsStatus', 'contentStatus', 'archiveStatus', 'operationsStatus', 'supportInboxStatus']) {
         const node = document.getElementById(id); if (node) node.textContent = '';
       }
       const archive = document.getElementById('archiveView');
       if (archive) { archive.textContent = ''; archive.hidden = true; }
+      const shared = document.getElementById('supportSharedView');
+      if (shared) { shared.textContent = ''; shared.hidden = true; }
       for (const form of document.querySelectorAll('#dashboard form')) form.reset();
       const commit = document.getElementById('importCommit'); if (commit) commit.disabled = true;
+      const supportNote = document.getElementById('support-note'); if (supportNote) supportNote.value = '';
       $('#credentialStatus').textContent = '凭证只显示一次，请通过学校批准的线下渠道交付。';
       $('#revokeStatus').textContent = '共享终端遗失或人员离岗时，可撤销活跃会话及未兑换凭证。';
     }
@@ -223,7 +239,7 @@
         if (!overview.data) throw new Error(overview.error?.message || '无权访问');
         if (!isActiveSession(epoch)) return;
         $('#metrics').innerHTML = Object.entries(overview.data).filter(([key]) => key !== 'note').map(([key, value]) => `<span class="metric"><b>${esc(key)}</b><br>${esc(value === null ? '已抑制' : value)}</span>`).join('');
-        const [campaigns, scales, slots, appointments, content, cases, rights] = await Promise.all([
+        const [campaigns, scales, slots, appointments, content, cases, rights, supportRequests] = await Promise.all([
           fetch('/v1/admin/campaigns', { headers }).then((response) => response.json()),
           fetch('/v1/admin/scales', { headers }).then((response) => response.json()),
           fetch('/v1/availability-slots', { headers }).then((response) => response.json()),
@@ -231,6 +247,7 @@
           fetch('/v1/content', { headers }).then((response) => response.json()),
           fetch('/v1/cases', { headers }).then((response) => response.json()),
           fetch('/v1/admin/rights-requests', { headers }).then((response) => response.json()),
+          fetch('/v1/professional/support-requests', { headers }).then((response) => response.json()),
         ]);
         if (!isActiveSession(epoch)) return;
         renderCampaigns(campaigns.data || []);
@@ -241,6 +258,8 @@
         renderContent(content.data || []);
         renderCases(cases.data || []);
         renderRightsAdmin(rights.data || []);
+        renderSupportInbox(supportRequests.data || [], supportRequests.error?.message);
+        await loadSupportEscalations();
       } catch (error) { if (isActiveSession(epoch)) setStatus(error.message); }
     }
 
@@ -548,6 +567,109 @@
         await load();
       } catch (error) { if (isActiveSession(epoch)) setStatus(error.message); }
     }
+
+    const supportStateLabel = { requested: '待确认', acknowledged: '已确认', in_contact: '沟通中', follow_up: '待跟进', completed: '已完成', cancelled: '已取消' };
+    function renderSupportInbox(requests, errorMessage) {
+      if (errorMessage) { $('#supportInbox').innerHTML = `<p class="muted">${esc(errorMessage)}</p>`; return; }
+      $('#supportInbox').innerHTML = requests.length ? requests.map((request) => {
+        const action = request.state === 'requested' ? `<button type="button" data-support-id="${esc(request.id)}" data-support-action="acknowledge">确认接收</button>`
+          : request.state === 'acknowledged' ? `<button type="button" data-support-id="${esc(request.id)}" data-support-action="start">开始沟通</button> <button type="button" data-support-id="${esc(request.id)}" data-support-action="follow_up">安排跟进</button>`
+            : request.state === 'in_contact' ? `<button type="button" data-support-id="${esc(request.id)}" data-support-action="follow_up">安排跟进</button> <button type="button" data-support-id="${esc(request.id)}" data-support-action="complete">标记完成</button>`
+              : request.state === 'follow_up' ? `<button type="button" data-support-id="${esc(request.id)}" data-support-action="complete">标记完成</button>` : '';
+        const noteAction = ['requested', 'acknowledged', 'in_contact', 'follow_up'].includes(request.state) ? `<button type="button" class="secondary" data-support-id="${esc(request.id)}" data-support-action="note">保存支持记录</button>` : '';
+        const shareAction = request.shareId && request.shareAccessible ? `<button type="button" class="secondary" data-support-share="${esc(request.shareId)}">查看已授权表达</button>` : '';
+        return `<article class="task"><b>${esc(supportStateLabel[request.state] || request.state)}</b> · 学生引用 ${esc(request.studentId)}<br><span class="muted">提交于 ${esc(formatWhen(request.createdAt))} · 响应目标 ${esc(formatWhen(request.ackDueAt))} · 版本 ${esc(request.version)}</span>${request.shareId ? `<br><span class="muted">附带表达分享：${esc(request.shareId.slice(0, 8))}（${request.shareAccessible ? '当前可读' : '已失效'}）</span>` : ''}${action || noteAction || shareAction ? `<br>${action} ${noteAction} ${shareAction}` : ''}</article>`;
+      }).join('') : '<p class="muted">暂无主动支持请求，或当前账号没有接收权限。</p>';
+      document.querySelectorAll('[data-support-id]').forEach((button) => { button.onclick = () => updateSupportRequest(button.dataset.supportId, button.dataset.supportAction, button); });
+      document.querySelectorAll('[data-support-share]').forEach((button) => { button.onclick = () => loadSharedExpression(button.dataset.supportShare); });
+    }
+    async function loadSharedExpression(shareId) {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch) || !shareId) return;
+      clearSharedView('正在重新验证分享权限…');
+      const target = $('#supportSharedView'); target.hidden = false;
+      sharedViewShareId = shareId;
+      sharedViewFailures = 0;
+      try {
+        const response = await fetch('/v1/professional/expression-shares/' + encodeURIComponent(shareId), { headers: { authorization: 'Bearer ' + token } });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '分享已失效或无权读取');
+        if (!isActiveSession(epoch) || sharedViewShareId !== shareId) return;
+        sharedViewLastVerifiedAt = Date.now();
+        target.textContent = `${result.data.topic ? `主题：${result.data.topic}\n` : ''}${result.data.note || '仅分享了主题。'}\n\n已按分享权限读取；关闭页面后不会写入普通支持请求摘要。\n\n将在 15 秒后重新验证分享权限。`;
+        scheduleSharedRecheck(shareId, epoch);
+      } catch (error) {
+        if (isActiveSession(epoch) && sharedViewShareId === shareId) { sharedViewFailures += 1; if (!sharedViewLastVerifiedAt || Date.now() - sharedViewLastVerifiedAt >= 30_000 || sharedViewFailures >= 2) clearSharedView('分享已失效或无法重新验证，正文已清除。'); else { target.textContent = '暂时无法重新验证分享权限；正文将在 30 秒内清除。'; scheduleSharedRecheck(shareId, epoch); } }
+      }
+    }
+    function scheduleSharedRecheck(shareId, epoch) {
+      if (sharedViewTimer) clearTimeout(sharedViewTimer);
+      sharedViewTimer = setTimeout(() => {
+        if (!isActiveSession(epoch) || sharedViewShareId !== shareId || document.hidden) { if (document.hidden) clearSharedView('页面隐藏，已清除已授权表达内容。'); return; }
+        loadSharedExpression(shareId);
+      }, 15_000);
+    }
+    function clearSharedView(message = '') {
+      if (sharedViewTimer) { clearTimeout(sharedViewTimer); sharedViewTimer = null; }
+      sharedViewShareId = '';
+      sharedViewLastVerifiedAt = 0;
+      sharedViewFailures = 0;
+      const target = $('#supportSharedView');
+      if (target) { target.textContent = message; target.hidden = !message; }
+    }
+    document.addEventListener('visibilitychange', () => { if (document.hidden && sharedViewShareId) clearSharedView('页面隐藏，已清除已授权表达内容。'); });
+    window.addEventListener('pagehide', () => clearSharedView());
+    async function loadSupportInbox() {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
+      try {
+        const response = await fetch('/v1/professional/support-requests', { headers: { authorization: 'Bearer ' + token } });
+        const result = await response.json();
+        if (!isActiveSession(epoch)) return;
+        renderSupportInbox(result.data || [], result.error?.message);
+        $('#supportInboxStatus').textContent = response.ok ? `已读取 ${result.data?.length || 0} 条主动支持请求。` : (result.error?.message || '支持请求暂时不可用');
+      } catch (error) { if (isActiveSession(epoch)) $('#supportInboxStatus').textContent = error.message || '支持请求暂时不可用'; }
+    }
+    async function loadSupportEscalations() {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
+      try {
+        const response = await fetch('/v1/professional/support-escalations', { headers: { authorization: 'Bearer ' + token } });
+        const result = await response.json();
+        if (!isActiveSession(epoch)) return;
+        const items = result.data || [];
+        $('#supportEscalations').innerHTML = response.ok ? (items.length ? items.map((item) => `<p class="muted">逾期支持请求 ${esc(item.requestId)} · 目标 ${esc(formatWhen(item.ackDueAt))} · ${esc(item.reasonCode)}</p>`).join('') : '<p class="muted">暂无逾期提醒。</p>') : `<p class="muted">${esc(result.error?.message || '逾期提醒暂时不可用')}</p>`;
+      } catch (error) { if (isActiveSession(epoch)) $('#supportEscalations').innerHTML = `<p class="muted">${esc(error.message || '逾期提醒暂时不可用')}</p>`; }
+    }
+    async function updateSupportRequest(requestId, action, button) {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch) || !requestId || !action) return;
+      button.disabled = true;
+      try {
+        if (action === 'note') {
+          const note = $('#support-note').value.trim();
+          if (!note) { $('#supportInboxStatus').textContent = '保存支持记录前请填写最小必要说明。'; button.disabled = false; return; }
+          const response = await fetch('/v1/professional/support-requests/' + encodeURIComponent(requestId) + '/notes', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() }, body: JSON.stringify({ note }) });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error?.message || '支持记录保存失败');
+          $('#support-note').value = ''; $('#supportInboxStatus').textContent = '支持记录已加密保存。'; await loadSupportInbox(); return;
+        }
+        const detailResponse = await fetch('/v1/professional/support-requests/' + encodeURIComponent(requestId), { headers: { authorization: 'Bearer ' + token } });
+        const detail = await detailResponse.json();
+        if (!detailResponse.ok) throw new Error(detail.error?.message || '支持请求暂时不可用');
+        const payload = { action, expectedVersion: detail.data.version };
+        if (action === 'follow_up') {
+          const next = new Date(Date.now() + 24 * 60 * 60_000); payload.nextFollowUpAt = next.toISOString();
+        }
+        const response = await fetch('/v1/professional/support-requests/' + encodeURIComponent(requestId) + '/transitions', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '支持请求状态更新失败');
+        if (!isActiveSession(epoch)) return;
+        $('#supportInboxStatus').textContent = '支持请求状态已更新。'; await loadSupportInbox();
+      } catch (error) { if (isActiveSession(epoch)) { $('#supportInboxStatus').textContent = error.message || '支持请求操作失败'; button.disabled = false; } }
+    }
+    $('#supportInboxRefresh').onclick = () => loadSupportInbox();
+    $('#supportEscalationsRefresh').onclick = () => loadSupportEscalations();
 
     const rightsStateLabel = { open: '待处理', processing: '处理中', completed: '已完成', rejected: '已拒绝' };
     const rightsKindLabel = { access: '查阅', correct: '更正', withdraw: '撤回参与', delete: '删除' };

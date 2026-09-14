@@ -48,6 +48,7 @@ test('health and browser surfaces expose safety headers', async () => {
   assert.equal(response.status, 200);
   assert.equal(body.status, 'ok');
   assert.match(response.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+  assert.equal(response.headers.get('permissions-policy'), 'camera=(), microphone=(), geolocation=()');
   const page = await fetch(base + '/student');
   assert.equal(page.status, 200);
   assert.equal(page.headers.get('cache-control'), 'no-store');
@@ -60,6 +61,21 @@ test('health and browser surfaces expose safety headers', async () => {
   assert.match(pageHtml, /资料权利申请/);
   assert.match(pageHtml, /测评参与说明/);
   assert.match(pageHtml, /自选支持筛查/);
+  assert.match(pageHtml, /表达与支持/);
+  assert.match(pageHtml, /保存我的记录/);
+  assert.match(pageHtml, /创建限时分享/);
+  assert.match(pageHtml, /发起支持请求/);
+  const visualAsset = await fetch(base + '/student/visual-interaction.js');
+  assert.equal(visualAsset.status, 200);
+  assert.doesNotMatch(await visualAsset.text(), /fetch\(/);
+  const previousVisualFlag = process.env.CAMPMIND_VISUAL_DEPLOYMENT_ENABLED;
+  const previousExpressionFlag = process.env.CAMPMIND_EXPRESSION_ENABLED;
+  process.env.CAMPMIND_EXPRESSION_ENABLED = 'true';
+  process.env.CAMPMIND_VISUAL_DEPLOYMENT_ENABLED = 'true';
+  const visualPage = await fetch(base + '/student');
+  assert.equal(visualPage.headers.get('permissions-policy'), 'camera=(self), microphone=(), geolocation=()');
+  if (previousVisualFlag === undefined) delete process.env.CAMPMIND_VISUAL_DEPLOYMENT_ENABLED; else process.env.CAMPMIND_VISUAL_DEPLOYMENT_ENABLED = previousVisualFlag;
+  if (previousExpressionFlag === undefined) delete process.env.CAMPMIND_EXPRESSION_ENABLED; else process.env.CAMPMIND_EXPRESSION_ENABLED = previousExpressionFlag;
   assert.doesNotMatch(pageHtml, /academicYear/);
   const adminPage = await fetch(base + '/admin');
   assert.equal(adminPage.status, 200);
@@ -74,6 +90,8 @@ test('health and browser surfaces expose safety headers', async () => {
   assert.match(adminHtml, /隐私保护统计/);
   assert.match(adminHtml, /复评例外审批/);
   assert.match(adminHtml, /人员信息导入预检/);
+  assert.match(adminHtml, /表达与支持收件箱/);
+  assert.match(adminHtml, /与危机线索工作台分开/);
   assert.match(adminHtml, /量表版本目录/);
   assert.match(adminHtml, /新建量表版本草稿/);
 });
