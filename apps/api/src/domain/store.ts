@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { DatabaseState } from './types.js';
+import type { DatabaseState, AuditEvent, Session, StudentAccessCredential, User } from './types.js';
 import type { PrivateObjectStore } from '../infra/object-store.js';
 
 export interface MediaScanResult {
@@ -24,6 +24,24 @@ export interface NotificationDeliveryResult {
 export interface NotificationDispatcher {
   /** `eventId` is the provider idempotency key; a retry must not duplicate a notification. */
   deliver(input: { eventId: string; tenantId: string; eventType: string; aggregateId: string; priority: 'urgent' | 'attention' | 'routine' }): Promise<NotificationDeliveryResult>;
+}
+
+/**
+ * Login is the one cross-tenant lookup that must happen before a request has
+ * an authenticated tenant context. A production implementation must back this
+ * narrow surface with a reviewed identity/security-definer boundary; it must
+ * not load psychological records merely to authenticate a bearer token.
+ */
+export interface IdentityState {
+  users: User[];
+  sessions: Session[];
+  studentAccessCredentials: StudentAccessCredential[];
+  auditEvents: AuditEvent[];
+}
+
+export interface IdentityRepository {
+  read<T>(fn: (state: IdentityState) => T | Promise<T>): Promise<T>;
+  transaction<T>(fn: (state: IdentityState) => T | Promise<T>): Promise<T>;
 }
 
 const localNotificationDispatcher: NotificationDispatcher = {
@@ -52,6 +70,10 @@ export interface Store {
   read<T>(fn: (state: DatabaseState) => T | Promise<T>): Promise<T>;
   /** Adapter identity is explicit so production cannot accept an arbitrary in-memory substitute. */
   readonly adapterKind?: 'json' | 'postgres';
+  /** True only after the production repository and its RLS health check are ready. */
+  readonly productionReady?: boolean;
+  /** Pre-authentication identity boundary; production must inject a restricted implementation. */
+  readonly identityRepository?: IdentityRepository;
   /** Private media/object storage boundary. Production must inject a managed private adapter. */
   readonly objectStore?: PrivateObjectStore;
   /** Malware scanning boundary. Production must inject a provider-backed scanner. */
@@ -65,7 +87,7 @@ export interface Store {
  * silently writing psychological records to a JSON file is not an acceptable
  * fallback. */
 export function assertProductionStoreInjection(store?: Store): void {
-  if (process.env.NODE_ENV === 'production' && (!store || store instanceof JsonStore || store.adapterKind !== 'postgres' || !store.objectStore || !store.mediaScanner || !store.notificationDispatcher)) throw new Error('Production requires injected PostgreSQL-backed store, private object-store, media-scanner and notification adapters; JsonStore is reference-only');
+  if (process.env.NODE_ENV === 'production' && (!store || store instanceof JsonStore || store.adapterKind !== 'postgres' || store.productionReady !== true || !store.identityRepository || !store.objectStore || !store.mediaScanner || !store.notificationDispatcher)) throw new Error('Production requires an injected PostgreSQL-backed store that is ready, plus a restricted identity, private object-store, media-scanner and notification adapters; JsonStore is reference-only');
 }
 
 /**
@@ -80,12 +102,32 @@ export class JsonStore implements Store {
   readonly objectStore?: PrivateObjectStore;
   readonly mediaScanner?: MediaScanner;
   readonly notificationDispatcher: NotificationDispatcher;
+  readonly identityRepository: IdentityRepository;
 
   constructor(options: StoreOptions = {}) {
     this.filePath = options.filePath;
     this.objectStore = options.objectStore;
     this.mediaScanner = options.mediaScanner;
     this.notificationDispatcher = options.notificationDispatcher ?? localNotificationDispatcher;
+    this.identityRepository = {
+      read: (fn) => this.read((state) => fn({ users: state.users, sessions: state.sessions, studentAccessCredentials: state.studentAccessCredentials, auditEvents: state.auditEvents })),
+      transaction: (fn) => this.transaction(async (state) => {
+        // Keep the identity adapter narrow while preserving reassignment made
+        // by session/credential rotation inside the parent DatabaseState.
+        const identityState: IdentityState = {
+          users: state.users,
+          sessions: state.sessions,
+          studentAccessCredentials: state.studentAccessCredentials,
+          auditEvents: state.auditEvents,
+        };
+        const result = await fn(identityState);
+        state.users = identityState.users;
+        state.sessions = identityState.sessions;
+        state.studentAccessCredentials = identityState.studentAccessCredentials;
+        state.auditEvents = identityState.auditEvents;
+        return result;
+      }),
+    };
     if (options.initial) {
       this.state = { ...emptyState(), ...structuredClone(options.initial) };
       this.persist();

@@ -1,5 +1,7 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 /**
- * PostgreSQL connection-pool boundary used by the future production adapter.
+ * PostgreSQL connection-pool boundary used by the production adapter.
  *
  * The domain layer receives a Store implementation, but every SQL transaction
  * must establish the tenant context on the leased connection before any query.
@@ -22,10 +24,32 @@ export interface PostgresPool {
   connect(): Promise<PostgresPoolClient>;
 }
 
-function assertTenantId(tenantId: string): void {
+const tenantContext = new AsyncLocalStorage<string>();
+
+export function assertTenantContext(tenantId: string): void {
   if (typeof tenantId !== 'string' || !tenantId.trim() || tenantId.length > 128 || /[\0\r\n]/.test(tenantId)) {
     throw new Error('TENANT_CONTEXT_INVALID');
   }
+}
+
+/**
+ * Carry the authenticated tenant through an asynchronous request without a
+ * mutable process-global variable. A PostgreSQL Store uses this context to
+ * establish `app.tenant_id` before it reads or mutates any tenant-owned row.
+ */
+export function withTenantContext<T>(tenantId: string, work: () => T): T {
+  assertTenantContext(tenantId);
+  return tenantContext.run(tenantId, work);
+}
+
+export function currentTenantContext(): string | undefined {
+  return tenantContext.getStore();
+}
+
+export function requireTenantContext(): string {
+  const tenantId = currentTenantContext();
+  if (!tenantId) throw new Error('TENANT_CONTEXT_REQUIRED');
+  return tenantId;
 }
 
 /**
@@ -35,7 +59,7 @@ function assertTenantId(tenantId: string): void {
  * failure so a pooled connection cannot retain a tenant context.
  */
 export async function withTenantTransaction<T>(client: PostgresClient, tenantId: string, work: (client: PostgresClient) => Promise<T>): Promise<T> {
-  assertTenantId(tenantId);
+  assertTenantContext(tenantId);
   await client.query('BEGIN');
   try {
     await client.query("select set_config('app.tenant_id', $1, true)", [tenantId]);
@@ -50,6 +74,7 @@ export async function withTenantTransaction<T>(client: PostgresClient, tenantId:
 
 /** Lease and release a pool connection around the tenant-scoped transaction. */
 export async function withTenantPoolTransaction<T>(pool: PostgresPool, tenantId: string, work: (client: PostgresClient) => Promise<T>): Promise<T> {
+  assertTenantContext(tenantId);
   const client = await pool.connect();
   let released = false;
   const release = (error?: Error) => {

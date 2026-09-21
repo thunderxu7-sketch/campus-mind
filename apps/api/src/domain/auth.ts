@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { DomainError, forbidden, unauthorized } from './errors.js';
 import { assertProductionConfig, decrypt, hashPassword, hashToken, randomToken, verifyPassword, verifyTotpCode } from './crypto.js';
 import type { AuthenticatedUser, DatabaseState, Role, Session, User } from './types.js';
-import type { Store } from './store.js';
+import type { IdentityState, Store } from './store.js';
 
 const SESSION_DAYS = 8;
 const STUDENT_CREDENTIAL_SESSION_HOURS = 8;
@@ -33,13 +33,21 @@ export function safeUser(user: User): Omit<User, 'passwordHash'> {
   return publicUser;
 }
 
+function identityRead<T>(store: Store, fn: (state: IdentityState) => T | Promise<T>): Promise<T> {
+  return store.identityRepository ? store.identityRepository.read(fn) : store.read(fn as (state: DatabaseState) => T | Promise<T>);
+}
+
+function identityTransaction<T>(store: Store, fn: (state: IdentityState) => T | Promise<T>): Promise<T> {
+  return store.identityRepository ? store.identityRepository.transaction(fn) : store.transaction(fn as (state: DatabaseState) => T | Promise<T>);
+}
+
 export async function login(store: Store, email: string, password: string, mfaCode?: string): Promise<{ token: string; user: Omit<User, 'passwordHash'>; expiresAt: string }> {
   assertProductionConfig();
   const normalized = email.trim().toLowerCase();
   const token = randomToken();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + SESSION_DAYS * 86_400_000).toISOString();
-  await store.transaction((state) => {
+  const userId = await identityTransaction(store, (state) => {
     const user = state.users.find((candidate) => candidate.email === normalized && candidate.active);
     if (!user || !verifyPassword(password, user.passwordHash)) throw new DomainError('INVALID_CREDENTIALS', '邮箱或密码错误', 401);
     if (user.mfaEnabled && process.env.CAMPMIND_DEMO_MFA !== 'true') {
@@ -53,8 +61,9 @@ export async function login(store: Store, email: string, password: string, mfaCo
     }
     state.sessions = state.sessions.filter((session) => session.expiresAt > now.toISOString() && !session.revokedAt);
     state.sessions.push({ tokenHash: hashToken(token), userId: user.id, tenantId: user.tenantId, expiresAt, createdAt: now.toISOString() });
+    return user.id;
   });
-  const user = await store.read((state) => state.users.find((candidate) => candidate.email === normalized));
+  const user = await identityRead(store, (state) => state.users.find((candidate) => candidate.id === userId));
   if (!user) throw unauthorized();
   return { token, user: safeUser(user), expiresAt };
 }
@@ -99,7 +108,7 @@ export async function loginWithStudentAccessCode(store: Store, code: string): Pr
   const token = randomToken();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + STUDENT_CREDENTIAL_SESSION_HOURS * 60 * 60_000).toISOString();
-  return store.transaction((state) => {
+  return identityTransaction(store, (state) => {
     const credential = state.studentAccessCredentials.find((candidate) => candidate.codeHash === hashToken(code) && !candidate.usedAt && candidate.expiresAt > now.toISOString());
     const user = credential ? state.users.find((candidate) => candidate.id === credential.studentId && candidate.tenantId === credential.tenantId && candidate.role === 'student' && candidate.active) : undefined;
     if (!credential || !user) throw new DomainError('STUDENT_CREDENTIAL_INVALID', '学生凭证无效或已过期', 401);
@@ -134,7 +143,7 @@ export async function authenticate(store: Store, authorization: string | undefin
   const token = authorization.slice('Bearer '.length).trim();
   if (!token) throw unauthorized();
   const now = new Date().toISOString();
-  return store.read((state: DatabaseState) => {
+  return identityRead(store, (state) => {
     const session = state.sessions.find((candidate) => candidate.tokenHash === hashToken(token) && !candidate.revokedAt && candidate.expiresAt > now);
     if (!session) throw unauthorized();
     const user = state.users.find((candidate) => candidate.id === session.userId && candidate.active && candidate.tenantId === session.tenantId);
@@ -144,7 +153,7 @@ export async function authenticate(store: Store, authorization: string | undefin
 }
 
 export async function logout(store: Store, session: Session): Promise<void> {
-  await store.transaction((state) => {
+  await identityTransaction(store, (state) => {
     const record = state.sessions.find((candidate) => candidate.tokenHash === session.tokenHash);
     if (record) record.revokedAt = new Date().toISOString();
   });

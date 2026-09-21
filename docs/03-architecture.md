@@ -67,7 +67,7 @@ packages/
 infra/                # 环境模板与运行手册（后续）
 ```
 
-当前仓库已提供 `apps/api`、`apps/admin-web`、`apps/student-web`、`test` 和 `infra/migrations` 的合成数据参考实现；管理端/学生端目前是静态 HTML，API/Worker 是轻量 Node 实现，尚未接入 React/Vite/NestJS/Redis，也尚未创建空的 `packages/*`，避免产生“生产组件已实现”的误解。`apps/api/src/infra/postgres-context.ts` 提供不绑定驱动的租户事务/连接池生命周期辅助函数，需由真正的 PostgreSQL Store 适配器调用并在目标环境验证。
+当前仓库已提供 `apps/api`、`apps/admin-web`、`apps/student-web`、`test` 和 `infra/migrations` 的合成数据参考实现；管理端/学生端目前是静态 HTML，API/Worker 是轻量 Node 实现，尚未接入 React/Vite/NestJS/Redis，也尚未创建空的 `packages/*`，避免产生“生产组件已实现”的误解。`apps/api/src/infra/postgres-context.ts` 提供不绑定驱动的租户事务/连接池生命周期辅助函数，`apps/api/src/infra/postgres-store.ts` 和 `apps/api/src/infra/postgres-state-repository.ts` 现在提供规范化 SQL Store 契约与状态映射；公开内容读取、Worker/平台聚合、真实供应商和目标环境验证仍待完成。
 
 ## 4. 租户与授权防线
 

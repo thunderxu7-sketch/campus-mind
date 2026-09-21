@@ -31,6 +31,9 @@ const store = readFileSync(join(root, 'apps/api/src/domain/store.ts'), 'utf8');
 const service = readFileSync(join(root, 'apps/api/src/domain/service.ts'), 'utf8');
 const expressionSupport = readFileSync(join(root, 'apps/api/src/domain/expression-support.ts'), 'utf8');
 const objectStore = readFileSync(join(root, 'apps/api/src/infra/object-store.ts'), 'utf8');
+const postgresContext = readFileSync(join(root, 'apps/api/src/infra/postgres-context.ts'), 'utf8');
+const postgresStore = readFileSync(join(root, 'apps/api/src/infra/postgres-store.ts'), 'utf8');
+const postgresStateRepository = readFileSync(join(root, 'apps/api/src/infra/postgres-state-repository.ts'), 'utf8');
 const scoring = readFileSync(join(root, 'apps/api/src/domain/scoring.ts'), 'utf8');
 const adminWeb = readFileSync(join(root, 'apps/admin-web/index.html'), 'utf8');
 const studentWeb = readFileSync(join(root, 'apps/student-web/index.html'), 'utf8');
@@ -48,6 +51,13 @@ const requiredSnippets = [
   [store, 'assertProductionStoreInjection', 'production adapter guard'],
   [store, 'objectStore', 'private object-store boundary'],
   [store, 'notificationDispatcher', 'provider-backed notification boundary'],
+  [postgresContext, 'AsyncLocalStorage', 'asynchronous tenant context boundary'],
+  [postgresContext, 'assertTenantContext', 'tenant context validation'],
+  [postgresContext, "set_config('app.tenant_id', $1, true)", 'transaction-local RLS context'],
+  [postgresStore, 'requireTenantContext', 'PostgreSQL Store context requirement'],
+  [postgresStore, 'productionReady', 'PostgreSQL Store readiness boundary'],
+  [postgresStateRepository, 'pg_advisory_xact_lock', 'PostgreSQL tenant write lock'],
+  [postgresStateRepository, 'TENANT_SCOPE_VIOLATION', 'PostgreSQL state tenant guard'],
   [service, 'CAMPMIND_NOTIFICATION_ADAPTER_READY', 'runtime notification readiness guard'],
   [expressionSupport, 'student_self_report', 'expression source boundary'],
   [expressionSupport, 'requestDigest', 'expression HMAC idempotency boundary'],

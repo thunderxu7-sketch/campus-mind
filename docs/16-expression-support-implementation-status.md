@@ -1,7 +1,7 @@
 # 表达与支持扩展 · 执行状态与证据
 
-更新时间：2026-09-14  
-范围：`codex/implement-mvp-foundation` 本地参考实现；只使用合成身份和合成文本。
+更新时间：2026-09-21
+范围：本地参考实现；只使用合成身份和合成文本。
 
 ## 已按依赖顺序落地
 
@@ -42,6 +42,13 @@ psql ... --set ON_ERROR_STOP=1 --file infra/migrations/002_expression_support.sq
 
 当前测试覆盖：学生记录/分享/支持生命周期、同意撤回、幂等冲突、字段白名单、8 KiB 限制、专业对象授权、普通请求不产生 `RiskCase`、静态页面头、JSON 快照兼容、迁移表/RLS/索引检查。真实浏览器、实机摄像头、供应商故障与生产适配器尚未作为通过证据。
 
+## 生产化第一步（当前开发批次）
+
+- 新增 `PostgresStore` 生产边界和 `PostgresStateRepository` 契约：只接受 `kind=postgres`、`ready=true` 的实现，并要求私有对象存储、媒体扫描和通知适配器同时注入。
+- 新增异步 `AsyncLocalStorage` 租户上下文；PostgreSQL 实现必须在该上下文内建立事务级 `app.tenant_id`，不能使用可变全局租户变量。
+- `outbox_events` 迁移补齐 `cancelled_at` 与 `cancel_reason_code`，CI 增加列和约束断言。
+- 本批次已完成安全的适配器契约、规范化 SQL 状态映射和 fail-closed 检查；**尚未声称完成真实对象存储、身份、通知供应商、公开内容读取、Worker/平台聚合接入或目标环境演练**，这些仍是下一批次的实现范围。
+
 ## 尚未完成且不得营销为已实现
 
 1. **ES-13 / ES-15**：真实 SDK/模型的许可证、锁版本/哈希、目标浏览器实机资源释放、网络/存储/性能证据；在证据完成前不得启用视觉开关。
@@ -52,4 +59,3 @@ psql ... --set ON_ERROR_STOP=1 --file infra/migrations/002_expression_support.sq
 ### 关闭与回滚
 
 发现越权、正文/视觉数据外传、摄像头未停止、无人接续或误导性心理推断时，先关闭相应 feature flag，保留帮助、取消、撤回和权利入口；不 DROP 表、不把普通支持请求改写成危机结论。
-

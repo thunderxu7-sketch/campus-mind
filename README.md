@@ -59,14 +59,14 @@
 
 **生产规划方向**：TypeScript 单仓、React + Vite（管理端 / 学生端）、NestJS API 与 Worker、PostgreSQL、Redis 队列、私有对象存储。核心计分独立纯函数包；从模块化单体起步，不先上微服务、AI 诊断或 Kubernetes。以上选型尚未表示已经采购或接入。
 
-当前已提供一个**合成数据参考实现**（Node 20+），使用轻量 Node HTTP API 与静态响应式页面验证领域不变量；同时包含加密 JSON 本地适配器、版本化演示计分、人工复核工作流、受控导入/导出、预约、教育内容、媒体安全检查、学生反馈与权利申请入口、专业档案/报告工作台、运维接续按钮、无手机学生一次性短期凭证和 PostgreSQL 迁移草案。React/Vite/NestJS/Redis 等生产组件尚未在本参考实现中接入。它不是生产部署，也不能接收真实学生资料。生产环境必须替换存储、密钥、通知和身份接入，并通过 M4 Gate。
+当前已提供一个**合成数据参考实现**（Node 20+），使用轻量 Node HTTP API 与静态响应式页面验证领域不变量；同时包含加密 JSON 本地适配器、版本化演示计分、人工复核工作流、受控导入/导出、预约、教育内容、媒体安全检查、学生反馈与权利申请入口、专业档案/报告工作台、运维接续按钮、无手机学生一次性短期凭证和 PostgreSQL 迁移草案。当前开发批次新增了规范化 SQL PostgreSQL Store 契约/状态映射和异步租户上下文，但尚未接入真实对象存储、身份、通知供应商或 Worker/平台聚合运行时。React/Vite/NestJS/Redis 等生产组件尚未在本参考实现中接入。它不是生产部署，也不能接收真实学生资料。生产环境必须替换存储、密钥、通知和身份接入，并通过 M4 Gate。
 
 ```sh
 npm install
 CAMPMIND_DEMO_MFA=true CAMPMIND_MASTER_KEY=local-only-key npm start
 # 管理端 http://localhost:8787/admin；学生端 http://localhost:8787/student
 
-npm run check       # TypeScript、54 项行为测试、安全扫描与规划校验
+npm run check       # TypeScript、64 项行为测试、安全扫描与规划校验
 npm run drill:capacity  # 合成并发基线（输出 p50/p95/错误率）
 npm run drill:recovery  # 合成快照与加密私有对象恢复演练
 npm run drill:crisis    # 合成危机线索、人工接续与死信恢复演练

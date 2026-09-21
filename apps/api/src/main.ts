@@ -14,6 +14,7 @@ import type { Store } from './domain/store.js';
 import { seedDemoState } from './domain/seed.js';
 import type { AuthenticatedUser, DatabaseState } from './domain/types.js';
 import { EncryptedFileObjectStore } from './infra/object-store.js';
+import { withTenantContext } from './infra/postgres-context.js';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const DATA_FILE = process.env.CAMPMIND_DATA_FILE ?? resolve(process.cwd(), 'private-data/demo-store.json');
@@ -206,6 +207,10 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
     const auth = await getAuth(req, store); await logout(store, auth.session); json(res, 204, {}); return;
   }
   const auth = await getAuth(req, store);
+  await withTenantContext(auth.user.tenantId, () => routeAuthenticatedApi(req, res, method, path, url, store, segments, input, auth));
+}
+
+async function routeAuthenticatedApi(req: IncomingMessage, res: ServerResponse, method: string, path: string, url: URL, store: Store, segments: string[], input: Record<string, unknown>, auth: AuthenticatedUser): Promise<void> {
   if (method === 'GET' && path === '/v1/me') { json(res, 200, { data: await currentUser(store, auth) }); return; }
   // Student-led expression and support workflows. These routes deliberately
   // expose metadata by default; encrypted text is returned only to the owner

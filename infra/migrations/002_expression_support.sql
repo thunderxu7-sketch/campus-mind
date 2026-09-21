@@ -11,6 +11,13 @@ alter table consents drop constraint if exists consents_purpose_check;
 alter table consents add constraint consents_purpose_check check (purpose in ('assessment','support','research','self_expression','visual_interaction'));
 alter table outbox_events drop constraint if exists outbox_events_status_check;
 alter table outbox_events add constraint outbox_events_status_check check (status in ('pending','published','dead_letter','cancelled'));
+alter table outbox_events add column if not exists cancelled_at timestamptz;
+alter table outbox_events add column if not exists cancel_reason_code text;
+do $$
+begin
+  alter table outbox_events add constraint outbox_events_cancel_reason_check check (cancel_reason_code is null or cancel_reason_code in ('request_cancelled','consent_revoked','already_acknowledged','schedule_replaced','recipient_unavailable'));
+exception when duplicate_object then null;
+end $$;
 do $$
 begin
   alter table consents add constraint consents_tenant_id_id_key unique (tenant_id, id);
