@@ -49,6 +49,12 @@ psql ... --set ON_ERROR_STOP=1 --file infra/migrations/002_expression_support.sq
 - `outbox_events` 迁移补齐 `cancelled_at` 与 `cancel_reason_code`，CI 增加列和约束断言。
 - 本批次已完成安全的适配器契约、规范化 SQL 状态映射和 fail-closed 检查；**尚未声称完成真实对象存储、身份、通知供应商、公开内容读取、Worker/平台聚合接入或目标环境演练**，这些仍是下一批次的实现范围。
 
+## 生产化第二步（当前开发批次）
+
+- 加入 `pg` 驱动运行时边界：连接串、TLS、连接池大小/超时和应用名均经过上限校验；生产没有 TLS 或缺少连接串时 fail closed。
+- `probePostgresPool()` 只执行 `select 1` 并释放连接；数据库是否达到 RLS/迁移 readiness 仍由 `PostgresStateRepository.healthCheck()` 与 CI/目标环境演练判定。
+- 本批次仍不把 `pg` 驱动误称为身份服务、对象存储或通知供应商；这些适配器以及 API 生产组装仍未完成。
+
 ## 尚未完成且不得营销为已实现
 
 1. **ES-13 / ES-15**：真实 SDK/模型的许可证、锁版本/哈希、目标浏览器实机资源释放、网络/存储/性能证据；在证据完成前不得启用视觉开关。

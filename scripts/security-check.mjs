@@ -32,6 +32,7 @@ const service = readFileSync(join(root, 'apps/api/src/domain/service.ts'), 'utf8
 const expressionSupport = readFileSync(join(root, 'apps/api/src/domain/expression-support.ts'), 'utf8');
 const objectStore = readFileSync(join(root, 'apps/api/src/infra/object-store.ts'), 'utf8');
 const postgresContext = readFileSync(join(root, 'apps/api/src/infra/postgres-context.ts'), 'utf8');
+const postgresRuntime = readFileSync(join(root, 'apps/api/src/infra/postgres-runtime.ts'), 'utf8');
 const postgresStore = readFileSync(join(root, 'apps/api/src/infra/postgres-store.ts'), 'utf8');
 const postgresStateRepository = readFileSync(join(root, 'apps/api/src/infra/postgres-state-repository.ts'), 'utf8');
 const scoring = readFileSync(join(root, 'apps/api/src/domain/scoring.ts'), 'utf8');
@@ -54,6 +55,10 @@ const requiredSnippets = [
   [postgresContext, 'AsyncLocalStorage', 'asynchronous tenant context boundary'],
   [postgresContext, 'assertTenantContext', 'tenant context validation'],
   [postgresContext, "set_config('app.tenant_id', $1, true)", 'transaction-local RLS context'],
+  [postgresRuntime, 'POSTGRES_TLS_REQUIRED', 'PostgreSQL production TLS guard'],
+  [postgresRuntime, 'POSTGRES_TLS_VERIFY_REQUIRED', 'PostgreSQL certificate verification guard'],
+  [postgresRuntime, 'POSTGRES_POOL_MAX_INVALID', 'PostgreSQL bounded pool settings'],
+  [postgresRuntime, "select 1", 'PostgreSQL no-data connectivity probe'],
   [postgresStore, 'requireTenantContext', 'PostgreSQL Store context requirement'],
   [postgresStore, 'productionReady', 'PostgreSQL Store readiness boundary'],
   [postgresStateRepository, 'pg_advisory_xact_lock', 'PostgreSQL tenant write lock'],
