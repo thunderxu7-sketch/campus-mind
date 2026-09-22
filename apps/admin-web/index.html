@@ -187,6 +187,10 @@
     const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     const setStatus = (message) => { $('#status').textContent = message; };
     const isActiveSession = (epoch) => epoch === sessionEpoch && Boolean(token);
+    async function readJson(response) {
+      const text = await response.text();
+      return text ? JSON.parse(text) : {};
+    }
 
     // Shared workstations must not briefly expose the previous operator's
     // records while the next account is loading. Clear both rendered results
@@ -286,7 +290,7 @@
       for (const [name, id] of Object.entries(fields)) { const value = $('#' + id).value; if (value) params.set(name, value); }
       try {
         const response = await fetch('/v1/admin/scales?' + params.toString(), { headers: { authorization: 'Bearer ' + token } });
-        const result = await response.json();
+        const result = await readJson(response);
         if (!response.ok) throw new Error(result.error?.message || '量表目录暂时不可用');
         if (!isActiveSession(epoch)) return;
         renderScaleCatalog(result.data || []);
@@ -304,7 +308,7 @@
       try {
         const body = action === 'revoke' ? { reason: $('#scale-revoke-reason').value.trim() } : {};
         const response = await fetch('/v1/scales/' + encodeURIComponent(scaleId) + '/' + (action === 'approve' ? 'approve' : 'revoke'), { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(body) });
-        const result = await response.json();
+        const result = await readJson(response);
         if (!response.ok) throw new Error(result.error?.message || '量表版本操作失败');
         if (!isActiveSession(epoch)) return;
         $('#scaleCatalogStatus').textContent = action === 'approve' ? '版本已记录专业批准。' : '版本已撤销，新任务将不能使用。';
@@ -323,7 +327,7 @@
         try { items = JSON.parse(form.itemsJson); } catch { throw new Error('题目 JSON 格式无效'); }
         if (form.warningRuleJson.trim()) { try { warningRule = JSON.parse(form.warningRuleJson); } catch { throw new Error('预警规则 JSON 格式无效'); } }
         const response = await fetch('/v1/scales', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ code: form.code, title: form.title, version: form.version, provenance: form.provenance, minAge: Number(form.minAge), maxAge: Number(form.maxAge), population: form.population, language: form.language, scoringVersion: form.scoringVersion, noticeVersion: form.noticeVersion, dimensions: form.dimensions.split(',').map((value) => value.trim()).filter(Boolean), licenseExpiresAt: form.licenseExpiresAt ? new Date(form.licenseExpiresAt).toISOString() : undefined, reviewEvidenceRef: form.reviewEvidenceRef || undefined, items, warningRule }) });
-        const result = await response.json();
+        const result = await readJson(response);
         if (!response.ok) throw new Error(result.error?.message || '量表版本草稿保存失败');
         if (!isActiveSession(epoch)) return;
         $('#scaleCatalogStatus').textContent = '量表版本草稿已保存；需由不同专业负责人审核。';
@@ -735,7 +739,7 @@
       const body = action === 'revoke' ? { reason: '合成演示：专业复核后撤回' } : {};
       try {
         const response = await fetch('/v1/reports/' + encodeURIComponent(reportId) + '/' + path, { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(body) });
-        const result = await response.json();
+        const result = await readJson(response);
         if (!response.ok) throw new Error(result.error?.message || '报告操作失败');
         if (!isActiveSession(epoch)) return;
         setStatus(action === 'approve' ? '报告已审核' : action === 'release' ? '报告已发布' : '报告已撤回');

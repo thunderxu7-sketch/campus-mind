@@ -167,6 +167,10 @@
     const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     const setStatus = (message) => { $('#status').textContent = message; };
     const isActiveSession = (epoch) => epoch === sessionEpoch && Boolean(token);
+    async function readJson(response) {
+      const text = await response.text();
+      return text ? JSON.parse(text) : {};
+    }
     $('#access-code').addEventListener('input', (event) => {
       const usingCode = Boolean(event.target.value.trim());
       $('#email').type = usingCode ? 'text' : 'email';
@@ -177,7 +181,7 @@
     async function api(path, opts = {}) {
       opts.headers = { ...(opts.headers || {}), authorization: 'Bearer ' + token, 'content-type': 'application/json' };
       const response = await fetch(path, opts);
-      const payload = await response.json();
+      const payload = await readJson(response);
       if (!response.ok) {
         const error = new Error(payload.error?.message || '请求失败');
         error.code = payload.error?.code;
@@ -191,7 +195,7 @@
       const target = $('#educationList');
       try {
         const response = await fetch('/v1/content/public');
-        const payload = await response.json();
+        const payload = await readJson(response);
         if (!response.ok) throw new Error(payload.error?.message || '教育内容暂时不可用');
         const items = Array.isArray(payload.data) ? payload.data : [];
         if (!items.length) { target.innerHTML = '<p class="muted">暂时没有已发布的教育资源。</p>'; return; }
@@ -364,7 +368,15 @@
     function renderQuestions(scale, answers = {}) {
       const groups = scale.items.map((question) => {
         const selected = answers[question.id];
-        return `<fieldset><legend>${esc(question.prompt)}</legend><label><input type="radio" name="${esc(question.id)}" value="0" ${selected === 0 ? 'checked' : ''}> 暂时不是</label><label><input type="radio" name="${esc(question.id)}" value="1" ${selected === 1 ? 'checked' : ''}> 有时或经常</label></fieldset>`;
+        const min = Number.isInteger(question.min) ? question.min : 0;
+        const configuredMax = Number.isInteger(question.max) ? question.max : 1;
+        const max = configuredMax >= min && configuredMax - min <= 20 ? configuredMax : min + 1;
+        const options = [];
+        for (let value = min; value <= max; value += 1) {
+          const label = min === 0 && max === 1 ? (value === 0 ? '暂时不是' : '有时或经常') : String(value);
+          options.push(`<label><input type="radio" name="${esc(question.id)}" value="${esc(value)}" ${selected === value ? 'checked' : ''}> ${esc(label)}</label>`);
+        }
+        return `<fieldset><legend>${esc(question.prompt)}</legend>${options.join('')}</fieldset>`;
       }).join('');
       $('#questions').innerHTML = `<h3>${esc(scale.title)}</h3><p class="muted">答案只在服务端保存；关闭页面前请等待“已保存”提示。</p>${groups}<p id="saveStatus" class="save-status" role="status" aria-live="polite"></p><div class="actions"><button id="save" type="button">保存并提交</button><button id="saveDraft" type="button" class="secondary">仅保存草稿</button></div>`;
       document.querySelectorAll('#questions input').forEach((input) => input.addEventListener('change', () => {
@@ -648,7 +660,7 @@
         clearClient();
         loginEpoch = sessionEpoch;
         const response = await fetch('/v1/auth/login', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body) });
-        const payload = await response.json();
+        const payload = await readJson(response);
         if (!response.ok) throw new Error(payload.error?.message || '登录失败');
         if (loginEpoch !== sessionEpoch) return;
         token = payload.data.token;

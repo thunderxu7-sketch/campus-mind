@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { approveFrequencyException, approveScale, beginAttempt, createCampaign, createConsent, createScale, createSelfScreening, listAvailableScales, listMyTasks, listScaleCatalog, publishCampaign, revokeScale, saveAnswers, updateCampaignState, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
+import { acknowledgeCase, addFollowUp, approveFrequencyException, approveScale, beginAttempt, createCampaign, createConsent, createRiskSignal, createScale, createSelfScreening, listAvailableScales, listMyTasks, listScaleCatalog, listStudents, publishCampaign, requestClosure, reviewCase, revokeScale, saveAnswers, updateCampaignState, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
 import { JsonStore } from '../dist/apps/api/src/domain/store.js';
 import { DEMO_IDS, seedDemoState } from '../dist/apps/api/src/domain/seed.js';
 
@@ -209,6 +209,27 @@ test('scale author cannot approve their own draft version', async () => {
   const approved = await approveScale(store, reviewer, scale.id);
   assert.equal(approved.status, 'approved');
   await assert.rejects(() => createScale(store, author, { code: 'SYNTH-LONG', title: 'x'.repeat(201), version: '1.0.0', provenance: 'synthetic_only', minAge: 12, maxAge: 18, scoringVersion: 'synthetic-v1', noticeVersion: 'notice-demo-v1', items: [{ id: 'q1', prompt: '合成题', min: 0, max: 1, reverse: false, factor: 'factor' }] }), (error) => error.code === 'SCALE_INVALID');
+});
+
+test('scale item ranges stay within the student control rendering bound', async () => {
+  const store = new JsonStore({ initial: seedDemoState() });
+  const author = authFor(store.snapshot(), 'user-professional-demo');
+  const accepted = await createScale(store, author, { code: 'SYNTH-RANGE-03', title: '合成三点评分方案', version: '1.0.0', provenance: 'synthetic_only', minAge: 12, maxAge: 18, scoringVersion: 'synthetic-range-v1', noticeVersion: 'notice-demo-v1', items: [{ id: 'q1', prompt: '合成三点评分题', min: 0, max: 3, reverse: false, factor: 'factor' }] });
+  assert.equal(accepted.items[0].max, 3);
+  await assert.rejects(() => createScale(store, author, { code: 'SYNTH-RANGE-TOO-WIDE', title: '合成超宽评分方案', version: '1.0.0', provenance: 'synthetic_only', minAge: 12, maxAge: 18, scoringVersion: 'synthetic-range-wide-v1', noticeVersion: 'notice-demo-v1', items: [{ id: 'q1', prompt: '合成超宽评分题', min: 0, max: 21, reverse: false, factor: 'factor' }] }), (error) => error.code === 'SCALE_INVALID');
+});
+
+test('counselor object scope rejects unassigned students and cases', async () => {
+  const store = new JsonStore({ initial: seedDemoState() });
+  const lead = authFor(store.snapshot(), 'user-professional-demo');
+  const counselor = authFor(store.snapshot(), 'user-counselor-demo');
+  const riskCase = await createRiskSignal(store, lead, { studentId: DEMO_IDS.student, level: 'attention', source: 'staff_observation', reason: '合成测试：负责人创建待分配线索' });
+  assert.deepEqual(await listStudents(store, counselor), []);
+  await assert.rejects(() => createRiskSignal(store, counselor, { studentId: DEMO_IDS.student, level: 'attention', reason: '合成测试：咨询师越权线索' }), (error) => error.code === 'NOT_FOUND');
+  await reviewCase(store, lead, riskCase.id, { decision: 'confirm', note: '合成测试：负责人完成初步复核。' });
+  await acknowledgeCase(store, lead, riskCase.id);
+  await assert.rejects(() => addFollowUp(store, counselor, riskCase.id, { kind: 'follow_up', note: '合成测试：未授权随访。' }), (error) => error.code === 'NOT_FOUND');
+  await assert.rejects(() => requestClosure(store, counselor, riskCase.id, '合成测试：未授权结案申请。'), (error) => error.code === 'NOT_FOUND');
 });
 
 test('assessment consent withdrawal stops an in-progress draft and pending processing', async () => {

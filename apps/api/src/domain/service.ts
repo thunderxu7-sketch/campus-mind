@@ -17,6 +17,11 @@ const sameTenant = <T extends { tenantId: string }>(record: T, tenantId: string)
 const hashExternal = (value: string): string => createHash('sha256').update(value.trim()).digest('hex');
 const validDate = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(new Date(value).getTime());
 const academicYearPattern = /^(\d{4})-(\d{4})$/;
+const SMALL_SAMPLE_THRESHOLD = 10;
+const MAX_SCALE_ITEM_RANGE = 20;
+const MAX_IMPORT_FIELD_LENGTH = 200;
+const MIN_IMPORT_AGE = 6;
+const MAX_IMPORT_AGE = 19;
 function validAcademicYear(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   const match = value.match(academicYearPattern);
@@ -40,6 +45,39 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 const importPreviewHash = (rows: Array<Record<string, unknown>>): string => createHash('sha256').update(stableJson(rows)).digest('hex');
+interface NormalizedImportRow {
+  externalId: string;
+  displayName: string;
+  age: number;
+  classId: string;
+  guardianVerified: boolean;
+  guardianValueValid: boolean;
+}
+
+interface ImportRowInspection {
+  normalized: NormalizedImportRow;
+  externalRef: string;
+  duplicate: boolean;
+  valid: boolean;
+  message?: string;
+}
+
+function inspectImportRow(raw: Record<string, unknown>, seenExternalRefs: Set<string>): ImportRowInspection {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const externalId = typeof source.externalId === 'string' ? source.externalId.trim() : '';
+  const displayName = typeof source.displayName === 'string' ? source.displayName.trim() : '';
+  const age = typeof source.age === 'number' ? source.age : Number(source.age);
+  const classId = typeof source.classId === 'string' ? source.classId.trim() : '';
+  const guardianValueValid = source.guardianVerified === undefined || typeof source.guardianVerified === 'boolean';
+  const normalized: NormalizedImportRow = { externalId, displayName, age, classId, guardianVerified: source.guardianVerified === true, guardianValueValid };
+  const baseValid = Boolean(externalId && displayName && classId && externalId.length <= MAX_IMPORT_FIELD_LENGTH && displayName.length <= MAX_IMPORT_FIELD_LENGTH && classId.length <= MAX_IMPORT_FIELD_LENGTH && Number.isInteger(age) && age >= MIN_IMPORT_AGE && age <= MAX_IMPORT_AGE && guardianValueValid);
+  const externalRef = externalId ? hashExternal(externalId) : '';
+  const duplicate = Boolean(externalRef && seenExternalRefs.has(externalRef));
+  if (externalRef) seenExternalRefs.add(externalRef);
+  const valid = baseValid && !duplicate;
+  const message = valid ? undefined : duplicate ? '本批次 externalId 重复' : `需要 externalId、displayName、classId 和 ${MIN_IMPORT_AGE}–${MAX_IMPORT_AGE} 岁整数 age；字段长度和 guardianVerified 类型也必须有效`;
+  return { normalized, externalRef, duplicate, valid, message };
+}
 type PublicRightsRequest = Omit<RightsRequest, 'resultCiphertext' | 'decisionReasonCiphertext' | 'reason' | 'reasonCiphertext'> & { resultReady: boolean; hasReason: boolean };
 type PublicExportJob = Omit<ExportJob, 'payloadCiphertext'> & { ready: boolean };
 type PublicConsent = Pick<ConsentRecord, 'id' | 'purpose' | 'noticeVersion' | 'actorType' | 'status' | 'recordedAt' | 'withdrawnAt'>;
@@ -348,20 +386,9 @@ export async function previewImport(store: Store, auth: AuthenticatedUser, input
     const batch: ImportBatch = { id: id(), tenantId: auth.user.tenantId, schoolId: school.id, createdBy: auth.user.id, filename: input.filename.slice(0, 200), status: 'previewed', mappingVersion: 1, rowCount: input.rows.length, validRowCount: 0, errorCount: 0, previewHash: importPreviewHash(input.rows), createdAt: now() };
     const seenExternalRefs = new Set<string>();
     const output: ImportRowResult[] = input.rows.map((raw, index) => {
-      const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
-      const externalId = typeof source.externalId === 'string' ? source.externalId.trim() : '';
-      const displayName = typeof source.displayName === 'string' ? source.displayName.trim() : '';
-      const age = typeof source.age === 'number' ? source.age : Number(source.age);
-      const classId = typeof source.classId === 'string' ? source.classId.trim() : '';
-      const guardianValueValid = source.guardianVerified === undefined || typeof source.guardianVerified === 'boolean';
-      const baseValid = Boolean(externalId && displayName && classId && externalId.length <= 200 && displayName.length <= 200 && classId.length <= 200 && Number.isInteger(age) && age >= 6 && age <= 19 && guardianValueValid);
-      const externalRef = externalId ? hashExternal(externalId) : '';
-      const duplicate = Boolean(externalRef && seenExternalRefs.has(externalRef));
-      if (externalRef) seenExternalRefs.add(externalRef);
-      const valid = baseValid && !duplicate;
-      const message = valid ? undefined : duplicate ? '本批次 externalId 重复' : '需要 externalId、displayName、classId 和 6–19 岁整数 age；字段长度和 guardianVerified 类型也必须有效';
-      const row: ImportRowResult = { id: id(), tenantId: auth.user.tenantId, batchId: batch.id, rowNumber: index + 1, status: valid ? 'valid' : 'error', message };
-      if (valid) batch.validRowCount += 1; else batch.errorCount += 1;
+      const inspection = inspectImportRow(raw, seenExternalRefs);
+      const row: ImportRowResult = { id: id(), tenantId: auth.user.tenantId, batchId: batch.id, rowNumber: index + 1, status: inspection.valid ? 'valid' : 'error', message: inspection.message };
+      if (inspection.valid) batch.validRowCount += 1; else batch.errorCount += 1;
       state.importRows.push(row);
       return row;
     });
@@ -382,18 +409,14 @@ export async function commitImport(store: Store, auth: AuthenticatedUser, batchI
     if (!batch.previewHash || importPreviewHash(rows) !== batch.previewHash) throw new DomainError('IMPORT_VERSION_CONFLICT', '提交内容与预检版本不一致，请重新预检', 409);
     const seen = new Set<string>();
     let createdStudents = 0;
-    for (const raw of rows) {
-      const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
-      const externalId = typeof source.externalId === 'string' ? source.externalId.trim() : '';
-      const displayName = typeof source.displayName === 'string' ? source.displayName.trim() : '';
-      const age = typeof source.age === 'number' ? source.age : Number(source.age);
-      const classId = typeof source.classId === 'string' ? source.classId.trim() : '';
-      const refHash = hashExternal(externalId);
-      if (!externalId || !displayName || !classId || !Number.isInteger(age) || age < 6 || age > 19 || seen.has(refHash)) continue;
-      seen.add(refHash);
-      const existing = state.students.find((student) => student.tenantId === auth.user.tenantId && student.externalRefHash === refHash);
+    for (const [index, raw] of rows.entries()) {
+      const previewRow = state.importRows.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.batchId === batch.id && candidate.rowNumber === index + 1);
+      const inspection = inspectImportRow(raw, seen);
+      if (!previewRow || previewRow.status !== 'valid' || !inspection.valid) continue;
+      const { normalized, externalRef } = inspection;
+      const existing = state.students.find((student) => student.tenantId === auth.user.tenantId && student.externalRefHash === externalRef);
       if (existing) continue;
-      state.students.push({ id: id(), tenantId: auth.user.tenantId, schoolId: batch.schoolId, classId, externalRefHash: refHash, displayNameCiphertext: encrypt(displayName), age, guardianVerified: source.guardianVerified === true, active: true, createdAt: now() });
+      state.students.push({ id: id(), tenantId: auth.user.tenantId, schoolId: batch.schoolId, classId: normalized.classId, externalRefHash: externalRef, displayNameCiphertext: encrypt(normalized.displayName), age: normalized.age, guardianVerified: normalized.guardianVerified, active: true, createdAt: now() });
       createdStudents += 1;
     }
     batch.status = 'committed';
@@ -412,7 +435,7 @@ export async function createScale(store: Store, auth: AuthenticatedUser, input: 
   if (input.language !== undefined && (typeof input.language !== 'string' || !input.language.trim() || input.language.length > 32)) throw new DomainError('SCALE_INVALID', '量表语言标识无效');
   if (input.dimensions !== undefined && (!Array.isArray(input.dimensions) || input.dimensions.length > 20 || input.dimensions.some((dimension) => typeof dimension !== 'string' || !dimension.trim() || dimension.length > 80))) throw new DomainError('SCALE_INVALID', '量表维度目录无效');
   if (input.licenseExpiresAt !== undefined && (typeof input.licenseExpiresAt !== 'string' || Number.isNaN(new Date(input.licenseExpiresAt).getTime()))) throw new DomainError('SCALE_INVALID', '量表授权到期时间无效');
-  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 200 || new Set(input.items.map((item) => item?.id)).size !== input.items.length || input.items.some((item) => !item || typeof item.id !== 'string' || !item.id || item.id.length > 80 || typeof item.prompt !== 'string' || !item.prompt.trim() || item.prompt.length > 5_000 || !Number.isInteger(item.min) || !Number.isInteger(item.max) || item.min > item.max || typeof item.reverse !== 'boolean' || typeof item.factor !== 'string' || !item.factor.trim() || item.factor.length > 100)) throw new DomainError('SCALE_INVALID', '量表题目结构无效');
+  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 200 || new Set(input.items.map((item) => item?.id)).size !== input.items.length || input.items.some((item) => !item || typeof item.id !== 'string' || !item.id || item.id.length > 80 || typeof item.prompt !== 'string' || !item.prompt.trim() || item.prompt.length > 5_000 || !Number.isInteger(item.min) || !Number.isInteger(item.max) || item.min > item.max || item.max - item.min > MAX_SCALE_ITEM_RANGE || typeof item.reverse !== 'boolean' || typeof item.factor !== 'string' || !item.factor.trim() || item.factor.length > 100)) throw new DomainError('SCALE_INVALID', '量表题目结构无效');
   if (input.warningRule && (typeof input.warningRule !== 'object' || Array.isArray(input.warningRule) || !Number.isInteger(input.warningRule.threshold) || input.warningRule.threshold < 0 || !['attention', 'urgent'].includes(input.warningRule.level) || typeof input.warningRule.reason !== 'string' || !input.warningRule.reason.trim() || input.warningRule.reason.length > 500)) throw new DomainError('SCALE_INVALID', '预警规则结构无效');
   return store.transaction((state) => {
     if (state.scales.some((candidate) => candidate.tenantId === auth.user.tenantId && candidate.code === input.code && candidate.version === input.version)) {
@@ -847,6 +870,7 @@ export async function createRiskSignal(store: Store, auth: AuthenticatedUser, in
   if ((isStudent(auth.user) && source !== 'self_request') || (!isStudent(auth.user) && !['staff_observation', 'external_referral'].includes(source))) throw new DomainError('RISK_SIGNAL_SOURCE_INVALID', '该来源只能由对应工作流生成');
   return store.transaction((state) => {
     const student = studentFor(state, auth.user, input.studentId);
+    if (isProfessional(auth.user) && !professionalCanReadStudent(state, auth, student.id)) throw notFound();
     const signal: RiskSignal = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, source, level: input.level, reasonCiphertext: encrypt({ reason: input.reason.slice(0, 2000) }), createdAt: now(), status: 'open' };
     state.riskSignals.push(signal);
     let riskCase = state.riskCases.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.studentId === student.id && ['pending_review', 'confirmed', 'assigned', 'in_support', 'follow_up', 'closure_requested'].includes(candidate.state));
@@ -870,6 +894,7 @@ function caseFor(state: DatabaseState, auth: AuthenticatedUser, caseId: string):
   const riskCase = state.riskCases.find((candidate) => candidate.id === caseId && sameTenant(candidate, auth.user.tenantId));
   if (!riskCase) throw notFound();
   if (auth.user.schoolId && !state.students.some((student) => student.tenantId === auth.user.tenantId && student.id === riskCase.studentId && student.schoolId === auth.user.schoolId)) throw notFound();
+  if (auth.user.role === 'counselor' && riskCase.assignedTo !== auth.user.id) throw notFound();
   return riskCase;
 }
 
@@ -958,8 +983,8 @@ export async function adminOverview(store: Store, auth: AuthenticatedUser): Prom
     const assignments = state.assignments.filter((assignment) => sameTenant(assignment, tenant) && studentIds.has(assignment.studentId));
     const reports = state.reports.filter((report) => sameTenant(report, tenant) && studentIds.has(report.studentId));
     const cases = state.riskCases.filter((riskCase) => sameTenant(riskCase, tenant) && studentIds.has(riskCase.studentId) && riskCase.state !== 'closed' && riskCase.state !== 'dismissed');
-    const suppress = (value: number, size = visibleStudents.length): number | null => size < 10 ? null : value;
-    const result = { students: visibleStudents.length, assignments: assignments.length, completedAssignments: assignments.filter((a) => a.status === 'completed').length, releasedReports: reports.filter((r) => r.state === 'released').length, openCases: suppress(cases.length), suppressionThreshold: 10, note: '小样本指标以 null 抑制；统计不代表疾病患病率。' };
+    const suppress = (value: number, size = visibleStudents.length): number | null => size < SMALL_SAMPLE_THRESHOLD ? null : value;
+    const result = { students: suppress(visibleStudents.length), assignments: suppress(assignments.length), completedAssignments: suppress(assignments.filter((a) => a.status === 'completed').length), releasedReports: suppress(reports.filter((r) => r.state === 'released').length), openCases: suppress(cases.length), suppressionThreshold: SMALL_SAMPLE_THRESHOLD, note: '小样本指标以 null 抑制；统计不代表疾病患病率。' };
     audit(state, auth.user, 'analytics.admin_overview_viewed', 'analytics', 'overview', { studentCount: visibleStudents.length });
     return result;
   });
@@ -1249,8 +1274,8 @@ function aggregatePayload(state: DatabaseState, tenantId: string, schoolId?: str
   const studentIds = new Set(students.map((student) => student.id));
   const assignments = state.assignments.filter((assignment) => assignment.tenantId === tenantId && studentIds.has(assignment.studentId));
   const cases = state.riskCases.filter((riskCase) => riskCase.tenantId === tenantId && studentIds.has(riskCase.studentId) && !['closed', 'dismissed'].includes(riskCase.state));
-  const suppress = (value: number, size = students.length): number | null => size < 10 ? null : value;
-  return { studentCount: students.length, assignmentCount: assignments.length, completedCount: assignments.filter((assignment) => assignment.status === 'completed').length, openCaseCount: suppress(cases.length), suppressionThreshold: 10, generatedAt: now() };
+  const suppress = (value: number, size = students.length): number | null => size < SMALL_SAMPLE_THRESHOLD ? null : value;
+  return { studentCount: suppress(students.length), assignmentCount: suppress(assignments.length), completedCount: suppress(assignments.filter((assignment) => assignment.status === 'completed').length), openCaseCount: suppress(cases.length), suppressionThreshold: SMALL_SAMPLE_THRESHOLD, generatedAt: now() };
 }
 
 export async function requestExport(store: Store, auth: AuthenticatedUser, input: { kind: ExportJob['kind']; studentId?: string; purpose?: string }): Promise<ExportJob> {
@@ -1446,6 +1471,10 @@ export async function approveProfileSchema(store: Store, auth: AuthenticatedUser
   });
 }
 
+function availabilityOverlaps(state: DatabaseState, candidate: { id?: string; tenantId: string; counselorId: string; startsAt: string; endsAt: string; room?: string }, startsAt: string, endsAt: string, counselorId: string, room?: string): boolean {
+  return state.availabilitySlots.some((slot) => slot.id !== candidate.id && slot.tenantId === candidate.tenantId && slot.status !== 'blocked' && new Date(startsAt) < new Date(slot.endsAt) && new Date(endsAt) > new Date(slot.startsAt) && (slot.counselorId === counselorId || (Boolean(room) && Boolean(slot.room?.trim()) && slot.room?.trim() === room)));
+}
+
 export async function createAvailabilitySlot(store: Store, auth: AuthenticatedUser, input: { counselorId: string; startsAt: string; endsAt: string; room?: string }): Promise<AvailabilitySlot> {
   requirePermission(auth.user, 'appointment:manage');
   if (input.room !== undefined && typeof input.room !== 'string') throw new DomainError('SLOT_INVALID', '排班备注格式无效');
@@ -1453,7 +1482,7 @@ export async function createAvailabilitySlot(store: Store, auth: AuthenticatedUs
   return store.transaction((state) => {
     const counselor = state.users.find((candidate) => candidate.id === input.counselorId && candidate.tenantId === auth.user.tenantId && isProfessional(candidate));
     if (!counselor || (auth.user.schoolId && auth.user.schoolId !== counselor.schoolId) || !validDate(input.startsAt) || !validDate(input.endsAt) || new Date(input.startsAt) >= new Date(input.endsAt)) throw new DomainError('SLOT_INVALID', '排班人员或时间窗无效');
-    const overlap = state.availabilitySlots.some((slot) => slot.tenantId === auth.user.tenantId && slot.status !== 'blocked' && new Date(input.startsAt) < new Date(slot.endsAt) && new Date(input.endsAt) > new Date(slot.startsAt) && (slot.counselorId === counselor.id || (Boolean(room) && Boolean(slot.room?.trim()) && slot.room?.trim() === room)));
+    const overlap = availabilityOverlaps(state, { tenantId: auth.user.tenantId, counselorId: counselor.id, startsAt: input.startsAt, endsAt: input.endsAt, room }, input.startsAt, input.endsAt, counselor.id, room);
     if (overlap) throw new DomainError('SLOT_CONFLICT', '咨询师或咨询室时间段重叠', 409);
     const slot: AvailabilitySlot = { id: id(), tenantId: auth.user.tenantId, counselorId: counselor.id, startsAt: input.startsAt, endsAt: input.endsAt, room, status: 'available' }; state.availabilitySlots.push(slot); audit(state, auth.user, 'availability.created', 'availability_slot', slot.id, {}); return slot;
   });
@@ -1581,6 +1610,7 @@ export async function updateAvailabilitySlot(store: Store, auth: AuthenticatedUs
     const counselor = slot ? state.users.find((user) => user.id === slot.counselorId && user.tenantId === auth.user.tenantId && isProfessional(user)) : undefined;
     if (!slot || !counselor || (auth.user.schoolId && counselor.schoolId !== auth.user.schoolId)) throw notFound();
     if (slot.status === 'held') throw new DomainError('SLOT_HELD', '已有预约的时段不能直接改排班状态', 409);
+    if (status === 'available' && availabilityOverlaps(state, slot, slot.startsAt, slot.endsAt, slot.counselorId, slot.room)) throw new DomainError('SLOT_CONFLICT', '咨询师或咨询室时间段重叠', 409);
     slot.status = status;
     audit(state, auth.user, `availability.${status}`, 'availability_slot', slot.id, {});
     return slot;
@@ -1823,7 +1853,7 @@ export async function listStudents(store: Store, auth: AuthenticatedUser): Promi
   if (!can(auth.user, 'org:read')) throw forbidden();
   if (auth.user.role === 'teacher') throw forbidden();
   return store.transaction((state) => {
-    const students = state.students.filter((student) => student.tenantId === auth.user.tenantId && student.active && (!auth.user.schoolId || student.schoolId === auth.user.schoolId)).map((student) => ({ id: student.id, schoolId: student.schoolId, classId: student.classId, age: student.age, guardianVerified: student.guardianVerified }));
+    const students = state.students.filter((student) => student.tenantId === auth.user.tenantId && student.active && (!auth.user.schoolId || student.schoolId === auth.user.schoolId) && (!isProfessional(auth.user) || professionalCanReadStudent(state, auth, student.id))).map((student) => ({ id: student.id, schoolId: student.schoolId, classId: student.classId, age: student.age, guardianVerified: student.guardianVerified }));
     audit(state, auth.user, 'student.directory_listed', 'student', 'tenant', { count: students.length }, 'org:read');
     return students;
   });

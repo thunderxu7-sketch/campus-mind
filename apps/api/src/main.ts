@@ -57,10 +57,16 @@ function loadStore(): JsonStore {
 }
 
 function json(res: ServerResponse, status: number, value: unknown): void {
-  const body = JSON.stringify(value);
   res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
+  if (status === 204) {
+    res.removeHeader('Content-Type');
+    res.removeHeader('Content-Length');
+    res.end();
+    return;
+  }
+  const body = JSON.stringify(value);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(body);
 }
 
