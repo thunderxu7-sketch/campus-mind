@@ -1,6 +1,6 @@
 # 表达与支持扩展 · 执行状态与证据
 
-更新时间：2026-09-21
+更新时间：2026-09-23
 范围：本地参考实现；只使用合成身份和合成文本。
 
 ## 已按依赖顺序落地
@@ -12,7 +12,8 @@
 - **专业端**：指定收件人的分享详情、普通支持收件箱、接单/开始沟通/跟进/完成状态机、加密工作备注；与危机线索工作台分离。
 - **后端**：字段白名单、8 KiB 请求上限、服务器 HMAC 幂等、版本冲突、活动请求唯一约束、通知 outbox 的 routine 事件与取消状态。
 - **隐私与恢复**：单条删除、用途撤回、权利 access 包、全人清理、保留任务（记录/分享/已结束请求/备注）和最小撤回台账。
-- **数据库**：`infra/migrations/002_expression_support.sql` 增加五张租户运行数据表、复合外键、部分唯一索引、RLS + FORCE RLS，并扩展 consent/outbox CHECK；CI 会执行 001→002、数量和索引断言。策略/告知版本是受控、版本化部署注册表，由参考种子和生产配置适配器提供，不在迁移里做成可被业务写入的表。
+- **数据库**：`infra/migrations/002_expression_support.sql` 增加五张租户运行数据表、复合外键、部分唯一索引、RLS + FORCE RLS，并扩展 consent/outbox CHECK；CI 会执行 001→003、数量和索引断言。策略/告知版本是受控、版本化部署注册表，由参考种子和生产配置适配器提供，不在迁移里做成可被业务写入的表。
+- **工作人员工作台**：`infra/migrations/003_student_grade.sql` 为学生增加可选学校年级标签；年级只从学校花名册导入，不按年龄推断，旧数据保持 NULL。
 - **契约**：`docs/openapi.yaml` 已登记新增 HTTP 路由；`.env.example` 与 `scripts/release-gate.mjs` 增加显式上线证据开关。
 
 ### P1 安全开关与合成演示（ES-14、ES-16 基线）
@@ -38,6 +39,9 @@ git diff --check
 ```sh
 psql ... --set ON_ERROR_STOP=1 --file infra/migrations/001_initial.sql
 psql ... --set ON_ERROR_STOP=1 --file infra/migrations/002_expression_support.sql
+psql ... --set ON_ERROR_STOP=1 --file infra/migrations/003_student_grade.sql
+psql ... --set ON_ERROR_STOP=1 --file infra/migrations/004_import_recovery.sql
+psql ... --set ON_ERROR_STOP=1 --file infra/migrations/005_education_privacy.sql
 ```
 
 当前测试覆盖：学生记录/分享/支持生命周期、同意撤回、幂等冲突、字段白名单、8 KiB 限制、专业对象授权、普通请求不产生 `RiskCase`、静态页面头、JSON 快照兼容、迁移表/RLS/索引检查。真实浏览器、实机摄像头、供应商故障与生产适配器尚未作为通过证据。

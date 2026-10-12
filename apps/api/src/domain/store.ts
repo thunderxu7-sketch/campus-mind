@@ -23,7 +23,7 @@ export interface NotificationDeliveryResult {
 
 export interface NotificationDispatcher {
   /** `eventId` is the provider idempotency key; a retry must not duplicate a notification. */
-  deliver(input: { eventId: string; tenantId: string; eventType: string; aggregateId: string; priority: 'urgent' | 'attention' | 'routine' }): Promise<NotificationDeliveryResult>;
+  deliver(input: { eventId: string; tenantId: string; eventType: string; aggregateId: string; priority: 'urgent' | 'attention' | 'routine'; recipientIds?: readonly string[]; context?: Readonly<Record<string, string | number | boolean | null>> }): Promise<NotificationDeliveryResult>;
 }
 
 /**
@@ -50,11 +50,11 @@ const localNotificationDispatcher: NotificationDispatcher = {
 
 export function emptyState(): DatabaseState {
   return {
-    schemaVersion: 1,
+    schemaVersion: 5,
     tenants: [], schools: [], users: [], sessions: [], studentAccessCredentials: [], students: [], consents: [], expressionPolicies: [], expressionNotices: [], expressionEntries: [], expressionShares: [], supportRequests: [], supportNotes: [], expressionRevocations: [], scales: [], campaigns: [],
     guardianLinks: [], assignments: [], frequencyReservations: [], attempts: [], answerRevisions: [], submissions: [], scoreRuns: [],
     reports: [], riskSignals: [], riskCases: [], riskReviews: [], acknowledgements: [], followUps: [], auditEvents: [],
-    outboxEvents: [], importBatches: [], importRows: [], rightsRequests: [], deletionTombstones: [], exportJobs: [], deliveryAttempts: [], availabilitySlots: [], appointments: [], contentItems: [], mediaAssets: [], profileSchemas: [], profileResponses: [],
+    outboxEvents: [], importBatches: [], importRows: [], rightsRequests: [], deletionTombstones: [], exportJobs: [], deliveryAttempts: [], availabilitySlots: [], appointments: [], contentItems: [], contentEngagements: [], mediaAssets: [], profileSchemas: [], profileResponses: [],
   };
 }
 

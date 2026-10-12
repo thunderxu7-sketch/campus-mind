@@ -16,9 +16,14 @@ const id = () => randomUUID();
 const sameTenant = <T extends { tenantId: string }>(record: T, tenantId: string): boolean => record.tenantId === tenantId;
 const hashExternal = (value: string): string => createHash('sha256').update(value.trim()).digest('hex');
 const validDate = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(new Date(value).getTime());
+const zonedDate = (value: unknown): value is string => validDate(value) && /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
 const academicYearPattern = /^(\d{4})-(\d{4})$/;
 const SMALL_SAMPLE_THRESHOLD = 10;
 const MAX_SCALE_ITEM_RANGE = 20;
+const APPOINTMENT_CONFIRMATION_SLA_MINUTES = (() => {
+  const value = Number(process.env.CAMPMIND_APPOINTMENT_CONFIRMATION_SLA_MINUTES ?? 1440);
+  return Number.isInteger(value) && value >= 15 && value <= 10_080 ? value : 1440;
+})();
 const MAX_IMPORT_FIELD_LENGTH = 200;
 const MIN_IMPORT_AGE = 6;
 const MAX_IMPORT_AGE = 19;
@@ -50,6 +55,7 @@ interface NormalizedImportRow {
   displayName: string;
   age: number;
   classId: string;
+  grade?: string;
   guardianVerified: boolean;
   guardianValueValid: boolean;
 }
@@ -68,14 +74,31 @@ function inspectImportRow(raw: Record<string, unknown>, seenExternalRefs: Set<st
   const displayName = typeof source.displayName === 'string' ? source.displayName.trim() : '';
   const age = typeof source.age === 'number' ? source.age : Number(source.age);
   const classId = typeof source.classId === 'string' ? source.classId.trim() : '';
+  const gradeValueValid = source.grade === undefined || typeof source.grade === 'string';
+  const grade = typeof source.grade === 'string' ? source.grade.trim() : '';
   const guardianValueValid = source.guardianVerified === undefined || typeof source.guardianVerified === 'boolean';
-  const normalized: NormalizedImportRow = { externalId, displayName, age, classId, guardianVerified: source.guardianVerified === true, guardianValueValid };
-  const baseValid = Boolean(externalId && displayName && classId && externalId.length <= MAX_IMPORT_FIELD_LENGTH && displayName.length <= MAX_IMPORT_FIELD_LENGTH && classId.length <= MAX_IMPORT_FIELD_LENGTH && Number.isInteger(age) && age >= MIN_IMPORT_AGE && age <= MAX_IMPORT_AGE && guardianValueValid);
+  const normalized: NormalizedImportRow = { externalId, displayName, age, classId, ...(grade ? { grade } : {}), guardianVerified: source.guardianVerified === true, guardianValueValid };
+  const errors: string[] = [];
+  if (!externalId) errors.push('缺少 externalId');
+  else if (externalId.length > MAX_IMPORT_FIELD_LENGTH) errors.push(`externalId 超过 ${MAX_IMPORT_FIELD_LENGTH} 字符`);
+  if (!displayName) errors.push('缺少 displayName');
+  else if (displayName.length > MAX_IMPORT_FIELD_LENGTH) errors.push(`displayName 超过 ${MAX_IMPORT_FIELD_LENGTH} 字符`);
+  if (!classId) errors.push('缺少 classId');
+  else if (classId.length > MAX_IMPORT_FIELD_LENGTH) errors.push(`classId 超过 ${MAX_IMPORT_FIELD_LENGTH} 字符`);
+  if (source.age === undefined || source.age === null || typeof source.age === 'string' && !source.age.trim()) errors.push('缺少 age');
+  else if (!Number.isInteger(age)) errors.push('age 必须为整数');
+  else if (age < MIN_IMPORT_AGE || age > MAX_IMPORT_AGE) errors.push(`age 必须在 ${MIN_IMPORT_AGE}–${MAX_IMPORT_AGE} 岁范围内`);
+  if (!gradeValueValid) errors.push('grade 必须为文本');
+  else if (grade.length > MAX_IMPORT_FIELD_LENGTH) errors.push(`grade 超过 ${MAX_IMPORT_FIELD_LENGTH} 字符`);
+  if (!guardianValueValid) errors.push('guardianVerified 仅接受 true/false');
+  const baseValid = errors.length === 0;
   const externalRef = externalId ? hashExternal(externalId) : '';
-  const duplicate = Boolean(externalRef && seenExternalRefs.has(externalRef));
-  if (externalRef) seenExternalRefs.add(externalRef);
+  const duplicate = Boolean(baseValid && externalRef && seenExternalRefs.has(externalRef));
+  // An invalid earlier row must not prevent a later valid row with the same
+  // external identifier from being considered for import.
+  if (baseValid && externalRef) seenExternalRefs.add(externalRef);
   const valid = baseValid && !duplicate;
-  const message = valid ? undefined : duplicate ? '本批次 externalId 重复' : `需要 externalId、displayName、classId 和 ${MIN_IMPORT_AGE}–${MAX_IMPORT_AGE} 岁整数 age；字段长度和 guardianVerified 类型也必须有效`;
+  const message = valid ? undefined : baseValid ? '本批次 externalId 重复' : errors.join('；');
   return { normalized, externalRef, duplicate, valid, message };
 }
 type PublicRightsRequest = Omit<RightsRequest, 'resultCiphertext' | 'decisionReasonCiphertext' | 'reason' | 'reasonCiphertext'> & { resultReady: boolean; hasReason: boolean };
@@ -126,7 +149,7 @@ function publicRightsRequest(request: RightsRequest): PublicRightsRequest {
   return { ...publicRequest, resultReady: Boolean(_resultCiphertext), hasReason: Boolean(_reason || _reasonCiphertext) };
 }
 
-function audit(state: DatabaseState, actor: User | undefined, action: string, objectType: string, objectId: string, metadata: Record<string, string | number | boolean | null> = {}, purpose?: string, tenantIdOverride?: string): void {
+function audit(state: DatabaseState, actor: User | undefined, action: string, objectType: string, objectId: string, metadata: Record<string, string | number | boolean | null> = {}, purpose?: string, tenantIdOverride?: string): string {
   const safeMetadata = Object.fromEntries(Object.entries(metadata).map(([key, value]) => {
     // Free-text reasons/notes and credential-like fields do not belong in an
     // audit envelope. Keep a bounded marker so the event remains useful
@@ -135,7 +158,9 @@ function audit(state: DatabaseState, actor: User | undefined, action: string, ob
     if (typeof value === 'string') return [key, value.slice(0, 200)];
     return [key, value];
   })) as Record<string, string | number | boolean | null>;
-  state.auditEvents.push({ id: id(), tenantId: actor?.tenantId ?? tenantIdOverride ?? 'system', actorId: actor?.id, action, objectType, objectId, purpose, metadata: safeMetadata, createdAt: now() });
+  const eventId = id();
+  state.auditEvents.push({ id: eventId, tenantId: actor?.tenantId ?? tenantIdOverride ?? 'system', actorId: actor?.id, action, objectType, objectId, purpose, metadata: safeMetadata, createdAt: now() });
+  return eventId;
 }
 
 function studentFor(state: DatabaseState, user: User, studentId: string): Student {
@@ -148,6 +173,35 @@ function studentFor(state: DatabaseState, user: User, studentId: string): Studen
 
 function activeConsent(state: DatabaseState, studentId: string, purpose: ConsentRecord['purpose'], tenantId?: string, noticeVersion?: string): ConsentRecord | undefined {
   return state.consents.find((consent) => consent.studentId === studentId && (!tenantId || consent.tenantId === tenantId) && consent.purpose === purpose && consent.status === 'active' && (!noticeVersion || consent.noticeVersion === noticeVersion));
+}
+
+function currentPurposeConsent(state: DatabaseState, student: Student, purpose: ConsentRecord['purpose'], noticeVersion?: string): ConsentRecord | undefined {
+  const consent = activeConsent(state, student.id, purpose, student.tenantId, noticeVersion);
+  if (!consent) return undefined;
+  if (student.age === undefined) return undefined;
+  if (student.age < 14) {
+    return consent.actorType === 'guardian' && state.guardianLinks.some((link) => link.tenantId === student.tenantId && link.studentId === student.id && link.guardianUserId === consent.actorId && link.status === 'verified') ? consent : undefined;
+  }
+  if (['assessment', 'self_expression', 'visual_interaction'].includes(purpose)) {
+    return consent.actorType === 'student' && consent.actorId === student.id ? consent : undefined;
+  }
+  return consent;
+}
+
+function participationAgeBand(age?: number): 'under_14' | '14_to_17' | 'adult' | 'unknown' {
+  if (typeof age !== 'number') return 'unknown';
+  if (age < 14) return 'under_14';
+  if (age < 18) return '14_to_17';
+  return 'adult';
+}
+
+function guardianVerificationStatus(state: DatabaseState, student: Student): 'verified' | 'pending' | 'not_linked' | 'not_required' | 'unknown' {
+  if (typeof student.age !== 'number') return 'unknown';
+  if (student.age >= 18) return 'not_required';
+  const links = state.guardianLinks.filter((link) => link.tenantId === student.tenantId && link.studentId === student.id);
+  if (links.some((link) => link.status === 'verified')) return 'verified';
+  if (links.some((link) => link.status === 'pending')) return 'pending';
+  return 'not_linked';
 }
 
 function revokeStudentAssessmentProcessing(state: DatabaseState, tenantId: string, studentId: string): void {
@@ -204,6 +258,8 @@ function purgeStudentData(state: DatabaseState, tenantId: string, studentId: str
   state.acknowledgements = state.acknowledgements.filter((ack) => !(ack.tenantId === tenantId && deletedCaseIds.has(ack.caseId)));
   state.followUps = state.followUps.filter((followUp) => !(followUp.tenantId === tenantId && deletedCaseIds.has(followUp.caseId)));
   state.profileResponses = state.profileResponses.filter((response) => !(response.tenantId === tenantId && response.studentId === studentId));
+  state.contentEngagements = state.contentEngagements.filter((engagement) => !(engagement.tenantId === tenantId && engagement.studentId === studentId));
+  const deletedAppointmentIds = new Set(state.appointments.filter((appointment) => appointment.tenantId === tenantId && appointment.studentId === studentId).map((appointment) => appointment.id));
   state.appointments = state.appointments.filter((appointment) => !(appointment.tenantId === tenantId && appointment.studentId === studentId));
   const expressionEntryIds = new Set(state.expressionEntries.filter((entry) => entry.tenantId === tenantId && entry.studentId === studentId).map((entry) => entry.id));
   const supportRequestIds = new Set(state.supportRequests.filter((request) => request.tenantId === tenantId && request.studentId === studentId).map((request) => request.id));
@@ -214,7 +270,7 @@ function purgeStudentData(state: DatabaseState, tenantId: string, studentId: str
   state.expressionRevocations = state.expressionRevocations.filter((record) => !(record.tenantId === tenantId && record.studentId === studentId));
   for (const rights of state.rightsRequests.filter((rights) => rights.tenantId === tenantId && rights.studentId === studentId)) { rights.resultCiphertext = undefined; rights.reasonCiphertext = undefined; rights.reason = undefined; }
   for (const job of state.exportJobs.filter((job) => job.tenantId === tenantId && job.studentId === studentId)) { job.status = 'revoked'; job.payloadCiphertext = undefined; }
-  state.outboxEvents = state.outboxEvents.filter((event) => event.tenantId !== tenantId || (!(event.type === 'assessment.submitted' && deletedSubmissionIds.has(String(event.payload.submissionId))) && !(event.type === 'risk.triage' && deletedSubmissionIds.has(String(event.payload.submissionId))) && !(['risk.signal_created', 'risk.escalation'].includes(event.type) && deletedCaseIds.has(event.aggregateId)) && !(['support.request_created', 'support.request_overdue', 'support.follow_up_due'].includes(event.type) && supportRequestIds.has(event.aggregateId))));
+  state.outboxEvents = state.outboxEvents.filter((event) => event.tenantId !== tenantId || (!(event.type === 'assessment.submitted' && deletedSubmissionIds.has(String(event.payload.submissionId))) && !(event.type === 'risk.triage' && deletedSubmissionIds.has(String(event.payload.submissionId))) && !(['risk.signal_created', 'risk.escalation'].includes(event.type) && deletedCaseIds.has(event.aggregateId)) && !(['support.request_created', 'support.request_overdue', 'support.follow_up_due'].includes(event.type) && supportRequestIds.has(event.aggregateId)) && !(event.type.startsWith('appointment.') && deletedAppointmentIds.has(event.aggregateId))));
   state.deliveryAttempts = state.deliveryAttempts.filter((delivery) => state.outboxEvents.some((event) => event.tenantId === delivery.tenantId && event.id === delivery.outboxEventId));
   return { deletedAttemptIds, deletedSubmissionIds, deletedCaseIds };
 }
@@ -235,6 +291,39 @@ export interface LoginResult { token: string; user: ReturnType<typeof safeUser>;
 
 export async function currentUser(store: Store, auth: AuthenticatedUser): Promise<ReturnType<typeof safeUser>> {
   return safeUser(auth.user);
+}
+
+type TaskProgress = {
+  completedQuestions: number;
+  totalQuestions: number;
+  percent: number;
+  lastSavedAt?: string;
+};
+
+function taskProgress(state: DatabaseState, attempt: Attempt | undefined, scale: ScaleVersion | undefined): TaskProgress {
+  const totalQuestions = scale?.items.length ?? 0;
+  if (!attempt || !scale || attempt.currentRevision < 1) return { completedQuestions: 0, totalQuestions, percent: 0 };
+  const revision = state.answerRevisions.find((candidate) => candidate.tenantId === attempt.tenantId && candidate.attemptId === attempt.id && candidate.revision === attempt.currentRevision);
+  if (!revision) return { completedQuestions: 0, totalQuestions, percent: 0 };
+  let answers: Record<string, unknown> = {};
+  try {
+    const decoded = decrypt<unknown>(revision.answersCiphertext);
+    answers = decoded && typeof decoded === 'object' && !Array.isArray(decoded) ? decoded as Record<string, unknown> : {};
+  } catch { answers = {}; }
+  const completedQuestions = scale.items.reduce((count, item) => count + (Object.hasOwn(answers, item.id) ? 1 : 0), 0);
+  return {
+    completedQuestions,
+    totalQuestions,
+    percent: totalQuestions ? Math.round((completedQuestions / totalQuestions) * 100) : 0,
+    lastSavedAt: revision.savedAt,
+  };
+}
+
+function taskEstimatedMinutes(scale: ScaleVersion | undefined): number {
+  if (scale?.estimatedMinutes !== undefined) return scale.estimatedMinutes;
+  // Legacy scale snapshots have no estimate. Keep the fallback conservative
+  // and deterministic rather than inventing a promise in the browser.
+  return Math.max(3, Math.ceil((scale?.items.length ?? 1) * 1.2));
 }
 
 export async function listMyTasks(store: Store, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
@@ -258,10 +347,27 @@ export async function listMyTasks(store: Store, auth: AuthenticatedUser): Promis
         if (!scale) return false;
         try { assertUsableScale(scale, currentTime); return true; } catch { return false; }
       })();
-      const consented = Boolean(student && activeConsent(state, student.id, 'assessment', auth.user.tenantId, scale?.noticeVersion));
+      const consented = Boolean(student && scale && currentPurposeConsent(state, student, 'assessment', scale.noticeVersion));
       const ageEligible = Boolean(scaleUsable && student && scale && ageAllowed(student, scale));
       const available = !terminal && ['assigned', 'started'].includes(assignment.status) && inWindow && scaleUsable && ageEligible && consented && Boolean(reservation && ['reserved', 'exception'].includes(reservation.status));
-      const availabilityReason = terminal ? 'terminal' : !['assigned', 'started'].includes(assignment.status) ? 'assignment_unavailable' : !campaign || !validAcademicYear(campaign.academicYear) ? 'academic_year_invalid' : !inWindow ? 'outside_window' : !scaleUsable ? 'scale_unavailable' : !consented ? 'consent_required' : !ageEligible ? 'age_not_allowed' : !reservation || !['reserved', 'exception'].includes(reservation.status) ? 'frequency_review' : 'available';
+      const availabilityReason = terminal ? 'terminal' : !['assigned', 'started'].includes(assignment.status) ? 'assignment_unavailable' : !campaign || !validAcademicYear(campaign.academicYear) ? 'academic_year_invalid' : !inWindow ? 'outside_window' : !scaleUsable ? 'scale_unavailable' : !ageEligible ? 'age_not_allowed' : !consented ? 'consent_required' : !reservation || !['reserved', 'exception'].includes(reservation.status) ? 'frequency_review' : 'available';
+      const progress = taskProgress(state, attempt, scale);
+      const scoreRun = attempt?.submissionId ? state.scoreRuns.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.submissionId === attempt.submissionId) : undefined;
+      const report = scoreRun ? state.reports.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.studentId === auth.user.id && candidate.scoreRunId === scoreRun.id) : undefined;
+      const feedbackState = report?.state === 'released' ? 'released' : (report || (attempt && ['submitted', 'scoring_pending', 'scored'].includes(attempt.state))) ? 'professional_review' : 'not_available';
+      const nextAction = feedbackState === 'released'
+        ? 'view_feedback'
+        : feedbackState === 'professional_review'
+          ? 'await_review'
+          : attempt?.state === 'in_progress' && available
+            ? 'continue_assessment'
+            : available
+              ? 'start_assessment'
+              : availabilityReason === 'consent_required'
+                ? 'give_consent'
+                : availabilityReason === 'outside_window'
+                  ? 'wait_for_window'
+                  : 'contact_school';
       return {
         id: assignment.id,
         name: campaign?.name ?? '测评任务',
@@ -274,6 +380,18 @@ export async function listMyTasks(store: Store, auth: AuthenticatedUser): Promis
         status: assignment.status,
         available,
         availabilityReason,
+        nextAction,
+        dueAt: campaign?.closesAt ?? null,
+        estimatedMinutes: taskEstimatedMinutes(scale),
+        minAge: scale?.minAge ?? null,
+        maxAge: scale?.maxAge ?? null,
+        ageBand: student ? participationAgeBand(student.age) : 'unknown',
+        isMinor: student && typeof student.age === 'number' ? student.age < 18 : null,
+        guardianConsentRequired: Boolean(student && typeof student.age === 'number' && student.age < 14),
+        guardianVerificationStatus: student ? guardianVerificationStatus(state, student) : 'unknown',
+        progress,
+        progressPercent: progress.percent,
+        feedbackState,
         attempt: attempt ? { id: attempt.id, state: attempt.state, currentRevision: attempt.currentRevision } : null,
       };
     });
@@ -319,6 +437,11 @@ export async function createConsent(store: Store, auth: AuthenticatedUser, input
     const student = studentFor(state, auth.user, input.studentId);
     if (purpose === 'self_expression' || purpose === 'visual_interaction') assertExpressionConsentAllowed(state, student, purpose, noticeVersion);
     if ((purpose === 'self_expression' || purpose === 'visual_interaction') && input.actorType === 'school_legal_basis') throw new DomainError('CONSENT_INVALID', '表达用途必须由本人或已核验监护人明确参与', 403);
+    if (['assessment', 'self_expression', 'visual_interaction'].includes(purpose)) {
+      if (typeof student.age !== 'number') throw new DomainError('AGE_REVIEW_REQUIRED', '年龄信息未核验，暂不能记录本用途参与');
+      if (student.age < 14 && input.actorType !== 'guardian') throw new DomainError('GUARDIAN_CONSENT_REQUIRED', '不满 14 周岁需要已核验监护人完成本用途同意');
+      if (student.age >= 14 && input.actorType === 'guardian') throw new DomainError('STUDENT_CONSENT_REQUIRED', '14 周岁及以上需要学生本人完成本用途同意');
+    }
     if (input.actorType === 'student' && (!isStudent(auth.user) || auth.user.id !== student.id)) throw forbidden('学生参与记录必须由本人提交');
     if (input.actorType === 'guardian' && (auth.user.role !== 'guardian' || !state.guardianLinks.some((link) => link.tenantId === auth.user.tenantId && link.studentId === student.id && link.guardianUserId === auth.user.id && link.status === 'verified'))) throw forbidden('监护人参与记录必须由已核验监护账号提交');
     if (input.actorType === 'school_legal_basis' && !can(auth.user, 'org:manage')) throw forbidden('学校合法依据记录需要校务授权');
@@ -327,7 +450,7 @@ export async function createConsent(store: Store, auth: AuthenticatedUser, input
     }
     if (input.actorType === 'guardian' && !student.guardianVerified) throw new DomainError('GUARDIAN_NOT_VERIFIED', '监护关系尚未核验');
     const existing = state.consents.find((c) => c.tenantId === auth.user.tenantId && c.studentId === student.id && c.purpose === purpose && c.status === 'active');
-    if (existing && existing.noticeVersion === noticeVersion) return publicConsent(existing);
+    if (existing && existing.noticeVersion === noticeVersion && existing.actorType === input.actorType && existing.actorId === auth.user.id) return publicConsent(existing);
     // A changed notice is a new participation record, not an in-place edit.
     // Expire the old record so task gates cannot accidentally accept stale
     // terms while preserving the historical evidence of what was shown.
@@ -361,6 +484,62 @@ export async function listMyConsents(store: Store, auth: AuthenticatedUser, purp
   });
 }
 
+/** Purpose-scoped consent context for the authenticated student or verified
+ * guardian. The guardian view contains only students with a verified link and
+ * only task/notice metadata needed to record their required consent; it never
+ * includes answers, reports, or expression content. */
+export async function getMyConsentContext(store: Store, auth: AuthenticatedUser): Promise<Record<string, unknown>> {
+  if (!isStudent(auth.user) && auth.user.role !== 'guardian') throw forbidden();
+  return store.transaction((state) => {
+    const ageContext = (student: Student) => {
+      const ageBand = participationAgeBand(student.age);
+      return {
+        ageBand,
+        isMinor: ageBand === 'unknown' ? null : ageBand !== 'adult',
+        guardianConsentRequired: ageBand === 'under_14',
+        guardianVerificationStatus: guardianVerificationStatus(state, student),
+      };
+    };
+    if (isStudent(auth.user)) {
+      const student = state.students.find((candidate) => candidate.id === auth.user.id && candidate.tenantId === auth.user.tenantId && candidate.active);
+      if (!student) throw notFound();
+      const consentHistory = state.consents.filter((consent) => consent.tenantId === auth.user.tenantId && consent.studentId === student.id).map(publicConsent).sort((left, right) => right.recordedAt.localeCompare(left.recordedAt));
+      audit(state, auth.user, 'consent.context_listed', 'consent', 'self', { count: consentHistory.length }, 'consent:read');
+      return { role: 'student', ...ageContext(student), consentHistory };
+    }
+
+    const linkedStudents = state.guardianLinks
+      .filter((link) => link.tenantId === auth.user.tenantId && link.guardianUserId === auth.user.id && link.status === 'verified')
+      .map((link) => state.students.find((student) => student.id === link.studentId && student.tenantId === auth.user.tenantId && student.active))
+      .filter((student): student is Student => Boolean(student))
+      .map((student) => {
+        const tasks = state.assignments.filter((assignment) => assignment.tenantId === auth.user.tenantId && assignment.studentId === student.id && ['assigned', 'started'].includes(assignment.status)).flatMap((assignment) => {
+          const campaign = state.campaigns.find((candidate) => candidate.id === assignment.campaignId && candidate.tenantId === auth.user.tenantId && !['closed', 'cancelled', 'archived'].includes(candidate.state));
+          const scale = campaign && state.scales.find((candidate) => candidate.id === campaign.scaleVersionId && candidate.tenantId === auth.user.tenantId);
+          if (!campaign || !scale) return [];
+          return [{ assignmentId: assignment.id, name: campaign.name, purpose: campaign.purpose, scaleTitle: scale.title, noticeVersion: scale.noticeVersion, minAge: scale.minAge, maxAge: scale.maxAge, estimatedMinutes: taskEstimatedMinutes(scale), dueAt: campaign.closesAt }];
+        });
+        const policy = state.expressionPolicies.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.schoolId === student.schoolId);
+        const notices = policy ? state.expressionNotices.filter((notice) => notice.tenantId === auth.user.tenantId && notice.schoolId === student.schoolId && notice.approved && ((notice.purpose === 'self_expression' && notice.version === policy.selfExpressionNoticeVersion) || (notice.purpose === 'visual_interaction' && notice.version === policy.visualNoticeVersion))).map((notice) => ({ purpose: notice.purpose, version: notice.version, title: notice.title, body: notice.body })) : [];
+        const consentHistory = state.consents.filter((consent) => consent.tenantId === auth.user.tenantId && consent.studentId === student.id).map(publicConsent).sort((left, right) => right.recordedAt.localeCompare(left.recordedAt));
+        return {
+          studentId: student.id,
+          studentName: decrypt<string>(student.displayNameCiphertext),
+          ...ageContext(student),
+          assessmentTasks: tasks,
+          expressionNotices: notices,
+          expressionEnabled: Boolean(policy?.enabled && (process.env.NODE_ENV !== 'production' || process.env.CAMPMIND_EXPRESSION_ENABLED === 'true')),
+          visualEnabled: Boolean(policy?.enabled && policy.visualEnabled && process.env.CAMPMIND_EXPRESSION_ENABLED === 'true' && process.env.CAMPMIND_VISUAL_DEPLOYMENT_ENABLED === 'true'),
+          expressionEntryRetentionDays: policy?.entryRetentionDays ?? null,
+          closedRequestRetentionDays: policy?.closedRequestRetentionDays ?? null,
+          consentHistory,
+        };
+      });
+    audit(state, auth.user, 'consent.context_listed', 'consent', 'verified_guardianships', { linkedStudentCount: linkedStudents.length }, 'consent:read');
+    return { role: 'guardian', linkedStudents };
+  });
+}
+
 export async function withdrawConsent(store: Store, auth: AuthenticatedUser, consentId: string): Promise<void> {
   return store.transaction((state) => {
     const consent = state.consents.find((candidate) => candidate.id === consentId && sameTenant(candidate, auth.user.tenantId));
@@ -368,6 +547,7 @@ export async function withdrawConsent(store: Store, auth: AuthenticatedUser, con
     const student = state.students.find((candidate) => candidate.id === consent.studentId && candidate.tenantId === auth.user.tenantId && candidate.active);
     const verifiedGuardian = student && auth.user.role === 'guardian' && state.guardianLinks.some((link) => link.tenantId === auth.user.tenantId && link.studentId === student.id && link.guardianUserId === auth.user.id && link.status === 'verified');
     if (!student || (auth.user.schoolId && student.schoolId !== auth.user.schoolId) || (!isStudent(auth.user) && !can(auth.user, 'org:manage') && !verifiedGuardian) || (isStudent(auth.user) && auth.user.id !== student.id)) throw forbidden();
+    if (auth.user.role === 'guardian' && typeof student.age === 'number' && student.age >= 14 && ['assessment', 'self_expression', 'visual_interaction'].includes(consent.purpose)) throw forbidden('14 周岁及以上学生的本用途同意只能由学生本人撤回');
     consent.status = 'withdrawn';
     consent.withdrawnAt = now();
     if (consent.purpose === 'assessment') revokeStudentAssessmentProcessing(state, auth.user.tenantId, student.id);
@@ -377,52 +557,151 @@ export async function withdrawConsent(store: Store, auth: AuthenticatedUser, con
   });
 }
 
-export async function previewImport(store: Store, auth: AuthenticatedUser, input: { schoolId: string; filename: string; rows: Array<Record<string, unknown>> }): Promise<{ batch: ImportBatch; rows: ImportRowResult[] }> {
+type PublicImportBatch = Pick<ImportBatch, 'id' | 'schoolId' | 'status' | 'mappingVersion' | 'rowCount' | 'validRowCount' | 'errorCount' | 'createdCount' | 'duplicateCount' | 'skippedCount' | 'rolledBackCount' | 'rollbackBlockedCount' | 'auditEventId' | 'rollbackAuditEventId' | 'createdAt'>;
+type PublicImportRow = Omit<ImportRowResult, 'tenantId'>;
+
+function publicImportBatch(batch: ImportBatch): PublicImportBatch {
+  const { id, schoolId, status, mappingVersion, rowCount, validRowCount, errorCount, createdCount, duplicateCount, skippedCount, rolledBackCount, rollbackBlockedCount, auditEventId, rollbackAuditEventId, createdAt } = batch;
+  return { id, schoolId, status, mappingVersion, rowCount, validRowCount, errorCount, ...(createdCount !== undefined ? { createdCount } : {}), ...(duplicateCount !== undefined ? { duplicateCount } : {}), ...(skippedCount !== undefined ? { skippedCount } : {}), ...(rolledBackCount !== undefined ? { rolledBackCount } : {}), ...(rollbackBlockedCount !== undefined ? { rollbackBlockedCount } : {}), ...(auditEventId ? { auditEventId } : {}), ...(rollbackAuditEventId ? { rollbackAuditEventId } : {}), createdAt };
+}
+
+export async function previewImport(store: Store, auth: AuthenticatedUser, input: { schoolId: string; filename: string; rows: Array<Record<string, unknown>> }): Promise<{ batch: PublicImportBatch; rows: PublicImportRow[] }> {
   requirePermission(auth.user, 'import:write');
   if (typeof input.filename !== 'string' || !input.filename.trim() || !Array.isArray(input.rows) || input.rows.length === 0 || input.rows.length > 10_000) throw new DomainError('IMPORT_INVALID', '导入文件名或行数无效');
   return store.transaction((state) => {
-    const school = state.schools.find((candidate) => candidate.id === input.schoolId && sameTenant(candidate, auth.user.tenantId));
+    const school = state.schools.find((candidate) => candidate.id === input.schoolId && sameTenant(candidate, auth.user.tenantId) && (!auth.user.schoolId || candidate.id === auth.user.schoolId));
     if (!school) throw notFound();
-    const batch: ImportBatch = { id: id(), tenantId: auth.user.tenantId, schoolId: school.id, createdBy: auth.user.id, filename: input.filename.slice(0, 200), status: 'previewed', mappingVersion: 1, rowCount: input.rows.length, validRowCount: 0, errorCount: 0, previewHash: importPreviewHash(input.rows), createdAt: now() };
+    const batch: ImportBatch = { id: id(), tenantId: auth.user.tenantId, schoolId: school.id, createdBy: auth.user.id, filename: input.filename.slice(0, 200), status: 'previewed', mappingVersion: 2, rowCount: input.rows.length, validRowCount: 0, errorCount: 0, createdCount: 0, duplicateCount: 0, skippedCount: 0, previewHash: importPreviewHash(input.rows), createdAt: now() };
     const seenExternalRefs = new Set<string>();
     const output: ImportRowResult[] = input.rows.map((raw, index) => {
       const inspection = inspectImportRow(raw, seenExternalRefs);
-      const row: ImportRowResult = { id: id(), tenantId: auth.user.tenantId, batchId: batch.id, rowNumber: index + 1, status: inspection.valid ? 'valid' : 'error', message: inspection.message };
-      if (inspection.valid) batch.validRowCount += 1; else batch.errorCount += 1;
+      const existing = inspection.valid && state.students.some((student) => student.tenantId === auth.user.tenantId && student.externalRefHash === inspection.externalRef);
+      const status: ImportRowResult['status'] = !inspection.valid ? inspection.duplicate ? 'duplicate' : 'error' : existing ? 'duplicate' : 'valid';
+      const message = inspection.message ?? (existing ? '名单中已存在相同外部编号，将作为重复行跳过' : undefined);
+      const row: ImportRowResult = { id: id(), tenantId: auth.user.tenantId, batchId: batch.id, rowNumber: index + 1, status, ...(message ? { message } : {}) };
+      if (status === 'valid') batch.validRowCount += 1;
+      else if (status === 'error') batch.errorCount += 1;
+      else if (status === 'duplicate') batch.duplicateCount = (batch.duplicateCount ?? 0) + 1;
       state.importRows.push(row);
       return row;
     });
     state.importBatches.push(batch);
-    audit(state, auth.user, 'import.previewed', 'import_batch', batch.id, { rowCount: batch.rowCount, validRowCount: batch.validRowCount, errorCount: batch.errorCount });
-    return { batch, rows: output };
+    audit(state, auth.user, 'import.previewed', 'import_batch', batch.id, { rowCount: batch.rowCount, validRowCount: batch.validRowCount, errorCount: batch.errorCount, duplicateCount: batch.duplicateCount ?? 0 });
+    return { batch: publicImportBatch(batch), rows: output.map(({ tenantId: _tenantId, ...row }) => row) };
   });
 }
 
-export async function commitImport(store: Store, auth: AuthenticatedUser, batchId: string, rows: Array<Record<string, unknown>>): Promise<ImportBatch> {
+export async function listImportBatches(store: Store, auth: AuthenticatedUser, input: { limit?: number; schoolId?: string } = {}): Promise<PublicImportBatch[]> {
+  requirePermission(auth.user, 'import:write');
+  const limit = input.limit ?? 20;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new DomainError('IMPORT_INVALID', '批次数量限制无效');
+  return store.read((state) => state.importBatches
+    .filter((batch) => batch.tenantId === auth.user.tenantId && (!input.schoolId || batch.schoolId === input.schoolId) && (!auth.user.schoolId || batch.schoolId === auth.user.schoolId))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .slice(0, limit)
+    .map(publicImportBatch));
+}
+
+export async function commitImport(store: Store, auth: AuthenticatedUser, batchId: string, rows: Array<Record<string, unknown>>): Promise<PublicImportBatch> {
   requirePermission(auth.user, 'import:write');
   if (!Array.isArray(rows)) throw new DomainError('IMPORT_INVALID', '导入行必须是数组');
   return store.transaction((state) => {
-    const batch = state.importBatches.find((candidate) => candidate.id === batchId && sameTenant(candidate, auth.user.tenantId));
+    const batch = state.importBatches.find((candidate) => candidate.id === batchId && sameTenant(candidate, auth.user.tenantId) && (!auth.user.schoolId || candidate.schoolId === auth.user.schoolId));
     if (!batch) throw notFound();
     if (batch.status !== 'previewed') throw new DomainError('IMPORT_ALREADY_COMMITTED', '导入批次已处理');
     if (rows.length !== batch.rowCount) throw new DomainError('IMPORT_VERSION_CONFLICT', '提交行数与预检版本不一致', 409);
     if (!batch.previewHash || importPreviewHash(rows) !== batch.previewHash) throw new DomainError('IMPORT_VERSION_CONFLICT', '提交内容与预检版本不一致，请重新预检', 409);
+    if (batch.validRowCount === 0) throw new DomainError('IMPORT_NO_VALID_ROWS', '没有可导入的有效行');
     const seen = new Set<string>();
-    let createdStudents = 0;
+    batch.createdCount = 0; batch.duplicateCount = 0; batch.skippedCount = 0;
     for (const [index, raw] of rows.entries()) {
       const previewRow = state.importRows.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.batchId === batch.id && candidate.rowNumber === index + 1);
+      if (!previewRow) throw new DomainError('IMPORT_PREVIEW_MISSING', '预检行记录不完整，请重新预检', 409);
+      if (previewRow.status === 'error') {
+        previewRow.status = 'skipped';
+        batch.skippedCount += 1;
+        continue;
+      }
+      if (previewRow.status === 'duplicate') {
+        batch.duplicateCount += 1;
+        continue;
+      }
+      if (previewRow.status !== 'valid') throw new DomainError('IMPORT_ROW_STATE_INVALID', '预检行状态无效，请重新预检', 409);
       const inspection = inspectImportRow(raw, seen);
-      if (!previewRow || previewRow.status !== 'valid' || !inspection.valid) continue;
+      if (!inspection.valid) {
+        previewRow.status = inspection.duplicate ? 'duplicate' : 'skipped';
+        previewRow.message = inspection.message ?? '数据未通过最终校验，已跳过';
+        if (previewRow.status === 'duplicate') batch.duplicateCount += 1; else batch.skippedCount += 1;
+        continue;
+      }
       const { normalized, externalRef } = inspection;
       const existing = state.students.find((student) => student.tenantId === auth.user.tenantId && student.externalRefHash === externalRef);
-      if (existing) continue;
-      state.students.push({ id: id(), tenantId: auth.user.tenantId, schoolId: batch.schoolId, classId: normalized.classId, externalRefHash: externalRef, displayNameCiphertext: encrypt(normalized.displayName), age: normalized.age, guardianVerified: normalized.guardianVerified, active: true, createdAt: now() });
-      createdStudents += 1;
+      if (existing) {
+        previewRow.status = 'duplicate';
+        previewRow.message = '提交时名单中已存在相同外部编号，已跳过';
+        batch.duplicateCount += 1;
+        continue;
+      }
+      const studentId = id();
+      state.students.push({ id: studentId, tenantId: auth.user.tenantId, schoolId: batch.schoolId, classId: normalized.classId, grade: normalized.grade, externalRefHash: externalRef, displayNameCiphertext: encrypt(normalized.displayName), age: normalized.age, guardianVerified: normalized.guardianVerified, active: true, createdAt: now() });
+      previewRow.status = 'imported';
+      previewRow.createdStudentId = studentId;
+      previewRow.message = undefined;
+      batch.createdCount += 1;
     }
     batch.status = 'committed';
-    for (const row of state.importRows.filter((candidate) => candidate.tenantId === auth.user.tenantId && candidate.batchId === batch.id && candidate.status === 'valid')) row.status = 'valid';
-    audit(state, auth.user, 'import.committed', 'import_batch', batch.id, { rowCount: batch.rowCount, createdStudents });
-    return batch;
+    batch.auditEventId = audit(state, auth.user, 'import.committed', 'import_batch', batch.id, { rowCount: batch.rowCount, createdCount: batch.createdCount, duplicateCount: batch.duplicateCount, skippedCount: batch.skippedCount });
+    return publicImportBatch(batch);
+  });
+}
+
+function hasStudentDependents(state: DatabaseState, studentId: string): boolean {
+  // Scan direct student references across state collections. Excluding the
+  // student itself and this batch's bookkeeping allows future workflows that
+  // add a studentId relation to fail closed rather than erase linked records.
+  for (const [collection, records] of Object.entries(state)) {
+    if (!Array.isArray(records) || collection === 'students' || collection === 'importRows') continue;
+    if (records.some((record) => Boolean(record && typeof record === 'object' && 'studentId' in record && (record as { studentId?: unknown }).studentId === studentId))) return true;
+  }
+  return false;
+}
+
+export async function rollbackImport(store: Store, auth: AuthenticatedUser, batchId: string): Promise<PublicImportBatch> {
+  requirePermission(auth.user, 'import:write');
+  return store.transaction((state) => {
+    const batch = state.importBatches.find((candidate) => candidate.id === batchId && sameTenant(candidate, auth.user.tenantId) && (!auth.user.schoolId || candidate.schoolId === auth.user.schoolId));
+    if (!batch) throw notFound();
+    if (batch.status === 'rolled_back') return publicImportBatch(batch);
+    if (!['committed', 'partially_rolled_back'].includes(batch.status)) throw new DomainError('IMPORT_ROLLBACK_UNAVAILABLE', '只有已完成的导入批次可以回滚');
+    const batchRows = state.importRows.filter((row) => row.tenantId === auth.user.tenantId && row.batchId === batch.id);
+    const importedRows = batchRows.filter((row) => row.status === 'imported' || row.status === 'rollback_blocked' || row.status === 'rolled_back');
+    if (batch.createdCount === undefined && !batch.auditEventId && importedRows.length === 0) throw new DomainError('IMPORT_ROLLBACK_UNAVAILABLE', '此旧批次缺少逐行创建记录，不能安全自动回滚');
+    const previousRolledBackCount = batch.rolledBackCount ?? 0;
+    const previousBlockedCount = batch.rollbackBlockedCount ?? 0;
+    for (const row of importedRows) {
+      if (row.status === 'rolled_back') continue;
+      const student = row.createdStudentId && state.students.find((candidate) => candidate.id === row.createdStudentId && candidate.tenantId === batch.tenantId && candidate.schoolId === batch.schoolId);
+      if (!student) {
+        row.status = 'rollback_blocked';
+        row.message = '无法确认本批次创建的学生记录，未执行回滚';
+      } else if (hasStudentDependents(state, student.id)) {
+        row.status = 'rollback_blocked';
+        row.message = '该学生已有后续业务记录，为保护关联数据未停用';
+      } else {
+        student.active = false;
+        row.status = 'rolled_back';
+        row.message = '已停用本批次新建的学生记录，保留审计证据';
+      }
+    }
+    const rolledBackCount = importedRows.filter((row) => row.status === 'rolled_back').length;
+    const rollbackBlockedCount = importedRows.filter((row) => row.status === 'rollback_blocked').length;
+    batch.rolledBackCount = rolledBackCount;
+    batch.rollbackBlockedCount = rollbackBlockedCount;
+    batch.status = rollbackBlockedCount > 0 ? 'partially_rolled_back' : 'rolled_back';
+    if (rolledBackCount !== previousRolledBackCount || rollbackBlockedCount !== previousBlockedCount || !batch.rollbackAuditEventId) {
+      batch.rollbackAuditEventId = audit(state, auth.user, rollbackBlockedCount > 0 ? 'import.rollback_partial' : 'import.rolled_back', 'import_batch', batch.id, { rolledBackCount, rollbackBlockedCount });
+    }
+    return publicImportBatch(batch);
   });
 }
 
@@ -431,6 +710,7 @@ export async function createScale(store: Store, auth: AuthenticatedUser, input: 
   if (!['synthetic_only', 'licensed'].includes(input.provenance)) throw new DomainError('SCALE_INVALID', '量表来源类型无效');
   if (input.provenance === 'licensed' && (typeof input.code !== 'string' || !input.code.trim())) throw new DomainError('LICENSE_UNAVAILABLE', '授权量表需要来源登记');
   if (typeof input.code !== 'string' || !input.code.trim() || input.code.length > 80 || typeof input.title !== 'string' || !input.title.trim() || input.title.length > 200 || typeof input.version !== 'string' || !input.version.trim() || input.version.length > 40 || typeof input.scoringVersion !== 'string' || !input.scoringVersion.trim() || input.scoringVersion.length > 80 || typeof input.noticeVersion !== 'string' || !input.noticeVersion.trim() || input.noticeVersion.length > 80 || !Number.isInteger(input.minAge) || !Number.isInteger(input.maxAge) || input.minAge < 6 || input.maxAge > 19 || input.minAge > input.maxAge) throw new DomainError('SCALE_INVALID', '量表版本或适龄范围无效');
+  if (input.estimatedMinutes !== undefined && (!Number.isInteger(input.estimatedMinutes) || input.estimatedMinutes < 1 || input.estimatedMinutes > 180)) throw new DomainError('SCALE_INVALID', '量表预计用时必须是 1–180 分钟整数');
   if (input.population !== undefined && !['primary', 'middle', 'high', 'mixed'].includes(input.population)) throw new DomainError('SCALE_INVALID', '量表适用学段无效');
   if (input.language !== undefined && (typeof input.language !== 'string' || !input.language.trim() || input.language.length > 32)) throw new DomainError('SCALE_INVALID', '量表语言标识无效');
   if (input.dimensions !== undefined && (!Array.isArray(input.dimensions) || input.dimensions.length > 20 || input.dimensions.some((dimension) => typeof dimension !== 'string' || !dimension.trim() || dimension.length > 80))) throw new DomainError('SCALE_INVALID', '量表维度目录无效');
@@ -500,7 +780,7 @@ export async function publishCampaign(store: Store, auth: AuthenticatedUser, cam
     const studentList = campaign.participantStudentIds.map((studentId) => state.students.find((student) => student.id === studentId && sameTenant(student, auth.user.tenantId))).filter((student): student is Student => Boolean(student));
     if (studentList.length !== new Set(campaign.participantStudentIds).size || studentList.some((student) => !student.active || student.schoolId !== campaign.schoolId)) throw new DomainError('STUDENT_NOT_ELIGIBLE', '名单中有不存在、已停用或已转校的学生');
     if (studentList.some((student) => !ageAllowed(student, scale))) throw new DomainError('AGE_REVIEW_REQUIRED', '名单中有不适龄或年龄未知的学生');
-    if (studentList.some((student) => !activeConsent(state, student.id, 'assessment', auth.user.tenantId, scale.noticeVersion))) throw new DomainError('CONSENT_REQUIRED', '名单中有学生缺少当前告知版本的测评参与记录');
+    if (studentList.some((student) => !currentPurposeConsent(state, student, 'assessment', scale.noticeVersion))) throw new DomainError('CONSENT_REQUIRED', '名单中有学生缺少当前告知版本的测评参与记录');
     const existing = new Set(state.assignments.filter((a) => a.tenantId === auth.user.tenantId && a.campaignId === campaign.id).map((a) => a.studentId));
     for (const student of studentList) {
       if (existing.has(student.id)) continue;
@@ -535,7 +815,7 @@ export async function approveFrequencyException(store: Store, auth: Authenticate
     if (campaign.state !== 'draft' && campaign.state !== 'approved') throw new DomainError('CAMPAIGN_STATE_INVALID', '只能为尚未发布的任务申请复评例外');
     if (auth.user.schoolId && auth.user.schoolId !== campaign.schoolId) throw forbidden();
     if (student.schoolId !== campaign.schoolId || !ageAllowed(student, scale)) throw new DomainError('AGE_REVIEW_REQUIRED', '学生不属于任务学校或不在量表适龄范围');
-    if (!activeConsent(state, student.id, 'assessment', auth.user.tenantId, scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '复评前需要当前告知版本的测评参与记录');
+    if (!currentPurposeConsent(state, student, 'assessment', scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '复评前需要当前告知版本的测评参与记录');
     const existingException = state.frequencyReservations.find((reservation) => reservation.tenantId === auth.user.tenantId && reservation.studentId === student.id && reservation.academicYear === campaign.academicYear && reservation.campaignId === campaign.id && reservation.status === 'exception');
     if (existingException) {
       existingException.approvedBy = auth.user.id;
@@ -564,7 +844,7 @@ export async function beginAttempt(store: Store, auth: AuthenticatedUser, assign
     if (!validAcademicYear(campaign.academicYear)) throw new DomainError('ACADEMIC_YEAR_INVALID', '任务学年配置无效，不能开始答题');
     if (!['open', 'scheduled'].includes(campaign.state) || new Date(campaign.opensAt) > new Date() || new Date(campaign.closesAt) <= new Date()) throw new DomainError('CAMPAIGN_CLOSED', '任务当前不在开放时间');
     assertUsableScale(scale);
-    if (!activeConsent(state, student.id, 'assessment', auth.user.tenantId, scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '需要当前告知版本的测评参与记录');
+    if (!currentPurposeConsent(state, student, 'assessment', scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '需要当前告知版本的测评参与记录');
     if (!ageAllowed(student, scale)) throw new DomainError('AGE_REVIEW_REQUIRED', '年龄不在该方案适用范围');
     if (!['assigned', 'started'].includes(assignment.status)) throw new DomainError('ASSIGNMENT_NOT_AVAILABLE', '该任务已结束或不再接受答题', 409);
     const reservation = state.frequencyReservations.find((candidate) => candidate.id === assignment.frequencyReservationId && candidate.tenantId === auth.user.tenantId);
@@ -587,7 +867,8 @@ export async function getAttempt(store: Store, auth: AuthenticatedUser, attemptI
     assertAttemptWritable(state, attempt);
     const scale = state.scales.find((candidate) => candidate.id === attempt.scaleVersionId && sameTenant(candidate, auth.user.tenantId));
     if (!scale) throw notFound();
-    if (!activeConsent(state, attempt.studentId, 'assessment', auth.user.tenantId, scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '需要当前告知版本的测评参与记录');
+    const student = state.students.find((candidate) => candidate.id === attempt.studentId && sameTenant(candidate, auth.user.tenantId));
+    if (!student || !currentPurposeConsent(state, student, 'assessment', scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '需要当前告知版本的测评参与记录');
     const revision = state.answerRevisions.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.attemptId === attempt.id && candidate.revision === attempt.currentRevision);
     const answers = revision ? decrypt<Record<string, unknown>>(revision.answersCiphertext) : {};
     audit(state, auth.user, 'attempt.draft_read', 'attempt', attempt.id, { revision: attempt.currentRevision }, 'assessment');
@@ -629,7 +910,8 @@ export async function saveAnswers(store: Store, auth: AuthenticatedUser, attempt
     if (!attempt || attempt.state !== 'in_progress') throw notFound();
     const scale = state.scales.find((candidate) => candidate.id === attempt.scaleVersionId && sameTenant(candidate, auth.user.tenantId));
     if (!scale) throw notFound();
-    if (!activeConsent(state, attempt.studentId, 'assessment', auth.user.tenantId, scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '需要当前告知版本的测评参与记录');
+    const student = state.students.find((candidate) => candidate.id === attempt.studentId && sameTenant(candidate, auth.user.tenantId));
+    if (!student || !currentPurposeConsent(state, student, 'assessment', scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '需要当前告知版本的测评参与记录');
     assertAttemptWritable(state, attempt);
     if (attempt.currentRevision !== input.expectedRevision) throw new DomainError('REVISION_CONFLICT', '答题内容已在其他窗口更新', 409, { currentRevision: attempt.currentRevision });
     const allowed = new Set(scale.items.map((item) => item.id));
@@ -649,7 +931,8 @@ export async function submitAttempt(store: Store, auth: AuthenticatedUser, attem
     if (!attempt) throw notFound();
     const scale = state.scales.find((candidate) => candidate.id === attempt.scaleVersionId && sameTenant(candidate, auth.user.tenantId));
     if (!scale) throw notFound();
-    if (!activeConsent(state, attempt.studentId, 'assessment', auth.user.tenantId, scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '需要当前告知版本的测评参与记录');
+    const student = state.students.find((candidate) => candidate.id === attempt.studentId && sameTenant(candidate, auth.user.tenantId));
+    if (!student || !currentPurposeConsent(state, student, 'assessment', scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '需要当前告知版本的测评参与记录');
     const existing = state.submissions.find((submission) => submission.tenantId === auth.user.tenantId && submission.attemptId === attempt.id);
     if (existing) {
       if (existing.idempotencyKey !== idempotencyKey) throw new DomainError('IDEMPOTENCY_CONFLICT', '该答卷已经提交', 409);
@@ -818,6 +1101,48 @@ async function processOutboxEvent(store: Store, eventId: string): Promise<void> 
         state.deliveryAttempts.push({ id: id(), tenantId: event.tenantId, outboxEventId: event.id, channel: 'in_app', status: 'sent', attemptedAt: now() });
       }
     }
+    if (event.type.startsWith('appointment.')) {
+      const appointment = state.appointments.find((candidate) => candidate.tenantId === event.tenantId && candidate.id === event.aggregateId && candidate.id === String(event.payload.appointmentId));
+      if (!appointment) {
+        event.status = 'cancelled'; event.cancelledAt = now(); event.cancelReasonCode = 'request_cancelled';
+        return;
+      }
+      const slot = appointmentSlot(state, appointment);
+      const currentKind = event.type.slice('appointment.'.length);
+      const stale = !slot || slot.startsAt !== event.payload.scheduleStartsAt || (currentKind === 'reminder_due' && appointment.state !== 'confirmed') || (currentKind === 'requested' && appointment.state !== 'requested') || (currentKind === 'confirmed' && appointment.state !== 'confirmed') || (currentKind === 'rescheduled' && appointment.state !== 'requested') || (['cancelled', 'completed', 'no_show'].includes(currentKind) && appointment.state !== currentKind);
+      if (stale) {
+        event.status = 'cancelled'; event.cancelledAt = now(); event.cancelReasonCode = 'schedule_replaced';
+        audit(state, undefined, 'appointment.notification_cancelled', 'outbox', event.id, { reason: event.cancelReasonCode }, 'appointment', event.tenantId);
+        return;
+      }
+      const existingDelivery = state.deliveryAttempts.find((attempt) => attempt.tenantId === event.tenantId && attempt.outboxEventId === event.id && attempt.channel === 'in_app' && attempt.status === 'sent');
+      if (!existingDelivery) {
+        if (process.env.NODE_ENV === 'production' && process.env.CAMPMIND_NOTIFICATION_ADAPTER_READY !== 'true') throw new Error('NOTIFICATION_PROVIDER_NOT_CONFIGURED');
+        const recipientIds = [...new Set([appointment.studentId, appointment.counselorId, ...(typeof event.payload.previousCounselorId === 'string' ? [event.payload.previousCounselorId] : [])])];
+        const recipientUsers = recipientIds.map((recipientId) => state.users.find((candidate) => candidate.tenantId === event.tenantId && candidate.id === recipientId && candidate.active));
+        if (recipientUsers.some((recipient) => !recipient)) throw new Error('APPOINTMENT_RECIPIENT_UNAVAILABLE');
+        const context = {
+          state: appointment.state,
+          startsAt: slot.startsAt,
+          endsAt: slot.endsAt,
+          room: slot.room ?? null,
+          reminderMinutes: typeof event.payload.reminderMinutes === 'number' ? event.payload.reminderMinutes : null,
+          previousStartsAt: typeof event.payload.previousStartsAt === 'string' ? event.payload.previousStartsAt : null,
+        };
+        let delivery: { status: 'sent' | 'failed'; provider: string; errorCode?: string };
+        try {
+          delivery = store.notificationDispatcher ? await store.notificationDispatcher.deliver({ eventId: event.id, tenantId: event.tenantId, eventType: event.type, aggregateId: event.aggregateId, priority: 'routine', recipientIds, context }) : { status: 'sent', provider: 'local-reference' };
+        } catch {
+          throw new Error('NOTIFICATION_PROVIDER_UNAVAILABLE');
+        }
+        if (!delivery || !['sent', 'failed'].includes(delivery.status) || typeof delivery.provider !== 'string' || !delivery.provider.trim()) throw new Error('NOTIFICATION_PROVIDER_INVALID');
+        if (delivery.status === 'failed') {
+          const providerCode = typeof delivery.errorCode === 'string' && /^[A-Z][A-Z0-9_:-]{0,63}$/.test(delivery.errorCode) ? delivery.errorCode : 'NOTIFICATION_DELIVERY_FAILED';
+          throw new Error(providerCode);
+        }
+        state.deliveryAttempts.push({ id: id(), tenantId: event.tenantId, outboxEventId: event.id, channel: 'in_app', status: 'sent', attemptedAt: now() });
+      }
+    }
     // Notification delivery is recorded separately; case acknowledgement remains a human action.
     event.status = 'published';
   });
@@ -828,8 +1153,16 @@ export async function listReports(store: Store, auth: AuthenticatedUser, student
   return store.transaction((state) => {
     const reports = state.reports.filter((report) => sameTenant(report, auth.user.tenantId) && (!studentId || report.studentId === studentId));
     const visible = reports.filter((report) => isStudent(auth.user) ? report.studentId === auth.user.id && report.state === 'released' : professionalCanReadStudent(state, auth, report.studentId));
-    audit(state, auth.user, 'report.listed', 'report', studentId ?? 'self', { count: visible.length }, 'report:read');
-    return visible.map((report) => ({ id: report.id, studentId: report.studentId, title: report.title, state: report.state, scoreRunId: report.scoreRunId, createdAt: report.createdAt, releasedAt: report.releasedAt, summary: report.state === 'released' || isProfessional(auth.user) ? decrypt(report.summaryCiphertext) : undefined }));
+    audit(state, auth.user, 'report.listed', 'student', isStudent(auth.user) ? auth.user.id : studentId ?? 'tenant', { count: visible.length }, 'report:read');
+    if (isProfessional(auth.user)) {
+      for (const viewedStudentId of new Set(visible.map((report) => report.studentId))) {
+        audit(state, auth.user, 'report.student_viewed', 'student', viewedStudentId, { reportCount: visible.filter((report) => report.studentId === viewedStudentId).length }, 'report:read');
+      }
+    }
+    return visible.map((report) => {
+      const student = isProfessional(auth.user) ? state.students.find((candidate) => candidate.id === report.studentId && candidate.tenantId === auth.user.tenantId && candidate.active) : undefined;
+      return { id: report.id, studentId: report.studentId, ...(student ? { studentName: decrypt<string>(student.displayNameCiphertext), classId: student.classId, grade: student.grade } : {}), title: report.title, state: report.state, scoreRunId: report.scoreRunId, createdAt: report.createdAt, releasedAt: report.releasedAt, summary: report.state === 'released' || isProfessional(auth.user) ? decrypt(report.summaryCiphertext) : undefined };
+    });
   });
 }
 
@@ -881,12 +1214,130 @@ export async function createRiskSignal(store: Store, auth: AuthenticatedUser, in
   });
 }
 
+// Provisional calendar-time targets for the local demonstration workflow,
+// not clinical response guarantees. Production deployments must replace them
+// with school-approved, staffed operating procedures.
+const CASE_STAGE_TARGETS: Partial<Record<CaseState, { env: string; demoHours: number }>> = {
+  pending_review: { env: 'CAMPMIND_CASE_SLA_REVIEW_HOURS', demoHours: 24 },
+  confirmed: { env: 'CAMPMIND_CASE_SLA_ASSIGNMENT_HOURS', demoHours: 24 },
+  assigned: { env: 'CAMPMIND_CASE_SLA_ACK_HOURS', demoHours: 4 },
+  in_support: { env: 'CAMPMIND_CASE_SLA_FOLLOW_UP_HOURS', demoHours: 24 },
+  follow_up: { env: 'CAMPMIND_CASE_SLA_FOLLOW_UP_HOURS', demoHours: 24 },
+  closure_requested: { env: 'CAMPMIND_CASE_SLA_CLOSURE_REVIEW_HOURS', demoHours: 24 },
+};
+
+function caseWorkflowLane(state: CaseState): string {
+  if (state === 'pending_review') return 'pending_review';
+  if (state === 'confirmed') return 'pending_assignment';
+  if (state === 'assigned') return 'pending_acknowledgement';
+  if (state === 'in_support' || state === 'follow_up') return 'follow_up';
+  if (state === 'closure_requested') return 'pending_closure';
+  return 'history';
+}
+
+function caseNextOwner(riskCase: RiskCase, assignedName?: string): string {
+  if (riskCase.state === 'pending_review') return '专业负责人（待复核）';
+  if (riskCase.state === 'confirmed') return '专业负责人（待指派）';
+  if (riskCase.state === 'assigned') return assignedName || '专业负责人（需确认接单人）';
+  if (riskCase.state === 'in_support' || riskCase.state === 'follow_up') return assignedName || '专业负责人（需补充分派）';
+  if (riskCase.state === 'closure_requested') {
+    if (!riskCase.closureRequestedBy) return '需补全申请记录后再分派审核人';
+    if (riskCase.closureRequestedBy && riskCase.closureRequestedBy === riskCase.assignedTo) return '专业负责人（独立复核）';
+    return assignedName ? `${assignedName}（独立复核）` : '独立专业审核人（非申请人）';
+  }
+  return '无需后续处理';
+}
+
+function caseDeadlineAt(riskCase: RiskCase, latestFollowUp?: FollowUp): string | undefined {
+  if (['closed', 'dismissed'].includes(riskCase.state)) return undefined;
+  const followUpDeadline = latestFollowUp?.dueAt;
+  if ((riskCase.state === 'in_support' || riskCase.state === 'follow_up') && validDate(followUpDeadline)) return followUpDeadline;
+  const target = CASE_STAGE_TARGETS[riskCase.state];
+  if (!target || !validDate(riskCase.updatedAt)) return undefined;
+  const configured = process.env[target.env];
+  const targetHours = configured === undefined
+    ? (process.env.NODE_ENV === 'production' ? undefined : target.demoHours)
+    : Number(configured);
+  if (typeof targetHours !== 'number' || !Number.isInteger(targetHours) || targetHours < 1 || targetHours > 8_760) return undefined;
+  return new Date(Date.parse(riskCase.updatedAt) + targetHours * 60 * 60_000).toISOString();
+}
+
+function caseNotificationFailed(state: DatabaseState, riskCase: RiskCase): boolean {
+  const events = state.outboxEvents.filter((event) => event.tenantId === riskCase.tenantId && event.aggregateId === riskCase.id && ['risk.signal_created', 'risk.escalation'].includes(event.type));
+  return events.some((event) => {
+    const attempts = state.deliveryAttempts.filter((attempt) => attempt.tenantId === event.tenantId && attempt.outboxEventId === event.id && attempt.channel === 'in_app');
+    return event.status === 'dead_letter' || (attempts.some((attempt) => attempt.status === 'failed') && !attempts.some((attempt) => attempt.status === 'sent'));
+  });
+}
+
 export async function listCases(store: Store, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
   if (!isProfessional(auth.user)) throw forbidden();
   return store.transaction((state) => {
     const cases = state.riskCases.filter((candidate) => sameTenant(candidate, auth.user.tenantId) && (!auth.user.schoolId || state.students.some((student) => student.id === candidate.studentId && student.schoolId === auth.user.schoolId)) && (auth.user.role === 'professional_lead' || candidate.assignedTo === auth.user.id));
     audit(state, auth.user, 'risk.case_listed', 'risk_case', 'tenant', { count: cases.length }, 'case:read');
-    return cases.map((riskCase) => ({ id: riskCase.id, studentId: riskCase.studentId, state: riskCase.state, priority: riskCase.priority, assignedTo: riskCase.assignedTo, signalCount: riskCase.signalIds.length, createdAt: riskCase.createdAt, updatedAt: riskCase.updatedAt }));
+    for (const viewedStudentId of new Set(cases.map((riskCase) => riskCase.studentId))) audit(state, auth.user, 'risk.case_queue_viewed', 'student', viewedStudentId, { caseCount: cases.filter((riskCase) => riskCase.studentId === viewedStudentId).length }, 'case:read');
+    return cases.map((riskCase) => {
+      const student = state.students.find((candidate) => candidate.id === riskCase.studentId && candidate.tenantId === auth.user.tenantId && candidate.active);
+      const latestFollowUp = state.followUps.filter((followUp) => followUp.tenantId === auth.user.tenantId && followUp.caseId === riskCase.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+      const followUpDueAt = !['closed', 'dismissed'].includes(riskCase.state) ? latestFollowUp?.dueAt : undefined;
+      const assigned = riskCase.assignedTo ? state.users.find((candidate) => candidate.id === riskCase.assignedTo && candidate.tenantId === auth.user.tenantId && candidate.active) : undefined;
+      const deadlineAt = caseDeadlineAt(riskCase, latestFollowUp);
+      const currentTime = Date.now();
+      const waitingMinutes = validDate(riskCase.createdAt) ? Math.max(0, Math.floor((currentTime - Date.parse(riskCase.createdAt)) / 60_000)) : 0;
+      const exceptionReasons: string[] = [];
+      if (riskCase.state === 'confirmed' && !riskCase.assignedTo) exceptionReasons.push('unassigned');
+      if (['assigned', 'in_support', 'follow_up'].includes(riskCase.state) && (!riskCase.assignedTo || !assigned)) exceptionReasons.push('unassigned');
+      if (riskCase.state === 'assigned' && !state.acknowledgements.some((ack) => ack.tenantId === riskCase.tenantId && ack.caseId === riskCase.id) && deadlineAt && Date.parse(deadlineAt) <= currentTime) exceptionReasons.push('not_accepted');
+      if (riskCase.state === 'closure_requested' && !riskCase.closureRequestedBy) exceptionReasons.push('closure_request_unattributed');
+      if (caseNotificationFailed(state, riskCase)) exceptionReasons.push('notification_failed');
+      if (!['closed', 'dismissed'].includes(riskCase.state) && !deadlineAt) exceptionReasons.push('deadline_unconfigured');
+      if (deadlineAt && Date.parse(deadlineAt) <= currentTime) exceptionReasons.push('deadline_overdue');
+      return {
+        id: riskCase.id, studentId: riskCase.studentId,
+        studentName: student ? decrypt<string>(student.displayNameCiphertext) : '学生',
+        classId: student?.classId ?? '', grade: student?.grade,
+        state: riskCase.state, lane: caseWorkflowLane(riskCase.state), priority: riskCase.priority,
+        assignedTo: riskCase.assignedTo, assignedName: assigned?.displayName,
+        nextOwner: caseNextOwner(riskCase, assigned?.displayName),
+        canApproveClosure: riskCase.state === 'closure_requested' && Boolean(riskCase.closureRequestedBy) && riskCase.closureRequestedBy !== auth.user.id && (auth.user.role === 'professional_lead' || (auth.user.role === 'counselor' && riskCase.assignedTo === auth.user.id)),
+        signalCount: riskCase.signalIds.length, createdAt: riskCase.createdAt, updatedAt: riskCase.updatedAt,
+        waitingMinutes, deadlineAt,
+        ...(followUpDueAt ? { followUpDueAt } : {}),
+        overdue: Boolean(deadlineAt && Date.parse(deadlineAt) <= currentTime),
+        exceptionReasons,
+        exception: exceptionReasons.length > 0,
+      };
+    });
+  });
+}
+
+/** Return only workflow metadata for a case; never decrypt signal reasons, answers, reports, or narrative notes. */
+export async function getCaseBriefing(store: Store, auth: AuthenticatedUser, caseId: string): Promise<Record<string, unknown>> {
+  requirePermission(auth.user, 'case:read');
+  if (!isProfessional(auth.user)) throw forbidden();
+  return store.transaction((state) => {
+    const riskCase = caseFor(state, auth, caseId);
+    const student = state.students.find((candidate) => candidate.id === riskCase.studentId && candidate.tenantId === auth.user.tenantId && candidate.active);
+    const followUps = state.followUps.filter((followUp) => followUp.tenantId === auth.user.tenantId && followUp.caseId === riskCase.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    const latestFollowUp = followUps[0];
+    const visibleRelatedCases = state.riskCases.filter((candidate) => candidate.tenantId === auth.user.tenantId && candidate.studentId === riskCase.studentId && candidate.id !== riskCase.id && (auth.user.role === 'professional_lead' || candidate.assignedTo === auth.user.id));
+    const latestAcknowledgement = state.acknowledgements.filter((ack) => ack.tenantId === auth.user.tenantId && ack.caseId === riskCase.id).sort((left, right) => right.acknowledgedAt.localeCompare(left.acknowledgedAt))[0];
+    audit(state, auth.user, 'risk.case_minimum_context_viewed', 'risk_case', caseId, { relatedCaseCount: visibleRelatedCases.length, followUpCount: followUps.length }, 'case_review_minimum_context');
+    audit(state, auth.user, 'student.case_minimum_context_viewed', 'student', riskCase.studentId, { caseState: riskCase.state }, 'case_review_minimum_context');
+    return {
+      grade: student?.grade ?? null,
+      classId: student?.classId ?? null,
+      caseState: riskCase.state,
+      priority: riskCase.priority,
+      openedAt: riskCase.createdAt,
+      lastWorkflowUpdateAt: riskCase.updatedAt,
+      linkedSignalCount: riskCase.signalIds.length,
+      relatedCaseCount: visibleRelatedCases.length,
+      openRelatedCaseCount: visibleRelatedCases.filter((candidate) => !['closed', 'dismissed'].includes(candidate.state)).length,
+      acknowledgement: latestAcknowledgement ? { acknowledgedAt: latestAcknowledgement.acknowledgedAt } : { pending: riskCase.state === 'assigned' },
+      latestFollowUp: latestFollowUp ? { kind: latestFollowUp.kind, createdAt: latestFollowUp.createdAt, dueAt: latestFollowUp.dueAt ?? null } : null,
+      boundary: '仅含工作流元数据；不含原始答卷、预警理由、报告正文或随访叙述。',
+    };
   });
 }
 
@@ -905,7 +1356,7 @@ export async function reviewCase(store: Store, auth: AuthenticatedUser, caseId: 
   return store.transaction((state) => {
     const riskCase = caseFor(state, auth, caseId);
     if (auth.user.role === 'counselor' && riskCase.assignedTo !== auth.user.id) throw forbidden();
-    if (!['pending_review', 'closure_requested'].includes(riskCase.state)) throw new DomainError('CASE_STATE_INVALID', '个案当前状态不能复核');
+    if (riskCase.state !== 'pending_review') throw new DomainError('CASE_STATE_INVALID', '仅待复核线索可以执行初步复核');
     const review: RiskReview = { id: id(), tenantId: auth.user.tenantId, caseId, reviewerId: auth.user.id, decision: input.decision, noteCiphertext: encrypt({ note: input.note.slice(0, 4000) }), createdAt: now() };
     state.riskReviews.push(review);
     riskCase.state = input.decision === 'dismiss' ? 'dismissed' : 'confirmed'; riskCase.updatedAt = now();
@@ -929,8 +1380,8 @@ export async function acknowledgeCase(store: Store, auth: AuthenticatedUser, cas
   requirePermission(auth.user, 'case:ack');
   return store.transaction((state) => {
     const riskCase = caseFor(state, auth, caseId);
-    if (riskCase.assignedTo !== auth.user.id && auth.user.role !== 'professional_lead') throw forbidden();
-    if (!['assigned', 'confirmed'].includes(riskCase.state)) throw new DomainError('CASE_STATE_INVALID', '个案当前不可接单');
+    if (!riskCase.assignedTo || riskCase.assignedTo !== auth.user.id) throw forbidden();
+    if (riskCase.state !== 'assigned') throw new DomainError('CASE_STATE_INVALID', '仅已指派个案可由指派对象确认接单');
     const existing = state.acknowledgements.find((ack) => ack.tenantId === auth.user.tenantId && ack.caseId === caseId && ack.userId === auth.user.id);
     if (existing) return publicCaseAcknowledgement(existing);
     const acknowledgement: CaseAcknowledgement = { id: id(), tenantId: auth.user.tenantId, caseId, userId: auth.user.id, acknowledgedAt: now() }; state.acknowledgements.push(acknowledgement);
@@ -967,9 +1418,7 @@ export async function approveClosure(store: Store, auth: AuthenticatedUser, case
     if (riskCase.state !== 'closure_requested') throw new DomainError('CASE_STATE_INVALID', '个案尚未申请结案');
     if (auth.user.role === 'counselor' && riskCase.assignedTo !== auth.user.id) throw forbidden();
     const requester = riskCase.closureRequestedBy;
-    // Legacy snapshots may not have the requester marker.  Fail closed for
-    // non-lead roles rather than inferring the actor from an arbitrary note.
-    if (requester === auth.user.id || (auth.user.role !== 'professional_lead' && !requester)) throw new DomainError('SEPARATION_OF_DUTIES_REQUIRED', '结案审批需要独立专业复核', 403);
+    if (!requester || requester === auth.user.id) throw new DomainError('SEPARATION_OF_DUTIES_REQUIRED', '结案审批需要由与申请人不同的专业人员独立审核', 403);
     riskCase.state = 'closed'; riskCase.updatedAt = now(); audit(state, auth.user, 'risk.case_closed', 'risk_case', caseId, {}); return publicRiskCase(riskCase);
   });
 }
@@ -984,7 +1433,7 @@ export async function adminOverview(store: Store, auth: AuthenticatedUser): Prom
     const reports = state.reports.filter((report) => sameTenant(report, tenant) && studentIds.has(report.studentId));
     const cases = state.riskCases.filter((riskCase) => sameTenant(riskCase, tenant) && studentIds.has(riskCase.studentId) && riskCase.state !== 'closed' && riskCase.state !== 'dismissed');
     const suppress = (value: number, size = visibleStudents.length): number | null => size < SMALL_SAMPLE_THRESHOLD ? null : value;
-    const result = { students: suppress(visibleStudents.length), assignments: suppress(assignments.length), completedAssignments: suppress(assignments.filter((a) => a.status === 'completed').length), releasedReports: suppress(reports.filter((r) => r.state === 'released').length), openCases: suppress(cases.length), suppressionThreshold: SMALL_SAMPLE_THRESHOLD, note: '小样本指标以 null 抑制；统计不代表疾病患病率。' };
+    const result = { students: suppress(visibleStudents.length), assignments: suppress(assignments.length), completedAssignments: suppress(assignments.filter((a) => a.status === 'completed').length), releasedReports: suppress(reports.filter((r) => r.state === 'released').length), openCases: suppress(cases.length), suppressionThreshold: SMALL_SAMPLE_THRESHOLD, note: `样本数不足 ${SMALL_SAMPLE_THRESHOLD} 的指标以 null 抑制；这表示人数不足而非 0 人，也不代表没有风险。所有统计均为聚合参考，不代表疾病患病率。` };
     audit(state, auth.user, 'analytics.admin_overview_viewed', 'analytics', 'overview', { studentCount: visibleStudents.length });
     return result;
   });
@@ -1047,7 +1496,7 @@ export async function createRightsRequest(store: Store, auth: AuthenticatedUser,
 }
 
 export async function listRightsRequests(store: Store, auth: AuthenticatedUser): Promise<PublicRightsRequest[]> {
-  requirePermission(auth.user, 'rights:read');
+  if (!can(auth.user, 'rights:read') && !can(auth.user, 'rights:manage')) throw forbidden();
   return store.transaction((state) => {
     const requests = state.rightsRequests.filter((request) => request.tenantId === auth.user.tenantId && (!auth.user.schoolId || state.students.some((student) => student.id === request.studentId && student.schoolId === auth.user.schoolId))).map(publicRightsRequest);
     audit(state, auth.user, 'rights.listed', 'rights_request', 'tenant', { count: requests.length }, 'rights:read');
@@ -1066,6 +1515,45 @@ export async function listMyRightsRequests(store: Store, auth: AuthenticatedUser
       .map(publicRightsRequest);
     audit(state, auth.user, 'rights.own_listed', 'rights_request', 'self', { count: requests.length }, 'rights:request');
     return requests;
+  });
+}
+
+/** Subject-visible metadata for audited reads of released feedback, case
+ * workflow context and purpose-bound professional archive access. */
+export async function listMyDataAccessHistory(store: Store, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
+  if (!isStudent(auth.user)) throw forbidden();
+  const actionLabels: Record<string, string> = {
+    'report.listed': '已查看自己的已发布反馈',
+    'report.student_viewed': '工作人员查看了与反馈有关的资料',
+    'archive.viewed': '专业工作人员查看了授权档案',
+    'risk.case_queue_viewed': '专业工作人员查看了支持流程信息',
+    'student.case_minimum_context_viewed': '专业工作人员查看了最少必要支持背景',
+    'student.rights_result_viewed': '已查看权利申请处理结果',
+  };
+  const purposeLabels: Record<string, string> = {
+    'report:read': '反馈查看',
+    'rights:read': '权利申请处理',
+    case_review: '线索复核',
+    report_review: '报告审核',
+    support_follow_up: '支持与随访',
+    case_review_minimum_context: '最少必要线索背景',
+  };
+  return store.read((state) => {
+    if (!state.students.some((student) => student.tenantId === auth.user.tenantId && student.id === auth.user.id && student.active)) throw notFound();
+    return state.auditEvents
+      .filter((event) => event.tenantId === auth.user.tenantId && event.objectId === auth.user.id && Object.hasOwn(actionLabels, event.action))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(0, 100)
+      .map((event) => {
+        const actor = event.actorId === auth.user.id ? undefined : state.users.find((user) => user.tenantId === auth.user.tenantId && user.id === event.actorId);
+        const roleLabel = actor?.role === 'counselor' ? '咨询师' : actor?.role === 'professional_lead' ? '心理专业负责人' : undefined;
+        return {
+          accessedAt: event.createdAt,
+          activity: actionLabels[event.action],
+          actorName: event.actorId === auth.user.id ? '你本人' : actor ? `${actor.displayName}${roleLabel ? `（${roleLabel}）` : ''}` : '工作人员或系统',
+          purpose: event.purpose ? purposeLabels[event.purpose] ?? '学校记录的工作用途' : '本人查看',
+        };
+      });
   });
 }
 
@@ -1118,6 +1606,7 @@ export async function downloadRightsResult(store: Store, auth: AuthenticatedUser
     const requestStudent = request ? state.students.find((candidate) => candidate.id === request.studentId && candidate.tenantId === request.tenantId) : undefined;
     if (!request || !['completed', 'rejected'].includes(request.status) || !request.resultCiphertext || (auth.user.schoolId && (!requestStudent || requestStudent.schoolId !== auth.user.schoolId)) || (request.requesterId !== auth.user.id && !can(auth.user, 'rights:read'))) throw forbidden();
     audit(state, auth.user, 'rights.result_downloaded', 'rights_request', request.id, { kind: request.kind }, 'rights:read');
+    audit(state, auth.user, 'student.rights_result_viewed', 'student', request.studentId, { kind: request.kind }, 'rights:read');
     return decrypt<Record<string, unknown>>(request.resultCiphertext);
   });
 }
@@ -1447,7 +1936,7 @@ export async function getAnalytics(store: Store, auth: AuthenticatedUser, groupB
     }
     const rows = [...groups.entries()].map(([key, count]) => ({ key, count: count < 10 ? null : count, suppressed: count < 10 }));
     audit(state, auth.user, 'analytics.viewed', 'analytics', groupBy, { groupCount: rows.length });
-    return { groupBy, rows, suppressionThreshold: 10, note: '小样本与可重识别单元已抑制；指标不是疾病患病率。' };
+    return { groupBy, rows, suppressionThreshold: SMALL_SAMPLE_THRESHOLD, note: `样本数不足 ${SMALL_SAMPLE_THRESHOLD} 的分组会显示为“已抑制”，不代表 0 人或没有风险；指标为聚合参考，不代表疾病患病率。` };
   });
 }
 
@@ -1475,13 +1964,79 @@ function availabilityOverlaps(state: DatabaseState, candidate: { id?: string; te
   return state.availabilitySlots.some((slot) => slot.id !== candidate.id && slot.tenantId === candidate.tenantId && slot.status !== 'blocked' && new Date(startsAt) < new Date(slot.endsAt) && new Date(endsAt) > new Date(slot.startsAt) && (slot.counselorId === counselorId || (Boolean(room) && Boolean(slot.room?.trim()) && slot.room?.trim() === room)));
 }
 
+type AppointmentNotificationType = 'requested' | 'confirmed' | 'rescheduled' | 'cancelled' | 'completed' | 'no_show' | 'reminder_due';
+const APPOINTMENT_REMINDER_MINUTES = [24 * 60, 60, 15] as const;
+
+function isAppointmentManager(user: User): boolean { return can(user, 'appointment:manage'); }
+function isAppointmentCounselor(user: User): boolean { return can(user, 'appointment:self_manage') && user.role === 'counselor'; }
+function hasAppointmentWorkspace(user: User): boolean { return isStudent(user) || isAppointmentManager(user) || isAppointmentCounselor(user); }
+function mayManageAppointment(user: User, appointment: Appointment): boolean {
+  return isAppointmentManager(user) || (isAppointmentCounselor(user) && user.id === appointment.counselorId);
+}
+
+function appointmentSlot(state: DatabaseState, appointment: Appointment): AvailabilitySlot | undefined {
+  return state.availabilitySlots.find((candidate) => candidate.id === appointment.slotId && candidate.tenantId === appointment.tenantId);
+}
+
+function studentHasOverlappingAppointment(state: DatabaseState, tenantId: string, studentId: string, candidate: AvailabilitySlot, excludingAppointmentId?: string): boolean {
+  return state.appointments.some((appointment) => {
+    if (appointment.tenantId !== tenantId || appointment.studentId !== studentId || appointment.id === excludingAppointmentId || !['requested', 'confirmed'].includes(appointment.state)) return false;
+    const slot = appointmentSlot(state, appointment);
+    return Boolean(slot && new Date(candidate.startsAt) < new Date(slot.endsAt) && new Date(candidate.endsAt) > new Date(slot.startsAt));
+  });
+}
+
+function enqueueAppointmentEvent(state: DatabaseState, appointment: Appointment, type: AppointmentNotificationType, extra: Record<string, string | number | boolean | null> = {}): void {
+  const slot = appointmentSlot(state, appointment);
+  state.outboxEvents.push({
+    id: id(), tenantId: appointment.tenantId, type: `appointment.${type}`, aggregateId: appointment.id,
+    payload: { appointmentId: appointment.id, scheduleStartsAt: slot?.startsAt ?? '', ...extra },
+    status: 'pending', attempts: 0, availableAt: type === 'reminder_due' && typeof extra.reminderAt === 'string' ? extra.reminderAt : now(), createdAt: now(),
+  });
+}
+
+function cancelPendingAppointmentReminders(state: DatabaseState, appointment: Appointment, reason: 'schedule_replaced' | 'request_cancelled'): void {
+  for (const event of state.outboxEvents.filter((candidate) => candidate.tenantId === appointment.tenantId && candidate.aggregateId === appointment.id && candidate.type === 'appointment.reminder_due' && candidate.status === 'pending')) {
+    event.status = 'cancelled'; event.cancelledAt = now(); event.cancelReasonCode = reason;
+  }
+}
+
+function queueAppointmentReminders(state: DatabaseState, appointment: Appointment): void {
+  const slot = appointmentSlot(state, appointment);
+  if (!slot) return;
+  const currentTime = Date.now();
+  for (const reminderMinutes of APPOINTMENT_REMINDER_MINUTES) {
+    const reminderAt = new Date(new Date(slot.startsAt).getTime() - reminderMinutes * 60_000).toISOString();
+    if (new Date(reminderAt).getTime() <= currentTime) continue;
+    const alreadyQueued = state.outboxEvents.some((event) => event.tenantId === appointment.tenantId && event.aggregateId === appointment.id && event.type === 'appointment.reminder_due' && event.payload.scheduleStartsAt === slot.startsAt && event.payload.reminderMinutes === reminderMinutes && ['pending', 'published'].includes(event.status));
+    if (!alreadyQueued) enqueueAppointmentEvent(state, appointment, 'reminder_due', { reminderMinutes, reminderAt });
+  }
+}
+
+function assertAppointmentFilters(filters: AppointmentFilters): void {
+  for (const value of [filters.startsFrom, filters.startsTo]) if (value !== undefined && !zonedDate(value)) throw new DomainError('SLOT_FILTER_INVALID', '时间筛选必须包含明确时区');
+  if (filters.startsFrom && filters.startsTo && new Date(filters.startsFrom) > new Date(filters.startsTo)) throw new DomainError('SLOT_FILTER_INVALID', '时间筛选范围无效');
+  if (filters.room !== undefined && filters.room.length > 100) throw new DomainError('SLOT_FILTER_INVALID', '地点筛选过长');
+  if (filters.counselorId !== undefined && filters.counselorId.length > 100) throw new DomainError('SLOT_FILTER_INVALID', '咨询师筛选无效');
+}
+
+interface AppointmentFilters { counselorId?: string; room?: string; startsFrom?: string; startsTo?: string; state?: AppointmentState; exceptionOnly?: boolean; }
+
+function matchesSlotFilters(slot: AvailabilitySlot, filters: AppointmentFilters): boolean {
+  if (filters.counselorId && slot.counselorId !== filters.counselorId) return false;
+  if (filters.room && !slot.room?.toLocaleLowerCase().includes(filters.room.toLocaleLowerCase())) return false;
+  if (filters.startsFrom && new Date(slot.startsAt) < new Date(filters.startsFrom)) return false;
+  if (filters.startsTo && new Date(slot.startsAt) > new Date(filters.startsTo)) return false;
+  return true;
+}
+
 export async function createAvailabilitySlot(store: Store, auth: AuthenticatedUser, input: { counselorId: string; startsAt: string; endsAt: string; room?: string }): Promise<AvailabilitySlot> {
-  requirePermission(auth.user, 'appointment:manage');
+  if (!isAppointmentManager(auth.user) && !isAppointmentCounselor(auth.user)) throw forbidden();
   if (input.room !== undefined && typeof input.room !== 'string') throw new DomainError('SLOT_INVALID', '排班备注格式无效');
   const room = input.room?.trim().slice(0, 100);
   return store.transaction((state) => {
     const counselor = state.users.find((candidate) => candidate.id === input.counselorId && candidate.tenantId === auth.user.tenantId && isProfessional(candidate));
-    if (!counselor || (auth.user.schoolId && auth.user.schoolId !== counselor.schoolId) || !validDate(input.startsAt) || !validDate(input.endsAt) || new Date(input.startsAt) >= new Date(input.endsAt)) throw new DomainError('SLOT_INVALID', '排班人员或时间窗无效');
+    if (!counselor || (auth.user.schoolId && auth.user.schoolId !== counselor.schoolId) || (isAppointmentCounselor(auth.user) && counselor.id !== auth.user.id) || !zonedDate(input.startsAt) || !zonedDate(input.endsAt) || new Date(input.startsAt) >= new Date(input.endsAt) || new Date(input.startsAt) <= new Date()) throw new DomainError('SLOT_INVALID', '排班人员或时间窗无效；时间需包含时区且在未来');
     const overlap = availabilityOverlaps(state, { tenantId: auth.user.tenantId, counselorId: counselor.id, startsAt: input.startsAt, endsAt: input.endsAt, room }, input.startsAt, input.endsAt, counselor.id, room);
     if (overlap) throw new DomainError('SLOT_CONFLICT', '咨询师或咨询室时间段重叠', 409);
     const slot: AvailabilitySlot = { id: id(), tenantId: auth.user.tenantId, counselorId: counselor.id, startsAt: input.startsAt, endsAt: input.endsAt, room, status: 'available' }; state.availabilitySlots.push(slot); audit(state, auth.user, 'availability.created', 'availability_slot', slot.id, {}); return slot;
@@ -1507,108 +2062,150 @@ export async function requestAppointment(store: Store, auth: AuthenticatedUser, 
     const student = state.students.find((candidate) => candidate.id === auth.user.id && candidate.tenantId === auth.user.tenantId && candidate.active);
     if (!slot || !student || (auth.user.schoolId && student.schoolId !== auth.user.schoolId) || new Date(slot.startsAt) <= new Date()) throw new DomainError('SLOT_UNAVAILABLE', '该时段不可预约', 409);
     if (state.appointments.some((appointment) => appointment.tenantId === auth.user.tenantId && appointment.slotId === slot.id && ['requested', 'confirmed'].includes(appointment.state))) throw new DomainError('SLOT_UNAVAILABLE', '该时段刚刚被预约', 409);
-    const appointment: Appointment = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, counselorId: slot.counselorId, slotId: slot.id, state: 'requested', noteCiphertext: input.note ? encrypt({ note: input.note.slice(0, 1000) }) : undefined, ...(idempotencyKey ? { idempotencyKey, idempotencyHash } : {}), createdAt: now(), updatedAt: now() }; state.appointments.push(appointment); slot.status = 'held'; audit(state, auth.user, 'appointment.requested', 'appointment', appointment.id, {}); return appointment;
+    if (studentHasOverlappingAppointment(state, auth.user.tenantId, student.id, slot)) throw new DomainError('APPOINTMENT_CONFLICT', '你已有时间重叠的预约，请先改期或取消', 409);
+    const appointment: Appointment = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, counselorId: slot.counselorId, slotId: slot.id, state: 'requested', noteCiphertext: input.note ? encrypt({ note: input.note.slice(0, 1000) }) : undefined, ...(idempotencyKey ? { idempotencyKey, idempotencyHash } : {}), createdAt: now(), updatedAt: now() };
+    state.appointments.push(appointment); slot.status = 'held'; enqueueAppointmentEvent(state, appointment, 'requested'); audit(state, auth.user, 'appointment.requested', 'appointment', appointment.id, {}); return appointment;
+  });
+}
+
+export async function rescheduleAppointment(store: Store, auth: AuthenticatedUser, appointmentId: string, nextSlotId: string): Promise<Appointment> {
+  if (!isStudent(auth.user) && !isAppointmentManager(auth.user) && !isAppointmentCounselor(auth.user)) throw forbidden();
+  if (!nextSlotId || nextSlotId.length > 100) throw new DomainError('APPOINTMENT_INVALID', '新预约时段无效');
+  return store.transaction((state) => {
+    const appointment = state.appointments.find((candidate) => candidate.id === appointmentId && candidate.tenantId === auth.user.tenantId);
+    if (!appointment) throw notFound();
+    if (isStudent(auth.user) && appointment.studentId !== auth.user.id) throw forbidden();
+    if (isAppointmentCounselor(auth.user) && !isAppointmentManager(auth.user) && appointment.counselorId !== auth.user.id) throw forbidden();
+    const currentSlot = appointmentSlot(state, appointment);
+    const student = state.students.find((candidate) => candidate.id === appointment.studentId && candidate.tenantId === auth.user.tenantId);
+    const currentCounselor = state.users.find((candidate) => candidate.id === appointment.counselorId && candidate.tenantId === auth.user.tenantId && isProfessional(candidate));
+    if (auth.user.schoolId && (student?.schoolId !== auth.user.schoolId || currentCounselor?.schoolId !== auth.user.schoolId)) throw forbidden();
+    if (appointment.slotId === nextSlotId && currentSlot && ['requested', 'confirmed'].includes(appointment.state)) return appointment;
+    const nextSlot = state.availabilitySlots.find((candidate) => candidate.id === nextSlotId && candidate.tenantId === auth.user.tenantId && candidate.status === 'available');
+    const nextCounselor = nextSlot ? state.users.find((candidate) => candidate.id === nextSlot.counselorId && candidate.tenantId === auth.user.tenantId && isProfessional(candidate)) : undefined;
+    const oldCounselorId = appointment.counselorId;
+    if (isAppointmentCounselor(auth.user) && !isAppointmentManager(auth.user) && nextCounselor?.id !== auth.user.id) throw forbidden();
+    if (auth.user.schoolId && (student?.schoolId !== auth.user.schoolId || nextCounselor?.schoolId !== auth.user.schoolId)) throw forbidden();
+    if (!currentSlot || !nextSlot || !nextCounselor || appointment.state !== 'requested' && appointment.state !== 'confirmed' || new Date(currentSlot.startsAt) <= new Date() || new Date(nextSlot.startsAt) <= new Date() || nextSlot.id === currentSlot.id) throw new DomainError('APPOINTMENT_RESCHEDULE_INVALID', '该预约或新时段当前不可改期', 409);
+    if (state.appointments.some((candidate) => candidate.id !== appointment.id && candidate.tenantId === auth.user.tenantId && candidate.slotId === nextSlot.id && ['requested', 'confirmed'].includes(candidate.state))) throw new DomainError('SLOT_UNAVAILABLE', '新时段刚刚被预约', 409);
+    if (studentHasOverlappingAppointment(state, auth.user.tenantId, appointment.studentId, nextSlot, appointment.id)) throw new DomainError('APPOINTMENT_CONFLICT', '学生在新时段已有重叠预约', 409);
+    const previousStartsAt = currentSlot.startsAt;
+    cancelPendingAppointmentReminders(state, appointment, 'schedule_replaced');
+    currentSlot.status = 'available'; nextSlot.status = 'held';
+    appointment.slotId = nextSlot.id; appointment.counselorId = nextSlot.counselorId; appointment.state = 'requested'; appointment.updatedAt = now();
+    enqueueAppointmentEvent(state, appointment, 'rescheduled', { previousCounselorId: oldCounselorId, previousStartsAt });
+    audit(state, auth.user, 'appointment.rescheduled', 'appointment', appointment.id, { from: previousStartsAt, to: nextSlot.startsAt });
+    return appointment;
   });
 }
 
 export async function updateAppointment(store: Store, auth: AuthenticatedUser, appointmentId: string, stateValue: AppointmentState): Promise<Appointment> {
-  if (!isStudent(auth.user) && !can(auth.user, 'appointment:manage')) throw forbidden();
+  if (!isStudent(auth.user) && !isAppointmentManager(auth.user) && !isAppointmentCounselor(auth.user)) throw forbidden();
   if (!['requested', 'confirmed', 'completed', 'cancelled', 'no_show'].includes(stateValue)) throw new DomainError('APPOINTMENT_STATE_INVALID', '预约状态无效');
   return store.transaction((state) => {
     const appointment = state.appointments.find((candidate) => candidate.id === appointmentId && candidate.tenantId === auth.user.tenantId);
     if (!appointment) throw notFound();
     if (isStudent(auth.user) && appointment.studentId !== auth.user.id) throw forbidden();
+    if (isAppointmentCounselor(auth.user) && !isAppointmentManager(auth.user) && appointment.counselorId !== auth.user.id) throw forbidden();
     const appointmentStudent = state.students.find((student) => student.tenantId === auth.user.tenantId && student.id === appointment.studentId);
     const appointmentCounselor = state.users.find((user) => user.tenantId === auth.user.tenantId && user.id === appointment.counselorId && isProfessional(user));
     if (auth.user.schoolId && (appointmentStudent?.schoolId !== auth.user.schoolId || appointmentCounselor?.schoolId !== auth.user.schoolId)) throw forbidden();
     if (isStudent(auth.user) && stateValue !== 'cancelled') throw forbidden();
-    if (stateValue === 'confirmed' && !can(auth.user, 'appointment:manage')) throw forbidden();
-    if (['completed', 'no_show'].includes(stateValue) && !can(auth.user, 'appointment:manage')) throw forbidden();
+    if (stateValue === 'confirmed' && !mayManageAppointment(auth.user, appointment)) throw forbidden();
+    if (['completed', 'no_show'].includes(stateValue) && !mayManageAppointment(auth.user, appointment)) throw forbidden();
     const transitions: Record<AppointmentState, AppointmentState[]> = { requested: ['confirmed', 'cancelled'], confirmed: ['completed', 'cancelled', 'no_show'], completed: [], cancelled: [], no_show: [] };
     if (!transitions[appointment.state].includes(stateValue)) throw new DomainError('APPOINTMENT_STATE_INVALID', '预约状态不能这样变更');
+    const slot = appointmentSlot(state, appointment);
+    if (!slot) throw new DomainError('APPOINTMENT_SLOT_MISSING', '预约时段不存在', 409);
+    if (stateValue === 'confirmed' && new Date(slot.startsAt) <= new Date()) throw new DomainError('APPOINTMENT_TOO_LATE_TO_CONFIRM', '预约开始后不能再确认，请由工作人员人工处理', 409);
+    if (stateValue === 'cancelled' && new Date(slot.startsAt) <= new Date() && (isStudent(auth.user) || !mayManageAppointment(auth.user, appointment))) throw new DomainError('APPOINTMENT_TOO_LATE_TO_CANCEL', '预约开始后请联系学校人工处理', 409);
+    if (['completed', 'no_show'].includes(stateValue) && new Date(slot.endsAt) > new Date()) throw new DomainError('APPOINTMENT_NOT_ENDED', '预约结束后才能记录完成或未到访', 409);
     appointment.state = stateValue; appointment.updatedAt = now();
-    const slot = state.availabilitySlots.find((candidate) => candidate.id === appointment.slotId && candidate.tenantId === auth.user.tenantId);
-    if (slot && ['cancelled', 'completed', 'no_show'].includes(stateValue)) slot.status = 'available';
-    if (slot && stateValue === 'confirmed') slot.status = 'held';
+    if (['cancelled', 'completed', 'no_show'].includes(stateValue)) {
+      slot.status = 'available'; cancelPendingAppointmentReminders(state, appointment, stateValue === 'cancelled' ? 'request_cancelled' : 'schedule_replaced');
+    }
+    if (stateValue === 'confirmed') { slot.status = 'held'; enqueueAppointmentEvent(state, appointment, 'confirmed'); queueAppointmentReminders(state, appointment); }
+    else enqueueAppointmentEvent(state, appointment, stateValue as Exclude<AppointmentNotificationType, 'reminder_due' | 'rescheduled' | 'requested'>);
     audit(state, auth.user, `appointment.${stateValue}`, 'appointment', appointment.id, {}); return appointment;
   });
 }
 
-type PublicAvailabilitySlot = {
-  id: string;
-  startsAt: string;
-  endsAt: string;
-  room?: string;
-  counselorName: string;
-  status: AvailabilitySlot['status'];
-};
+type PublicAvailabilitySlot = { id: string; startsAt: string; endsAt: string; room?: string; counselorName: string; counselorId?: string; status: AvailabilitySlot['status']; };
 
-/**
- * Return future appointment windows without exposing internal staff records or
- * any student notes. Students only receive genuinely available slots; staff
- * with appointment management permission receive the scoped operational view.
- */
-export async function listAvailabilitySlots(store: Store, auth: AuthenticatedUser): Promise<PublicAvailabilitySlot[]> {
-  if (!isStudent(auth.user) && !can(auth.user, 'appointment:manage')) throw forbidden();
+/** Return timezone-explicit future windows within the caller's appointment scope. */
+export async function listAvailabilitySlots(store: Store, auth: AuthenticatedUser, filters: AppointmentFilters = {}): Promise<PublicAvailabilitySlot[]> {
+  if (!hasAppointmentWorkspace(auth.user)) throw forbidden();
+  assertAppointmentFilters(filters);
   return store.transaction((state) => {
     const currentTime = new Date();
     const slots = state.availabilitySlots
-      .filter((slot) => slot.tenantId === auth.user.tenantId && validDate(slot.startsAt) && validDate(slot.endsAt) && new Date(slot.startsAt) > currentTime && new Date(slot.endsAt) > currentTime && (!auth.user.schoolId || state.users.find((user) => user.id === slot.counselorId && user.tenantId === auth.user.tenantId)?.schoolId === auth.user.schoolId))
+      .filter((slot) => slot.tenantId === auth.user.tenantId && validDate(slot.startsAt) && validDate(slot.endsAt) && new Date(slot.startsAt) > currentTime && new Date(slot.endsAt) > currentTime)
       .filter((slot) => isStudent(auth.user) ? slot.status === 'available' : true)
+      .filter((slot) => isAppointmentCounselor(auth.user) && !isAppointmentManager(auth.user) ? slot.counselorId === auth.user.id : true)
+      .filter((slot) => !auth.user.schoolId || state.users.find((user) => user.id === slot.counselorId && user.tenantId === auth.user.tenantId)?.schoolId === auth.user.schoolId)
+      .filter((slot) => matchesSlotFilters(slot, filters))
+      .sort((left, right) => left.startsAt.localeCompare(right.startsAt))
       .map((slot) => {
         const counselor = state.users.find((user) => user.id === slot.counselorId && user.tenantId === auth.user.tenantId && isProfessional(user));
-        return { id: slot.id, startsAt: slot.startsAt, endsAt: slot.endsAt, ...(slot.room ? { room: slot.room } : {}), counselorName: counselor?.displayName ?? '心理支持人员', status: slot.status };
+        return { id: slot.id, startsAt: slot.startsAt, endsAt: slot.endsAt, ...(slot.room ? { room: slot.room } : {}), counselorName: counselor?.displayName ?? '心理支持人员', ...(isAppointmentManager(auth.user) ? { counselorId: slot.counselorId } : {}), status: slot.status };
       });
-    audit(state, auth.user, 'availability.listed', 'availability_slot', isStudent(auth.user) ? 'self' : 'school', { count: slots.length }, 'appointment:read');
+    audit(state, auth.user, 'availability.listed', 'availability_slot', isStudent(auth.user) ? 'self' : isAppointmentCounselor(auth.user) && !isAppointmentManager(auth.user) ? auth.user.id : 'school', { count: slots.length }, 'appointment:read');
     return slots;
   });
 }
 
-type PublicAppointment = {
-  id: string;
-  state: AppointmentState;
-  startsAt?: string;
-  endsAt?: string;
-  room?: string;
-  counselorName: string;
-  createdAt: string;
-  updatedAt: string;
-  studentId?: string;
-};
+type PublicAppointment = { id: string; state: AppointmentState; startsAt?: string; endsAt?: string; room?: string; counselorName: string; createdAt: string; updatedAt: string; counselorId?: string; studentId?: string; studentName?: string; classId?: string; waitingMinutes: number; confirmationSlaMinutes: number; confirmationOverdue: boolean; notificationIssue?: 'retrying' | 'failed'; };
 
-/**
- * List appointment status and time metadata. Notes stay encrypted and are not
- * returned by a list endpoint; a future counselor detail view must authorize
- * a purpose before decrypting them.
- */
-export async function listAppointments(store: Store, auth: AuthenticatedUser): Promise<PublicAppointment[]> {
-  if (!isStudent(auth.user) && !can(auth.user, 'appointment:manage')) throw forbidden();
+/** Appointment metadata only; encrypted notes are never returned by this list. */
+export async function listAppointments(store: Store, auth: AuthenticatedUser, filters: AppointmentFilters = {}): Promise<PublicAppointment[]> {
+  if (!hasAppointmentWorkspace(auth.user)) throw forbidden();
+  assertAppointmentFilters(filters);
   return store.transaction((state) => {
+    const currentTime = Date.now();
     const appointments = state.appointments
-      .filter((appointment) => appointment.tenantId === auth.user.tenantId && (isStudent(auth.user) ? appointment.studentId === auth.user.id : true))
+      .filter((appointment) => appointment.tenantId === auth.user.tenantId && (isStudent(auth.user) ? appointment.studentId === auth.user.id : isAppointmentCounselor(auth.user) && !isAppointmentManager(auth.user) ? appointment.counselorId === auth.user.id : true))
       .filter((appointment) => {
         const student = state.students.find((candidate) => candidate.id === appointment.studentId && candidate.tenantId === auth.user.tenantId);
         const counselor = state.users.find((candidate) => candidate.id === appointment.counselorId && candidate.tenantId === auth.user.tenantId && isProfessional(candidate));
         return !auth.user.schoolId || (student?.schoolId === auth.user.schoolId && counselor?.schoolId === auth.user.schoolId);
       })
+      .filter((appointment) => !filters.state || appointment.state === filters.state)
+      .filter((appointment) => {
+        const slot = appointmentSlot(state, appointment);
+        return !slot || matchesSlotFilters(slot, filters);
+      })
       .map((appointment) => {
-        const slot = state.availabilitySlots.find((candidate) => candidate.id === appointment.slotId && candidate.tenantId === auth.user.tenantId);
+        const slot = appointmentSlot(state, appointment);
         const counselor = state.users.find((user) => user.id === appointment.counselorId && user.tenantId === auth.user.tenantId && isProfessional(user));
-        return { id: appointment.id, state: appointment.state, ...(slot ? { startsAt: slot.startsAt, endsAt: slot.endsAt, ...(slot.room ? { room: slot.room } : {}) } : {}), counselorName: counselor?.displayName ?? '心理支持人员', createdAt: appointment.createdAt, updatedAt: appointment.updatedAt, ...(!isStudent(auth.user) ? { studentId: appointment.studentId } : {}) };
-      });
-    audit(state, auth.user, 'appointment.listed', 'appointment', isStudent(auth.user) ? 'self' : 'school', { count: appointments.length }, 'appointment:read');
+        const student = state.students.find((candidate) => candidate.id === appointment.studentId && candidate.tenantId === auth.user.tenantId);
+        const appointmentEvents = state.outboxEvents.filter((event) => event.tenantId === appointment.tenantId && event.aggregateId === appointment.id && event.type.startsWith('appointment.'));
+        const notificationIssue = appointmentEvents.some((event) => event.status === 'dead_letter') ? 'failed' as const : appointmentEvents.some((event) => event.status === 'pending' && event.attempts > 0) ? 'retrying' as const : undefined;
+        const waitingSince = appointment.state === 'requested' ? appointment.updatedAt : appointment.createdAt;
+        const waitingMinutes = Math.max(0, Math.floor((currentTime - new Date(waitingSince).getTime()) / 60_000));
+        const confirmationOverdue = appointment.state === 'requested' && waitingMinutes >= APPOINTMENT_CONFIRMATION_SLA_MINUTES;
+        return {
+          id: appointment.id, state: appointment.state, ...(slot ? { startsAt: slot.startsAt, endsAt: slot.endsAt, ...(slot.room ? { room: slot.room } : {}) } : {}),
+          counselorName: counselor?.displayName ?? '心理支持人员', createdAt: appointment.createdAt, updatedAt: appointment.updatedAt, waitingMinutes, confirmationSlaMinutes: APPOINTMENT_CONFIRMATION_SLA_MINUTES, confirmationOverdue,
+          ...(notificationIssue ? { notificationIssue } : {}),
+          ...(!isStudent(auth.user) ? { studentName: student ? decrypt<string>(student.displayNameCiphertext) : '学生', classId: student?.classId } : {}),
+          ...(isAppointmentManager(auth.user) ? { counselorId: appointment.counselorId, studentId: appointment.studentId } : {}),
+        };
+      })
+      .filter((appointment) => !filters.exceptionOnly || appointment.confirmationOverdue || appointment.notificationIssue !== undefined)
+      .sort((left, right) => (left.startsAt ?? '').localeCompare(right.startsAt ?? ''));
+    audit(state, auth.user, 'appointment.listed', 'appointment', isStudent(auth.user) ? 'self' : isAppointmentCounselor(auth.user) && !isAppointmentManager(auth.user) ? auth.user.id : 'school', { count: appointments.length }, 'appointment:read');
     return appointments;
   });
 }
 
-/** Block or reopen an unheld slot while preserving any booked appointment. */
+/** Block or reopen an unheld slot within the caller's appointment scope. */
 export async function updateAvailabilitySlot(store: Store, auth: AuthenticatedUser, slotId: string, status: 'available' | 'blocked'): Promise<AvailabilitySlot> {
-  requirePermission(auth.user, 'appointment:manage');
+  if (!isAppointmentManager(auth.user) && !isAppointmentCounselor(auth.user)) throw forbidden();
   if (status !== 'available' && status !== 'blocked') throw new DomainError('SLOT_STATUS_INVALID', '排班状态无效');
   return store.transaction((state) => {
     const slot = state.availabilitySlots.find((candidate) => candidate.id === slotId && candidate.tenantId === auth.user.tenantId);
     const counselor = slot ? state.users.find((user) => user.id === slot.counselorId && user.tenantId === auth.user.tenantId && isProfessional(user)) : undefined;
-    if (!slot || !counselor || (auth.user.schoolId && counselor.schoolId !== auth.user.schoolId)) throw notFound();
+    if (!slot || !counselor || (auth.user.schoolId && counselor.schoolId !== auth.user.schoolId) || (isAppointmentCounselor(auth.user) && !isAppointmentManager(auth.user) && counselor.id !== auth.user.id)) throw notFound();
     if (slot.status === 'held') throw new DomainError('SLOT_HELD', '已有预约的时段不能直接改排班状态', 409);
     if (status === 'available' && availabilityOverlaps(state, slot, slot.startsAt, slot.endsAt, slot.counselorId, slot.room)) throw new DomainError('SLOT_CONFLICT', '咨询师或咨询室时间段重叠', 409);
     slot.status = status;
@@ -1687,7 +2284,7 @@ export async function createMediaAsset(store: Store, auth: AuthenticatedUser, in
 export async function readPublicMedia(store: Store, assetId: string): Promise<{ mediaType: string; filename: string; bytes: Buffer }> {
   const record = await store.read((state) => {
     const asset = state.mediaAssets.find((candidate) => candidate.id === assetId && candidate.scanStatus === 'clean');
-    const linked = asset && state.contentItems.some((item) => item.mediaAssetId === asset.id && item.tenantId === asset.tenantId && item.state === 'published');
+    const linked = asset && state.contentItems.some((item) => (item.mediaAssetId === asset.id || item.subtitleAssetId === asset.id) && item.tenantId === asset.tenantId && item.state === 'published');
     if (!asset || !linked) throw notFound();
     return { asset };
   });
@@ -1704,23 +2301,27 @@ export async function readPublicMedia(store: Store, assetId: string): Promise<{ 
   return { mediaType: record.asset.mediaType, filename: record.asset.filename, bytes };
 }
 
-export async function createContent(store: Store, auth: AuthenticatedUser, input: { title: string; kind: ContentItem['kind']; body: string; ageMin: number; ageMax: number; copyrightSource: string; mediaAssetId?: string; altText?: string; captionText?: string }): Promise<ContentItem> {
+export async function createContent(store: Store, auth: AuthenticatedUser, input: { title: string; kind: ContentItem['kind']; category?: NonNullable<ContentItem['category']>; body: string; ageMin: number; ageMax: number; copyrightSource: string; mediaAssetId?: string; subtitleAssetId?: string; altText?: string; captionText?: string }): Promise<ContentItem> {
   requirePermission(auth.user, 'content:write');
   if (!['article', 'announcement', 'media'].includes(input.kind) || typeof input.title !== 'string' || !input.title.trim() || typeof input.body !== 'string' || !input.body.trim() || typeof input.copyrightSource !== 'string' || !input.copyrightSource.trim() || !Number.isInteger(input.ageMin) || !Number.isInteger(input.ageMax) || input.ageMin < 6 || input.ageMax > 19 || input.ageMin > input.ageMax) throw new DomainError('CONTENT_INVALID', '内容、版权、类型或适龄范围无效');
-  if ((input.mediaAssetId !== undefined && typeof input.mediaAssetId !== 'string') || (input.altText !== undefined && typeof input.altText !== 'string') || (input.captionText !== undefined && typeof input.captionText !== 'string')) throw new DomainError('CONTENT_INVALID', '媒体引用或无障碍说明格式无效');
+  if (input.category !== undefined && !['wellbeing', 'emotion', 'stress', 'relationships', 'sleep', 'help_seeking', 'general'].includes(input.category)) throw new DomainError('CONTENT_CATEGORY_INVALID', '教育内容分类无效');
+  if ((input.mediaAssetId !== undefined && typeof input.mediaAssetId !== 'string') || (input.subtitleAssetId !== undefined && typeof input.subtitleAssetId !== 'string') || (input.altText !== undefined && typeof input.altText !== 'string') || (input.captionText !== undefined && typeof input.captionText !== 'string')) throw new DomainError('CONTENT_INVALID', '媒体引用或无障碍说明格式无效');
   if (input.kind === 'media' && !input.mediaAssetId) throw new DomainError('MEDIA_REQUIRED', '媒体内容需要绑定已检查的媒体资源');
   if (input.kind !== 'media' && input.mediaAssetId) throw new DomainError('CONTENT_INVALID', '非媒体内容不能绑定媒体资源');
-  if (input.kind === 'media' && input.altText === undefined && input.captionText === undefined) throw new DomainError('ACCESSIBILITY_TEXT_REQUIRED', '媒体内容需要文字替代或字幕说明');
+  if (input.subtitleAssetId && input.kind !== 'media') throw new DomainError('CONTENT_INVALID', '只有音视频内容可以绑定字幕文件');
+  if (input.kind === 'media' && input.altText === undefined && input.captionText === undefined && input.subtitleAssetId === undefined) throw new DomainError('ACCESSIBILITY_TEXT_REQUIRED', '媒体内容需要文字替代、字幕文件或文字说明');
   return store.transaction((state) => {
     const media = input.mediaAssetId ? state.mediaAssets.find((asset) => asset.id === input.mediaAssetId && asset.tenantId === auth.user.tenantId && asset.scanStatus === 'clean') : undefined;
     if (input.mediaAssetId && !media) throw notFound();
-    const item: ContentItem = { id: id(), tenantId: auth.user.tenantId, title: input.title.trim().slice(0, 200), kind: input.kind, ageMin: input.ageMin, ageMax: input.ageMax, bodyCiphertext: encrypt({ body: input.body.slice(0, 30_000) }), state: 'draft', copyrightSource: input.copyrightSource.slice(0, 500), createdBy: auth.user.id, mediaAssetId: media?.id, altText: input.altText?.trim().slice(0, 2000), captionText: input.captionText?.trim().slice(0, 20_000), createdAt: now() }; state.contentItems.push(item); audit(state, auth.user, 'content.created', 'content', item.id, { kind: item.kind, mediaAssetId: media?.id ?? null }); return item;
+    const subtitle = input.subtitleAssetId ? state.mediaAssets.find((asset) => asset.id === input.subtitleAssetId && asset.tenantId === auth.user.tenantId && asset.scanStatus === 'clean' && asset.kind === 'subtitle') : undefined;
+    if (input.subtitleAssetId && (!subtitle || !media || !['audio', 'video'].includes(media.kind))) throw new DomainError('SUBTITLE_ASSET_INVALID', '字幕必须是本租户已检查的 WebVTT 文件，并绑定音视频资源');
+    const item: ContentItem = { id: id(), tenantId: auth.user.tenantId, title: input.title.trim().slice(0, 200), kind: input.kind, category: input.category ?? 'general', ageMin: input.ageMin, ageMax: input.ageMax, bodyCiphertext: encrypt({ body: input.body.slice(0, 30_000) }), state: 'draft', copyrightSource: input.copyrightSource.slice(0, 500), createdBy: auth.user.id, mediaAssetId: media?.id, subtitleAssetId: subtitle?.id, altText: input.altText?.trim().slice(0, 2000), captionText: input.captionText?.trim().slice(0, 20_000), createdAt: now() }; state.contentItems.push(item); audit(state, auth.user, 'content.created', 'content', item.id, { kind: item.kind, category: item.category ?? 'general', mediaAssetId: media?.id ?? null, hasSubtitle: Boolean(subtitle) }); return item;
   });
 }
 
 export async function approveContent(store: Store, auth: AuthenticatedUser, contentId: string): Promise<ContentItem> {
   requirePermission(auth.user, 'content:approve');
-  return store.transaction((state) => { const item = state.contentItems.find((candidate) => candidate.id === contentId && candidate.tenantId === auth.user.tenantId); if (!item) throw notFound(); if (item.state !== 'draft' && item.state !== 'professional_review') throw new DomainError('CONTENT_STATE_INVALID', '内容当前不可审核'); if (item.kind === 'media') { const media = item.mediaAssetId ? state.mediaAssets.find((asset) => asset.id === item.mediaAssetId && asset.tenantId === item.tenantId && asset.scanStatus === 'clean') : undefined; if (!media) throw new DomainError('MEDIA_NOT_READY', '媒体资源尚未通过安全检查'); if ((media.kind === 'audio' || media.kind === 'video') && !item.captionText?.trim()) throw new DomainError('CAPTION_REQUIRED', '音视频发布需要字幕或文字稿'); if (media.kind === 'image' && !item.altText?.trim()) throw new DomainError('ALT_TEXT_REQUIRED', '图片发布需要文字替代'); } item.state = 'published'; item.reviewedBy = auth.user.id; item.publishedAt = now(); audit(state, auth.user, 'content.published', 'content', item.id, {}); return item; });
+  return store.transaction((state) => { const item = state.contentItems.find((candidate) => candidate.id === contentId && candidate.tenantId === auth.user.tenantId); if (!item) throw notFound(); if (item.state !== 'draft' && item.state !== 'professional_review') throw new DomainError('CONTENT_STATE_INVALID', '内容当前不可审核'); if (item.kind === 'media') { const media = item.mediaAssetId ? state.mediaAssets.find((asset) => asset.id === item.mediaAssetId && asset.tenantId === item.tenantId && asset.scanStatus === 'clean') : undefined; if (!media) throw new DomainError('MEDIA_NOT_READY', '媒体资源尚未通过安全检查'); if (media.kind === 'audio' || media.kind === 'video') { const subtitle = item.subtitleAssetId ? state.mediaAssets.find((asset) => asset.id === item.subtitleAssetId && asset.tenantId === item.tenantId && asset.kind === 'subtitle' && asset.scanStatus === 'clean') : undefined; if (item.subtitleAssetId && !subtitle) throw new DomainError('SUBTITLE_ASSET_INVALID', '字幕文件尚未通过安全检查'); if (!item.captionText?.trim() && !subtitle) throw new DomainError('CAPTION_REQUIRED', '音视频发布需要字幕文件或文字稿'); } if (media.kind === 'image' && !item.altText?.trim()) throw new DomainError('ALT_TEXT_REQUIRED', '图片发布需要文字替代'); } item.state = 'published'; item.reviewedBy = auth.user.id; item.publishedAt = now(); audit(state, auth.user, 'content.published', 'content', item.id, {}); return item; });
 }
 
 /** Retire a previously published education item without deleting its audit
@@ -1733,6 +2334,7 @@ export async function retireContent(store: Store, auth: AuthenticatedUser, conte
     if (!item) throw notFound();
     if (item.state !== 'published') throw new DomainError('CONTENT_STATE_INVALID', '只有已发布内容可以下架');
     item.state = 'retired';
+    state.contentEngagements = state.contentEngagements.filter((engagement) => !(engagement.tenantId === auth.user.tenantId && engagement.contentId === item.id));
     audit(state, auth.user, 'content.retired', 'content', item.id, {});
     return item;
   });
@@ -1753,15 +2355,18 @@ export async function listContent(store: Store, auth: AuthenticatedUser): Promis
           id: item.id,
           title: item.title,
           kind: item.kind,
+          category: item.category ?? 'general',
           ageMin: item.ageMin,
           ageMax: item.ageMax,
           body: decrypt<{ body: string }>(item.bodyCiphertext).body,
           state: item.state,
           copyrightSource: item.copyrightSource,
           mediaAssetId: item.mediaAssetId,
+          subtitleAssetId: item.subtitleAssetId,
           altText: item.altText,
           captionText: item.captionText,
           ...(media ? { media: { id: media.id, filename: media.filename, mediaType: media.mediaType, kind: media.kind, byteSize: media.byteSize, sha256: media.sha256 } } : {}),
+          ...(item.subtitleAssetId ? (() => { const subtitle = state.mediaAssets.find((asset) => asset.id === item.subtitleAssetId && asset.tenantId === item.tenantId && asset.scanStatus === 'clean'); return subtitle ? { subtitle: { id: subtitle.id, filename: subtitle.filename, mediaType: subtitle.mediaType, kind: subtitle.kind } } : {}; })() : {}),
           reviewedBy: item.reviewedBy,
           publishedAt: item.publishedAt,
           createdAt: item.createdAt,
@@ -1772,9 +2377,40 @@ export async function listContent(store: Store, auth: AuthenticatedUser): Promis
   });
 }
 
-export async function listPublicContent(store: Store, age?: number): Promise<Array<Record<string, unknown>>> {
+export async function listPublicContent(store: Store, age?: number, kind?: ContentItem['kind'], tenantId?: string, category?: NonNullable<ContentItem['category']>): Promise<Array<Record<string, unknown>>> {
   if (age !== undefined && (!Number.isInteger(age) || age < 6 || age > 19)) throw new DomainError('CONTENT_AGE_INVALID', '内容筛选年龄必须是 6–19 周岁的整数');
-  return store.read((state) => state.contentItems.filter((item) => item.state === 'published' && (age === undefined || (age >= item.ageMin && age <= item.ageMax))).map((item) => ({ id: item.id, title: item.title, kind: item.kind, ageMin: item.ageMin, ageMax: item.ageMax, body: decrypt<{ body: string }>(item.bodyCiphertext).body, altText: item.altText, captionText: item.captionText, media: item.mediaAssetId ? (() => { const media = state.mediaAssets.find((asset) => asset.id === item.mediaAssetId && asset.scanStatus === 'clean'); return media ? { id: media.id, filename: media.filename, mediaType: media.mediaType, kind: media.kind, byteSize: media.byteSize, sha256: media.sha256, url: `/v1/content/public/${media.id}/media` } : undefined; })() : undefined, publishedAt: item.publishedAt })));
+  if (kind !== undefined && !['article', 'announcement', 'media'].includes(kind)) throw new DomainError('CONTENT_KIND_INVALID', '内容分类筛选无效');
+  if (category !== undefined && !['wellbeing', 'emotion', 'stress', 'relationships', 'sleep', 'help_seeking', 'general'].includes(category)) throw new DomainError('CONTENT_CATEGORY_INVALID', '教育内容分类筛选无效');
+  return store.read((state) => state.contentItems.filter((item) => item.state === 'published' && (!tenantId || item.tenantId === tenantId) && (kind === undefined || item.kind === kind) && (category === undefined || (item.category ?? 'general') === category) && (age === undefined || (age >= item.ageMin && age <= item.ageMax))).map((item) => ({ id: item.id, title: item.title, kind: item.kind, category: item.category ?? 'general', ageMin: item.ageMin, ageMax: item.ageMax, body: decrypt<{ body: string }>(item.bodyCiphertext).body, altText: item.altText, captionText: item.captionText, media: item.mediaAssetId ? (() => { const media = state.mediaAssets.find((asset) => asset.id === item.mediaAssetId && asset.tenantId === item.tenantId && asset.scanStatus === 'clean'); return media ? { id: media.id, filename: media.filename, mediaType: media.mediaType, kind: media.kind, byteSize: media.byteSize, sha256: media.sha256, url: `/v1/content/public/${media.id}/media`, ...(item.subtitleAssetId ? { captionsUrl: `/v1/content/public/${item.subtitleAssetId}/media` } : {}) } : undefined; })() : undefined, publishedAt: item.publishedAt })));
+}
+
+export async function listMyContentEngagements(store: Store, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
+  if (!isStudent(auth.user)) throw forbidden();
+  return store.read((state) => state.contentEngagements
+    .filter((engagement) => engagement.tenantId === auth.user.tenantId && engagement.studentId === auth.user.id && state.contentItems.some((item) => item.tenantId === engagement.tenantId && item.id === engagement.contentId && item.state === 'published'))
+    .map(({ contentId, readAt, favoriteAt, updatedAt }) => ({ contentId, readAt, favoriteAt, updatedAt }))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
+}
+
+export async function updateMyContentEngagement(store: Store, auth: AuthenticatedUser, contentId: string, input: { read: boolean; favorite: boolean }): Promise<Record<string, unknown>> {
+  if (!isStudent(auth.user)) throw forbidden();
+  if (typeof input.read !== 'boolean' || typeof input.favorite !== 'boolean') throw new DomainError('CONTENT_ENGAGEMENT_INVALID', '已读和收藏状态必须为布尔值');
+  return store.transaction((state) => {
+    const student = state.students.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.id === auth.user.id && candidate.active);
+    const content = state.contentItems.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.id === contentId && candidate.state === 'published');
+    if (!student || !content) throw notFound();
+    let engagement = state.contentEngagements.find((candidate) => candidate.tenantId === auth.user.tenantId && candidate.studentId === student.id && candidate.contentId === content.id);
+    if (!engagement) {
+      engagement = { id: id(), tenantId: auth.user.tenantId, studentId: student.id, contentId: content.id, updatedAt: now() };
+      state.contentEngagements.push(engagement);
+    }
+    engagement.readAt = input.read ? engagement.readAt ?? now() : undefined;
+    engagement.favoriteAt = input.favorite ? engagement.favoriteAt ?? now() : undefined;
+    engagement.updatedAt = now();
+    const result = { contentId: content.id, readAt: engagement.readAt, favoriteAt: engagement.favoriteAt, updatedAt: engagement.updatedAt };
+    if (!engagement.readAt && !engagement.favoriteAt) state.contentEngagements = state.contentEngagements.filter((candidate) => candidate.id !== engagement!.id);
+    return result;
+  });
 }
 
 export async function submitProfileResponse(store: Store, auth: AuthenticatedUser, input: { schemaId: string; values: Record<string, unknown> }): Promise<{ id: string; submittedAt: string }> {
@@ -1815,7 +2451,7 @@ export async function createSelfScreening(store: Store, auth: AuthenticatedUser,
     const scale = state.scales.find((candidate) => candidate.id === scaleId && candidate.tenantId === auth.user.tenantId);
     if (!student || !scale) throw notFound();
     assertUsableScale(scale);
-    if (!activeConsent(state, student.id, 'assessment', auth.user.tenantId, scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '需要当前告知版本的测评参与记录');
+    if (!currentPurposeConsent(state, student, 'assessment', scale.noticeVersion)) throw new DomainError('CONSENT_REQUIRED', '需要当前告知版本的测评参与记录');
     if (!ageAllowed(student, scale)) throw new DomainError('AGE_REVIEW_REQUIRED', '年龄不在该方案适用范围');
     if (state.frequencyReservations.some((reservation) => reservation.tenantId === auth.user.tenantId && reservation.studentId === student.id && reservation.academicYear === academicYear && reservation.status !== 'released')) throw new DomainError('FREQUENCY_REVIEW_REQUIRED', '本学年已有测评场次');
     const campaign: Campaign = { id: id(), tenantId: auth.user.tenantId, schoolId: student.schoolId, name: '学生自选支持筛查（需专业复核）', purpose: 'screening', state: 'open', academicYear, opensAt: now(), closesAt: new Date(Date.now() + 24 * 60 * 60_000).toISOString(), scaleVersionId: scale.id, reportVisibility: 'professional_review', participantStudentIds: [student.id], createdBy: auth.user.id, publishedAt: now(), createdAt: now() };
@@ -1843,20 +2479,32 @@ export async function regionalAnalytics(store: Store, auth: AuthenticatedUser): 
       const entry = regions.get(region) ?? { tenants: 0, students: 0, openCases: 0 };
       entry.tenants += 1; entry.students += state.students.filter((student) => student.tenantId === tenant.id && student.active).length; entry.openCases += state.riskCases.filter((riskCase) => riskCase.tenantId === tenant.id && !['closed', 'dismissed'].includes(riskCase.state)).length; regions.set(region, entry);
     }
-    const rows = [...regions.entries()].map(([region, value]) => ({ region, tenants: value.tenants, students: value.students < 10 ? null : value.students, openCases: value.students < 10 ? null : value.openCases, suppressed: value.students < 10 }));
-    audit(state, auth.user, 'analytics.regional_viewed', 'regional_analytics', 'all', { regionCount: rows.length }); return { rows, suppressionThreshold: 10, note: '仅提供批准的区域聚合；小样本与个体风险均不展示。' };
+    const rows = [...regions.entries()].map(([region, value]) => ({ region, tenants: value.tenants, students: value.students < SMALL_SAMPLE_THRESHOLD ? null : value.students, openCases: value.students < SMALL_SAMPLE_THRESHOLD ? null : value.openCases, suppressed: value.students < SMALL_SAMPLE_THRESHOLD }));
+    audit(state, auth.user, 'analytics.regional_viewed', 'regional_analytics', 'all', { regionCount: rows.length }); return { rows, suppressionThreshold: SMALL_SAMPLE_THRESHOLD, note: `样本数不足 ${SMALL_SAMPLE_THRESHOLD} 的区域计数会抑制，不代表 0 人或没有风险；仅展示批准的聚合参考。` };
   });
 }
 
 
-export async function listStudents(store: Store, auth: AuthenticatedUser): Promise<Array<Record<string, unknown>>> {
+export async function listStudents(store: Store, auth: AuthenticatedUser, filters: { search?: string; classId?: string; grade?: string } = {}): Promise<Array<Record<string, unknown>>> {
   if (!can(auth.user, 'org:read')) throw forbidden();
   if (auth.user.role === 'teacher') throw forbidden();
+  const search = filters.search?.trim().toLocaleLowerCase('zh-CN');
+  const classId = filters.classId?.trim();
+  const grade = filters.grade?.trim();
+  if (search !== undefined && (search.length < 1 || search.length > 80) || classId !== undefined && (classId.length < 1 || classId.length > 100) || grade !== undefined && (grade.length < 1 || grade.length > 100)) throw new DomainError('STUDENT_SEARCH_INVALID', '学生姓名、年级或班级筛选条件无效');
   return store.transaction((state) => {
-    const students = state.students.filter((student) => student.tenantId === auth.user.tenantId && student.active && (!auth.user.schoolId || student.schoolId === auth.user.schoolId) && (!isProfessional(auth.user) || professionalCanReadStudent(state, auth, student.id))).map((student) => ({ id: student.id, schoolId: student.schoolId, classId: student.classId, age: student.age, guardianVerified: student.guardianVerified }));
+    const canListAssignedScope = auth.user.role === 'counselor';
+    const students = !search && !classId && !grade && !canListAssignedScope ? [] : state.students.filter((student) => student.tenantId === auth.user.tenantId && student.active && (!auth.user.schoolId || student.schoolId === auth.user.schoolId) && (!isProfessional(auth.user) || professionalCanReadStudent(state, auth, student.id))).map((student) => ({ student, displayName: decrypt<string>(student.displayNameCiphertext) })).filter(({ student, displayName }) => (!classId || student.classId === classId) && (!grade || student.grade === grade) && (!search || `${displayName} ${student.classId} ${student.grade ?? ''}`.toLocaleLowerCase('zh-CN').includes(search))).sort((left, right) => left.displayName.localeCompare(right.displayName, 'zh-CN')).slice(0, 50).map(({ student, displayName }) => ({ id: student.id, displayName, classId: student.classId, grade: student.grade }));
     audit(state, auth.user, 'student.directory_listed', 'student', 'tenant', { count: students.length }, 'org:read');
     return students;
   });
+}
+
+/** A minimal, purpose-specific staff picker; IDs remain API values, not free-text inputs. */
+export async function listProfessionalDirectory(store: Store, auth: AuthenticatedUser, purpose: 'appointment' | 'case_assignment'): Promise<Array<{ id: string; displayName: string; role: 'professional_lead' | 'counselor' }>> {
+  requirePermission(auth.user, purpose === 'appointment' ? 'appointment:manage' : 'case:assign');
+  if (purpose !== 'appointment' && purpose !== 'case_assignment') throw new DomainError('DIRECTORY_PURPOSE_INVALID', '人员目录用途无效');
+  return store.read((state) => state.users.filter((user) => user.tenantId === auth.user.tenantId && user.active && isProfessional(user) && (purpose !== 'appointment' || user.role === 'counselor') && (!auth.user.schoolId || user.schoolId === auth.user.schoolId)).map((user) => ({ id: user.id, displayName: user.displayName, role: user.role as 'professional_lead' | 'counselor' })).sort((left, right) => left.displayName.localeCompare(right.displayName, 'zh-CN')));
 }
 
 /** Return a bounded, metadata-only audit view for the privacy/audit role.
@@ -1909,7 +2557,7 @@ export async function listScaleCatalog(store: Store, auth: AuthenticatedUser, fi
     }).map((scale) => {
       const expiry = scale.licenseExpiresAt ? new Date(scale.licenseExpiresAt) : undefined;
       const licenseState = scale.provenance === 'synthetic_only' ? 'synthetic_only' : !expiry ? 'missing_expiry' : Number.isNaN(expiry.getTime()) ? 'invalid_expiry' : expiry <= new Date() ? 'expired' : 'valid';
-      return { id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, status: scale.status, minAge: scale.minAge, maxAge: scale.maxAge, scoringVersion: scale.scoringVersion, dimensions: scale.dimensions ?? [], population: scale.population ?? 'mixed', language: scale.language ?? 'zh-CN', licenseExpiresAt: scale.licenseExpiresAt, licenseState };
+      return { id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, status: scale.status, minAge: scale.minAge, maxAge: scale.maxAge, scoringVersion: scale.scoringVersion, estimatedMinutes: taskEstimatedMinutes(scale), dimensions: scale.dimensions ?? [], population: scale.population ?? 'mixed', language: scale.language ?? 'zh-CN', licenseExpiresAt: scale.licenseExpiresAt, licenseState };
     });
     audit(state, auth.user, 'scale.catalog_listed', 'scale_version', 'tenant', { count: scales.length, status: filters.status ?? null, population: filters.population ?? null, minAge: filters.minAge ?? null, maxAge: filters.maxAge ?? null }, 'scale:read');
     return scales;
@@ -1924,7 +2572,7 @@ export async function listAvailableScales(store: Store, auth: AuthenticatedUser)
     const scales = state.scales.filter((scale) => {
       if (scale.tenantId !== auth.user.tenantId || !student || !ageAllowed(student, scale)) return false;
       try { assertUsableScale(scale); return true; } catch { return false; }
-    }).map((scale) => ({ id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, minAge: scale.minAge, maxAge: scale.maxAge, noticeVersion: scale.noticeVersion, dimensions: scale.dimensions ?? [], population: scale.population ?? 'mixed', language: scale.language ?? 'zh-CN', items: scale.items.map((item) => ({ id: item.id, prompt: item.prompt, min: item.min, max: item.max, factor: item.factor })) }));
+    }).map((scale) => ({ id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, minAge: scale.minAge, maxAge: scale.maxAge, noticeVersion: scale.noticeVersion, estimatedMinutes: taskEstimatedMinutes(scale), dimensions: scale.dimensions ?? [], population: scale.population ?? 'mixed', language: scale.language ?? 'zh-CN', items: scale.items.map((item) => ({ id: item.id, prompt: item.prompt, min: item.min, max: item.max, factor: item.factor })) }));
     audit(state, auth.user, 'scale.available_listed', 'scale_version', 'self', { count: scales.length }, 'self:assessment');
     return scales;
   });

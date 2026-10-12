@@ -49,6 +49,8 @@ export type PublicExpressionShare = {
 export type PublicSupportRequest = {
   id: string;
   studentId: string;
+  studentName?: string;
+  classId?: string;
   recipientId: string;
   shareId?: string;
   state: SupportRequestState;
@@ -73,6 +75,8 @@ export type ExpressionCapabilities = {
   serviceHoursText: string | null;
   contactInstructions: string | null;
   allowedShareHours: number[];
+  entryRetentionDays: number | null;
+  closedRequestRetentionDays: number | null;
   validForSeconds: 45;
 };
 
@@ -184,6 +188,7 @@ function requireConsent(state: DatabaseState, student: { id: string; tenantId: s
   if (!consent) throw new DomainError(purpose === 'visual_interaction' ? 'VISUAL_CONSENT_REQUIRED' : 'EXPRESSION_CONSENT_REQUIRED', '需要当前告知版本的参与记录', 403);
   if (typeof student.age !== 'number') throw new DomainError('EXPRESSION_CONSENT_REQUIRED', '年龄信息未核验，暂不能启用该功能', 403);
   if (student.age < 14 && (consent.actorType !== 'guardian' || !state.guardianLinks.some((link) => link.tenantId === student.tenantId && link.studentId === student.id && link.guardianUserId === consent.actorId && link.status === 'verified'))) throw new DomainError('GUARDIAN_CONSENT_REQUIRED', '不满 14 周岁需要当前核验监护人同意', 403);
+  if (student.age >= 14 && (consent.actorType !== 'student' || consent.actorId !== student.id)) throw new DomainError('STUDENT_CONSENT_REQUIRED', '14 周岁及以上需要学生本人完成当前用途同意', 403);
   return consent;
 }
 
@@ -315,18 +320,27 @@ export async function expressionCapabilities(store: Store, auth: AuthenticatedUs
       serviceHoursText: expressionEnabled ? policy?.serviceHoursText ?? null : null,
       contactInstructions: expressionEnabled ? policy?.contactInstructions ?? null : null,
       allowedShareHours: expressionEnabled && policy ? [1, 24, 168].filter((hours) => hours <= policy.maxShareHours) : [],
+      entryRetentionDays: validPolicy ? policy!.entryRetentionDays : null,
+      closedRequestRetentionDays: validPolicy ? policy!.closedRequestRetentionDays : null,
       validForSeconds: 45,
     } satisfies ExpressionCapabilities;
   });
 }
 
-export async function getExpressionNotice(store: Store, auth: AuthenticatedUser, purpose: ExpressionPurpose): Promise<Pick<ExpressionNotice, 'purpose' | 'version' | 'title' | 'body'>> {
+export async function getExpressionNotice(store: Store, auth: AuthenticatedUser, purpose: ExpressionPurpose): Promise<Pick<ExpressionNotice, 'purpose' | 'version' | 'title' | 'body'> & { whoCanSee: string; retentionDays: number | null } > {
   if (!EXPRESSION_PURPOSES.includes(purpose)) throw new DomainError('EXPRESSION_INPUT_INVALID', '用途无效');
   return store.read((state) => {
-    const { student, policy } = policyForRequest(state, auth, purpose);
+    const { student, policy } = policyForRequest(state, auth, purpose, purpose === 'visual_interaction');
     const notice = requireNotice(state, policy!, purpose, purpose === 'self_expression' ? policy!.selfExpressionNoticeVersion : policy!.visualNoticeVersion);
     if (typeof student.age !== 'number' || student.age < policy!.minAge || student.age > policy!.maxAge) throw new DomainError('EXPRESSION_CONSENT_REQUIRED', '当前年龄不在已批准适用范围内', 403);
-    return { purpose: notice.purpose, version: notice.version, title: notice.title, body: notice.body };
+    return {
+      purpose: notice.purpose,
+      version: notice.version,
+      title: notice.title,
+      body: notice.body,
+      whoCanSee: purpose === 'self_expression' ? '默认只有你能看；你主动限时分享后，仅所选的校内心理支持人员可在有效期内查看。' : '视觉互动仅在本机进行；不会把摄像头画面、照片或面部数据提供给学校或其他人。',
+      retentionDays: purpose === 'self_expression' ? policy!.entryRetentionDays : null,
+    };
   });
 }
 
@@ -546,7 +560,10 @@ export async function listProfessionalSupportRequests(store: Store, auth: Authen
   policyForProfessionalStateOnly(auth);
   return store.read((state) => {
     policyForProfessional(state, auth);
-    return state.supportRequests.filter((request) => request.tenantId === auth.user.tenantId && request.schoolId === auth.user.schoolId && request.recipientId === auth.user.id && (NON_TERMINAL_SUPPORT.includes(request.state) || request.state === 'completed')).sort((left, right) => right.createdAt.localeCompare(left.createdAt)).map((request) => publicSupportRequest(state, request));
+    return state.supportRequests.filter((request) => request.tenantId === auth.user.tenantId && request.schoolId === auth.user.schoolId && request.recipientId === auth.user.id && (NON_TERMINAL_SUPPORT.includes(request.state) || request.state === 'completed')).sort((left, right) => right.createdAt.localeCompare(left.createdAt)).map((request) => {
+      const student = state.students.find((candidate) => candidate.id === request.studentId && candidate.tenantId === request.tenantId && candidate.active);
+      return { ...publicSupportRequest(state, request), studentName: student ? decrypt<string>(student.displayNameCiphertext) : '学生', classId: student?.classId };
+    });
   });
 }
 

@@ -4,7 +4,7 @@ import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseXlsxBase64 } from './domain/spreadsheet.js';
-import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveFrequencyException, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, campaignProgress, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createGuardianLink, createMediaAsset, createProfileSchema, createRiskSignal, createScale, createSelfScreening, currentUser, downloadRightsResult, escalateUnacknowledged, getAttempt, getStudentArchive, listAuditEvents, listAvailableScales, listAvailabilitySlots, listAppointments, listContent, listMyConsents, listMyRightsRequests, listPublicContent, listReports, listScaleCatalog, listStudents, listRightsRequests, operationalStatus, parseCsv, previewImport, publishCampaign, readPublicMedia, regionalAnalytics, requeueDeadLetters, submitProfileResponse, drainOutbox, downloadExport, getAnalytics, listCases, listCampaigns, listMyTasks, requestAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, updateAvailabilitySlot, updateCampaignState, revokeReport, revokeScale, verifyGuardianLink, withdrawConsent, completeRightsRequest, createRightsRequest, retireContent, processRetention } from './domain/service.js';
+import { adminOverview, addFollowUp, acknowledgeCase, approveClosure, approveContent, approveExport, approveFrequencyException, approveProfileSchema, approveReport, approveScale, assignCase, beginAttempt, campaignProgress, commitImport, createAvailabilitySlot, createCampaign, createConsent, createContent, createGuardianLink, createMediaAsset, createProfileSchema, createRiskSignal, createScale, createSelfScreening, currentUser, downloadRightsResult, escalateUnacknowledged, getAttempt, getCaseBriefing, getMyConsentContext, getStudentArchive, listAuditEvents, listAvailableScales, listAvailabilitySlots, listAppointments, listContent, listImportBatches, listMyConsents, listMyRightsRequests, listPublicContent, listMyContentEngagements, updateMyContentEngagement, listMyDataAccessHistory, listReports, listScaleCatalog, listStudents, listProfessionalDirectory, listRightsRequests, operationalStatus, parseCsv, previewImport, publishCampaign, readPublicMedia, regionalAnalytics, requeueDeadLetters, rollbackImport, submitProfileResponse, drainOutbox, downloadExport, getAnalytics, listCases, listCampaigns, listMyTasks, requestAppointment, rescheduleAppointment, requestClosure, requestExport, reviewCase, saveAnswers, submitAttempt, updateAppointment, updateAvailabilitySlot, updateCampaignState, revokeReport, revokeScale, verifyGuardianLink, withdrawConsent, completeRightsRequest, createRightsRequest, retireContent, processRetention } from './domain/service.js';
 import { cancelSupportRequest, createExpressionEntry, createExpressionShare, createSupportRequest, deleteExpressionEntry, escalateSupportRequests, expressionCapabilities, getExpressionEntry, getExpressionNotice, getProfessionalExpressionShare, getSupportRequest, listExpressionEntries, listExpressionShares, listProfessionalExpressionShares, listProfessionalSupportRequests, listSupportEscalations, listSupportNotes, listSupportRecipients, listMySupportRequests, revokeExpressionShare, transitionSupportRequest, addSupportNote } from './domain/expression-support.js';
 import { authenticate, issueStudentAccessCode, login as loginUser, loginWithStudentAccessCode, logout, requirePermission, revokeUserSessions } from './domain/auth.js';
 import { assertProductionConfig } from './domain/crypto.js';
@@ -112,6 +112,15 @@ function requestIdempotencyKey(req: IncomingMessage, input: Record<string, unkno
   return input.idempotencyKey;
 }
 
+function normalizeImportCsvRows(rows: Array<Record<string, string>>): Array<Record<string, unknown>> {
+  return rows.map((row) => {
+    const guardianText = (row.guardianVerified ?? '').trim();
+    const normalizedGuardian = guardianText.toLocaleLowerCase('en-US');
+    const guardianVerified = normalizedGuardian === '' || normalizedGuardian === 'false' ? false : normalizedGuardian === 'true' ? true : guardianText;
+    return { ...row, guardianVerified };
+  });
+}
+
 function assertAllowedFields(input: Record<string, unknown>, allowed: readonly string[]): void {
   const allowedSet = new Set(allowed);
   const unexpected = Object.keys(input).find((key) => !allowedSet.has(key));
@@ -142,7 +151,7 @@ function enforceSameOrigin(req: IncomingMessage, method: string, url: URL): void
 }
 
 function publicScale(scale: DatabaseState['scales'][number]): Record<string, unknown> {
-  return { id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, minAge: scale.minAge, maxAge: scale.maxAge, noticeVersion: scale.noticeVersion, dimensions: scale.dimensions ?? [], population: scale.population ?? 'mixed', language: scale.language ?? 'zh-CN', items: scale.items.map((item) => ({ id: item.id, prompt: item.prompt, min: item.min, max: item.max, factor: item.factor })) };
+  return { id: scale.id, code: scale.code, title: scale.title, version: scale.version, provenance: scale.provenance, minAge: scale.minAge, maxAge: scale.maxAge, noticeVersion: scale.noticeVersion, estimatedMinutes: scale.estimatedMinutes ?? Math.max(3, Math.ceil(scale.items.length * 1.2)), dimensions: scale.dimensions ?? [], population: scale.population ?? 'mixed', language: scale.language ?? 'zh-CN', items: scale.items.map((item) => ({ id: item.id, prompt: item.prompt, min: item.min, max: item.max, factor: item.factor })) };
 }
 
 export interface AppOptions { store?: Store; }
@@ -195,7 +204,17 @@ async function routeApi(req: IncomingMessage, res: ServerResponse, method: strin
   const segments = path.split('/').filter(Boolean);
   const expressionRoute = path.startsWith('/v1/me/expression') || path.startsWith('/v1/me/support') || path.startsWith('/v1/professional/expression') || path.startsWith('/v1/professional/support') || path === '/v1/admin/operations/support-escalate';
   const input = method !== 'GET' && method !== 'DELETE' ? await body(req, expressionRoute ? 8_192 : MAX_BODY_BYTES) : {};
-  if (method === 'GET' && path === '/v1/content/public') { json(res, 200, { data: await listPublicContent(store, url.searchParams.has('age') ? Number(url.searchParams.get('age')) : undefined) }); return; }
+  if (method === 'GET' && path === '/v1/content/public') {
+    const publicAuth = req.headers.authorization ? await getAuth(req, store) : undefined;
+    const kindParam = url.searchParams.get('kind');
+    if (kindParam && !['article', 'announcement', 'media'].includes(kindParam)) throw new DomainError('CONTENT_KIND_INVALID', '内容分类筛选无效');
+    const kind = kindParam ? kindParam as 'article' | 'announcement' | 'media' : undefined;
+    const categoryParam = url.searchParams.get('category');
+    if (categoryParam && !['wellbeing', 'emotion', 'stress', 'relationships', 'sleep', 'help_seeking', 'general'].includes(categoryParam)) throw new DomainError('CONTENT_CATEGORY_INVALID', '教育内容分类筛选无效');
+    const category = categoryParam ? categoryParam as 'wellbeing' | 'emotion' | 'stress' | 'relationships' | 'sleep' | 'help_seeking' | 'general' : undefined;
+    const list = () => listPublicContent(store, url.searchParams.has('age') ? Number(url.searchParams.get('age')) : undefined, kind, publicAuth?.user.tenantId, category);
+    json(res, 200, { data: publicAuth ? await withTenantContext(publicAuth.user.tenantId, list) : await list() }); return;
+  }
   if (method === 'GET' && segments[1] === 'content' && segments[2] === 'public' && segments[4] === 'media') {
     const media = await readPublicMedia(store, segments[3]!);
     res.statusCode = 200; res.setHeader('Content-Type', media.mediaType); res.setHeader('Content-Length', media.bytes.byteLength);
@@ -278,7 +297,8 @@ async function routeAuthenticatedApi(req: IncomingMessage, res: ServerResponse, 
     const result = await revokeUserSessions(store, auth, segments[3]!);
     json(res, 200, { data: result }); return;
   }
-  if (method === 'GET' && path === '/v1/admin/students') { json(res, 200, { data: await listStudents(store, auth) }); return; }
+  if (method === 'GET' && path === '/v1/admin/students') { json(res, 200, { data: await listStudents(store, auth, { search: url.searchParams.get('search') ?? undefined, classId: url.searchParams.get('classId') ?? undefined, grade: url.searchParams.get('grade') ?? undefined }) }); return; }
+  if (method === 'GET' && path === '/v1/admin/professionals') { const purpose = url.searchParams.get('purpose'); if (purpose !== 'appointment' && purpose !== 'case_assignment') throw new DomainError('DIRECTORY_PURPOSE_INVALID', '人员目录用途无效'); json(res, 200, { data: await listProfessionalDirectory(store, auth, purpose) }); return; }
   if (method === 'GET' && path === '/v1/admin/campaigns') { json(res, 200, { data: await listCampaigns(store, auth) }); return; }
   if (method === 'GET' && path === '/v1/admin/scales') {
     const status = url.searchParams.get('status');
@@ -296,8 +316,34 @@ async function routeAuthenticatedApi(req: IncomingMessage, res: ServerResponse, 
     json(res, 200, { data: await listScaleCatalog(store, auth, filters) }); return;
   }
   if (method === 'GET' && path === '/v1/me/tasks') { json(res, 200, { data: await listMyTasks(store, auth) }); return; }
-  if (method === 'GET' && path === '/v1/availability-slots') { json(res, 200, { data: await listAvailabilitySlots(store, auth) }); return; }
-  if (method === 'GET' && path === '/v1/appointments') { json(res, 200, { data: await listAppointments(store, auth) }); return; }
+  if (method === 'GET' && path === '/v1/me/content-engagements') { json(res, 200, { data: await listMyContentEngagements(store, auth) }); return; }
+  if (method === 'PUT' && segments[1] === 'me' && segments[2] === 'content-engagements' && segments.length === 4) {
+    assertAllowedFields(input, ['read', 'favorite']);
+    json(res, 200, { data: await updateMyContentEngagement(store, auth, segments[3]!, { read: input.read as boolean, favorite: input.favorite as boolean }) }); return;
+  }
+  if (method === 'GET' && path === '/v1/me/data-access-history') { json(res, 200, { data: await listMyDataAccessHistory(store, auth) }); return; }
+  if (method === 'GET' && path === '/v1/me/consent-context') { json(res, 200, { data: await getMyConsentContext(store, auth) }); return; }
+  if (method === 'GET' && path === '/v1/availability-slots') {
+    const result = await listAvailabilitySlots(store, auth, {
+      ...(url.searchParams.get('counselorId') ? { counselorId: url.searchParams.get('counselorId')! } : {}),
+      ...(url.searchParams.get('room') ? { room: url.searchParams.get('room')! } : {}),
+      ...(url.searchParams.get('startsFrom') ? { startsFrom: url.searchParams.get('startsFrom')! } : {}),
+      ...(url.searchParams.get('startsTo') ? { startsTo: url.searchParams.get('startsTo')! } : {}),
+    });
+    json(res, 200, { data: result }); return;
+  }
+  if (method === 'GET' && path === '/v1/appointments') {
+    const stateFilter = url.searchParams.get('state');
+    if (stateFilter && !['requested', 'confirmed', 'completed', 'cancelled', 'no_show'].includes(stateFilter)) throw new DomainError('APPOINTMENT_STATE_INVALID', '预约状态筛选无效');
+    json(res, 200, { data: await listAppointments(store, auth, {
+      ...(url.searchParams.get('counselorId') ? { counselorId: url.searchParams.get('counselorId')! } : {}),
+      ...(url.searchParams.get('room') ? { room: url.searchParams.get('room')! } : {}),
+      ...(url.searchParams.get('startsFrom') ? { startsFrom: url.searchParams.get('startsFrom')! } : {}),
+      ...(url.searchParams.get('startsTo') ? { startsTo: url.searchParams.get('startsTo')! } : {}),
+      ...(stateFilter ? { state: stateFilter as 'requested' | 'confirmed' | 'completed' | 'cancelled' | 'no_show' } : {}),
+      ...(url.searchParams.get('exceptions') === 'true' ? { exceptionOnly: true } : {}),
+    }) }); return;
+  }
   if (method === 'GET' && path === '/v1/content') { json(res, 200, { data: await listContent(store, auth) }); return; }
   if (method === 'GET' && segments[1] === 'students' && segments[3] === 'archive') { json(res, 200, { data: await getStudentArchive(store, auth, segments[2]!, url.searchParams.get('purpose') ?? '') }); return; }
   if (method === 'GET' && segments[1] === 'rights-requests' && segments[3] === 'result') { json(res, 200, { data: await downloadRightsResult(store, auth, segments[2]!) }); return; }
@@ -312,25 +358,33 @@ async function routeAuthenticatedApi(req: IncomingMessage, res: ServerResponse, 
   if (method === 'POST' && segments[1] === 'me' && segments[2] === 'consents' && segments[4] === 'withdraw') { await withdrawConsent(store, auth, segments[3]!); json(res, 204, {}); return; }
   if (method === 'POST' && path === '/v1/imports/preview-csv') {
     const csv = stringField(input, 'csv');
-    const rows = parseCsv(csv).map((row) => ({ ...row, age: Number(row.age), guardianVerified: row.guardianVerified === 'true' }));
+    const rows = normalizeImportCsvRows(parseCsv(csv));
     const result = await previewImport(store, auth, { schoolId: stringField(input, 'schoolId'), filename: typeof input.filename === 'string' ? input.filename : 'upload.csv', rows }); json(res, 201, { data: result }); return;
   }
   if (method === 'POST' && path === '/v1/imports/preview-xlsx') {
     const encoded = stringField(input, 'xlsxBase64');
-    const rows = parseXlsxBase64(encoded).map((row) => ({ ...row, age: Number(row.age), guardianVerified: row.guardianVerified === 'true' }));
+    const rows = normalizeImportCsvRows(parseXlsxBase64(encoded));
     const result = await previewImport(store, auth, { schoolId: stringField(input, 'schoolId'), filename: typeof input.filename === 'string' ? input.filename : 'upload.xlsx', rows }); json(res, 201, { data: result }); return;
   }
   if (method === 'POST' && path === '/v1/imports/preview') {
     const rows = arrayField(input, 'rows').filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object' && !Array.isArray(row)));
     const result = await previewImport(store, auth, { schoolId: stringField(input, 'schoolId'), filename: stringField(input, 'filename'), rows }); json(res, 201, { data: result }); return;
   }
+  if (method === 'GET' && path === '/v1/imports') {
+    const rawLimit = url.searchParams.get('limit');
+    const limit = rawLimit === null ? undefined : Number(rawLimit);
+    json(res, 200, { data: await listImportBatches(store, auth, { ...(limit !== undefined ? { limit } : {}), ...(url.searchParams.get('schoolId') ? { schoolId: url.searchParams.get('schoolId')! } : {}) }) }); return;
+  }
   if (method === 'POST' && segments[1] === 'imports' && segments[3] === 'commit') {
     const rows = arrayField(input, 'rows').filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object' && !Array.isArray(row)));
     const result = await commitImport(store, auth, segments[2]!, rows); json(res, 200, { data: result }); return;
   }
+  if (method === 'POST' && segments[1] === 'imports' && segments[3] === 'rollback') {
+    json(res, 200, { data: await rollbackImport(store, auth, segments[2]!) }); return;
+  }
   if (method === 'POST' && path === '/v1/scales') {
     const dimensions = Array.isArray(input.dimensions) ? input.dimensions.filter((value): value is string => typeof value === 'string').map((value) => value.trim()).filter(Boolean).slice(0, 20) : undefined;
-    const scale = await createScale(store, auth, { code: stringField(input, 'code'), title: stringField(input, 'title'), version: stringField(input, 'version'), provenance: (input.provenance as 'synthetic_only' | 'licensed') ?? 'synthetic_only', minAge: Number(input.minAge), maxAge: Number(input.maxAge), scoringVersion: stringField(input, 'scoringVersion'), noticeVersion: stringField(input, 'noticeVersion'), dimensions, population: input.population as 'primary' | 'middle' | 'high' | 'mixed' | undefined, language: typeof input.language === 'string' ? input.language.trim() : undefined, licenseExpiresAt: typeof input.licenseExpiresAt === 'string' ? input.licenseExpiresAt : undefined, reviewEvidenceRef: typeof input.reviewEvidenceRef === 'string' ? input.reviewEvidenceRef.trim() : undefined, items: arrayField(input, 'items') as never, warningRule: input.warningRule as never }); json(res, 201, { data: publicScale(scale) }); return;
+    const scale = await createScale(store, auth, { code: stringField(input, 'code'), title: stringField(input, 'title'), version: stringField(input, 'version'), provenance: (input.provenance as 'synthetic_only' | 'licensed') ?? 'synthetic_only', minAge: Number(input.minAge), maxAge: Number(input.maxAge), scoringVersion: stringField(input, 'scoringVersion'), noticeVersion: stringField(input, 'noticeVersion'), estimatedMinutes: input.estimatedMinutes === undefined ? undefined : Number(input.estimatedMinutes), dimensions, population: input.population as 'primary' | 'middle' | 'high' | 'mixed' | undefined, language: typeof input.language === 'string' ? input.language.trim() : undefined, licenseExpiresAt: typeof input.licenseExpiresAt === 'string' ? input.licenseExpiresAt : undefined, reviewEvidenceRef: typeof input.reviewEvidenceRef === 'string' ? input.reviewEvidenceRef.trim() : undefined, items: arrayField(input, 'items') as never, warningRule: input.warningRule as never }); json(res, 201, { data: publicScale(scale) }); return;
   }
   if (method === 'POST' && segments[1] === 'scales' && segments[3] === 'approve') { const scale = await approveScale(store, auth, segments[2]!); json(res, 200, { data: publicScale(scale) }); return; }
   if (method === 'POST' && segments[1] === 'scales' && segments[3] === 'revoke') { await revokeScale(store, auth, segments[2]!, stringField(input, 'reason')); json(res, 204, {}); return; }
@@ -363,6 +417,7 @@ async function routeAuthenticatedApi(req: IncomingMessage, res: ServerResponse, 
   if (method === 'POST' && segments[1] === 'reports' && segments[3] === 'revoke') { await revokeReport(store, auth, segments[2]!, stringField(input, 'reason')); json(res, 204, {}); return; }
   if (method === 'POST' && path === '/v1/risk-signals') { const riskCase = await createRiskSignal(store, auth, { studentId: stringField(input, 'studentId'), level: (input.level as 'attention' | 'urgent') ?? 'attention', reason: stringField(input, 'reason'), source: input.source as never }); json(res, 201, { data: riskCase }); return; }
   if (method === 'GET' && path === '/v1/cases') { json(res, 200, { data: await listCases(store, auth) }); return; }
+  if (method === 'GET' && segments[1] === 'cases' && segments[3] === 'brief' && segments.length === 4) { json(res, 200, { data: await getCaseBriefing(store, auth, segments[2]!) }); return; }
   if (method === 'POST' && segments[1] === 'cases' && segments[3] === 'reviews') { const result = await reviewCase(store, auth, segments[2]!, { decision: input.decision as 'dismiss' | 'confirm', note: stringField(input, 'note') }); json(res, 200, { data: result }); return; }
   if (method === 'POST' && segments[1] === 'cases' && segments[3] === 'assign') { const result = await assignCase(store, auth, segments[2]!, stringField(input, 'assigneeId')); json(res, 200, { data: result }); return; }
   if (method === 'POST' && segments[1] === 'cases' && segments[3] === 'acknowledgements') { const result = await acknowledgeCase(store, auth, segments[2]!); json(res, 201, { data: result }); return; }
@@ -378,19 +433,26 @@ async function routeAuthenticatedApi(req: IncomingMessage, res: ServerResponse, 
   if (method === 'GET' && path === '/v1/analytics/summary') { json(res, 200, { data: await getAnalytics(store, auth, url.searchParams.get('groupBy') ?? 'school') }); return; }
   if (method === 'POST' && path === '/v1/profile-schemas') { const result = await createProfileSchema(store, auth, { version: stringField(input, 'version'), fields: arrayField(input, 'fields') as never }); json(res, 201, { data: result }); return; }
   if (method === 'POST' && segments[1] === 'profile-schemas' && segments[3] === 'approve') { const result = await approveProfileSchema(store, auth, segments[2]!); json(res, 200, { data: result }); return; }
-  if (method === 'POST' && path === '/v1/availability-slots') { const result = await createAvailabilitySlot(store, auth, { counselorId: stringField(input, 'counselorId'), startsAt: stringField(input, 'startsAt'), endsAt: stringField(input, 'endsAt'), room: typeof input.room === 'string' ? input.room : undefined }); json(res, 201, { data: result }); return; }
+  if (method === 'POST' && path === '/v1/availability-slots') { assertAllowedFields(input, ['counselorId', 'startsAt', 'endsAt', 'room']); const result = await createAvailabilitySlot(store, auth, { counselorId: stringField(input, 'counselorId'), startsAt: stringField(input, 'startsAt'), endsAt: stringField(input, 'endsAt'), room: typeof input.room === 'string' ? input.room : undefined }); json(res, 201, { data: result }); return; }
   if (method === 'POST' && path === '/v1/appointments') {
+    assertAllowedFields(input, ['slotId', 'note', 'idempotencyKey']);
     const result = await requestAppointment(store, auth, { slotId: stringField(input, 'slotId'), note: typeof input.note === 'string' ? input.note : undefined, idempotencyKey: typeof input.idempotencyKey === 'string' ? input.idempotencyKey : undefined });
     // Never return the encrypted note or the idempotency material. The client
     // only needs the booking reference and state to render a receipt.
     json(res, 201, { data: { id: result.id, state: result.state, createdAt: result.createdAt, updatedAt: result.updatedAt } }); return;
   }
+  if (method === 'POST' && segments[1] === 'appointments' && segments[3] === 'reschedule') {
+    assertAllowedFields(input, ['slotId']);
+    const result = await rescheduleAppointment(store, auth, segments[2]!, stringField(input, 'slotId'));
+    json(res, 200, { data: { id: result.id, state: result.state, createdAt: result.createdAt, updatedAt: result.updatedAt } }); return;
+  }
   if (method === 'POST' && segments[1] === 'appointments' && segments[3] === 'state') {
+    assertAllowedFields(input, ['state']);
     const result = await updateAppointment(store, auth, segments[2]!, (input.state as 'requested' | 'confirmed' | 'completed' | 'cancelled' | 'no_show') ?? 'cancelled');
     json(res, 200, { data: { id: result.id, state: result.state, createdAt: result.createdAt, updatedAt: result.updatedAt } }); return;
   }
   if (method === 'POST' && segments[1] === 'availability-slots' && segments[3] === 'state') { const result = await updateAvailabilitySlot(store, auth, segments[2]!, input.status as 'available' | 'blocked'); json(res, 200, { data: result }); return; }
-  if (method === 'POST' && path === '/v1/content') { const result = await createContent(store, auth, { title: stringField(input, 'title'), kind: (input.kind as 'article' | 'announcement' | 'media') ?? 'article', body: stringField(input, 'body'), ageMin: Number(input.ageMin), ageMax: Number(input.ageMax), copyrightSource: stringField(input, 'copyrightSource'), mediaAssetId: typeof input.mediaAssetId === 'string' ? input.mediaAssetId : undefined, altText: typeof input.altText === 'string' ? input.altText : undefined, captionText: typeof input.captionText === 'string' ? input.captionText : undefined }); json(res, 201, { data: { ...result, bodyCiphertext: undefined } }); return; }
+  if (method === 'POST' && path === '/v1/content') { assertAllowedFields(input, ['title', 'kind', 'category', 'body', 'ageMin', 'ageMax', 'copyrightSource', 'mediaAssetId', 'subtitleAssetId', 'altText', 'captionText']); const result = await createContent(store, auth, { title: stringField(input, 'title'), kind: (input.kind as 'article' | 'announcement' | 'media') ?? 'article', category: input.category as 'wellbeing' | 'emotion' | 'stress' | 'relationships' | 'sleep' | 'help_seeking' | 'general' | undefined, body: stringField(input, 'body'), ageMin: Number(input.ageMin), ageMax: Number(input.ageMax), copyrightSource: stringField(input, 'copyrightSource'), mediaAssetId: typeof input.mediaAssetId === 'string' ? input.mediaAssetId : undefined, subtitleAssetId: typeof input.subtitleAssetId === 'string' ? input.subtitleAssetId : undefined, altText: typeof input.altText === 'string' ? input.altText : undefined, captionText: typeof input.captionText === 'string' ? input.captionText : undefined }); json(res, 201, { data: { ...result, bodyCiphertext: undefined } }); return; }
   if (method === 'POST' && path === '/v1/media-assets') { const result = await createMediaAsset(store, auth, { filename: stringField(input, 'filename'), mediaType: stringField(input, 'mediaType'), base64: stringField(input, 'base64') }); json(res, 201, { data: { id: result.id, filename: result.filename, mediaType: result.mediaType, kind: result.kind, byteSize: result.byteSize, sha256: result.sha256, scanStatus: result.scanStatus, createdAt: result.createdAt } }); return; }
   if (method === 'POST' && segments[1] === 'content' && segments[3] === 'publish') { const result = await approveContent(store, auth, segments[2]!); json(res, 200, { data: { id: result.id, state: result.state, publishedAt: result.publishedAt } }); return; }
   if (method === 'POST' && segments[1] === 'content' && segments[3] === 'retire') { const result = await retireContent(store, auth, segments[2]!); json(res, 200, { data: { id: result.id, state: result.state } }); return; }

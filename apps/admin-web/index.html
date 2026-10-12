@@ -4,7 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>校园心晴｜工作人员端</title>
-  <style>body{font:16px system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#172033;line-height:1.55}header{display:flex;justify-content:space-between;align-items:center;gap:1rem}section{background:#f5f7fb;padding:1rem;margin:1rem 0;border-radius:12px}button{padding:.6rem 1rem;border:0;border-radius:8px;background:#2854d7;color:#fff;cursor:pointer;font:inherit}button.secondary{background:#57657d}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #f59e0b;outline-offset:2px}input,select,textarea{padding:.6rem;margin:.25rem;border:1px solid #ccd3e0;border-radius:6px;font:inherit}textarea{width:calc(100% - .5rem);box-sizing:border-box}.muted{color:#5f6b82}.metric{display:inline-block;min-width:130px;padding:.75rem;background:white;border-radius:8px;margin:.3rem}.status{min-height:1.6em}@media (max-width:600px){header{display:block}input,select,textarea,button{width:100%;box-sizing:border-box;margin:.25rem 0}}
+  <style>body{font:16px system-ui,sans-serif;max-width:1120px;margin:2rem auto;padding:0 1rem;color:#172033;line-height:1.55}header{display:flex;justify-content:space-between;align-items:center;gap:1rem}section{background:#f5f7fb;padding:1rem;margin:1rem 0;border-radius:12px}button{min-height:44px;padding:.6rem 1rem;border:0;border-radius:8px;background:#2854d7;color:#fff;cursor:pointer;font:inherit}button.secondary{background:#57657d}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid #f59e0b;outline-offset:2px}input,select,textarea{min-height:44px;padding:.6rem;margin:.25rem;border:1px solid #ccd3e0;border-radius:6px;font:inherit}textarea{width:calc(100% - .5rem);box-sizing:border-box}.muted{color:#5f6b82}.metric{display:inline-block;min-width:130px;padding:.75rem;background:white;border-radius:8px;margin:.3rem}.status{min-height:1.6em}.workspace-nav{display:flex;gap:.5rem;flex-wrap:wrap;position:sticky;top:0;background:#fff;padding:.5rem;z-index:5;border-radius:8px}.workspace-nav a{padding:.4rem .7rem;border-radius:999px;background:#e9eefb;color:#172033}.workspace-panel{scroll-margin-top:5rem}.filter-row{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap}.filter-row label{display:grid;gap:.2rem}.case-toolbar{display:flex;gap:.5rem;flex-wrap:wrap;margin:.75rem 0}.case-board{display:grid;grid-auto-columns:minmax(260px,1fr);grid-auto-flow:column;gap:.75rem;overflow-x:auto;padding:.4rem .2rem 1rem;scroll-snap-type:x proximity}.case-lane{background:#e9eef6;border-radius:10px;padding:.65rem;min-height:9rem;scroll-snap-align:start}.case-lane h3{font-size:1rem;margin:.2rem 0 .65rem}.case-lane-count{display:inline-grid;place-items:center;min-width:1.8rem;height:1.8rem;border-radius:999px;background:#d4def0}.case-card{background:#fff;border:1px solid #d5ddec;border-left:4px solid #5472be;border-radius:8px;padding:.7rem;margin:.55rem 0;overflow-wrap:anywhere}.case-card.is-overdue,.case-card.has-exception{border-left-color:#a32626}.case-meta{font-size:.94rem}.case-badges{display:flex;gap:.35rem;flex-wrap:wrap;margin:.4rem 0}.case-badge{display:inline-block;background:#fff0d5;color:#633d00;border-radius:999px;padding:.1rem .55rem;font-size:.88rem}.case-brief{background:#f5f7fb;border-radius:8px;padding:.65rem;margin-top:.5rem}.case-brief dl{display:grid;grid-template-columns:max-content 1fr;gap:.2rem .6rem;margin:.2rem 0}.case-brief dt{font-weight:600}.case-brief dd{margin:0}.case-exception-summary{background:#fff5e6;border:1px solid #e7c57b;border-radius:8px;padding:.7rem}.case-stage-note{padding:.5rem;border-left:4px solid #2854d7;background:#edf2ff}.case-history{margin-top:1rem}.case-board-empty{color:#5f6b82;padding:.4rem}@media (max-width:600px){header{display:block}input,select,textarea,button{width:100%;box-sizing:border-box;margin:.25rem 0}.workspace-nav{position:static;display:grid;grid-template-columns:1fr 1fr}.filter-row>*{flex:1 1 100%}.case-board{grid-auto-columns:minmax(82vw,1fr);margin:0 -.4rem}.case-lane{min-height:auto}}</style>
+  <style>
+    .calendar-toolbar{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin:.75rem 0}.calendar-toolbar label{display:grid;gap:.2rem;flex:1 1 10rem}.calendar-controls{display:flex;gap:.5rem;flex-wrap:wrap;margin:.6rem 0}.calendar-controls button[aria-pressed="true"]{background:#123b9a;box-shadow:0 0 0 2px #a8bdf4 inset}.calendar-scroll{overflow-x:auto;padding-bottom:.6rem}.calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(150px,1fr));gap:.5rem;min-width:1080px}.calendar-grid.day-view{grid-template-columns:minmax(0,1fr);min-width:0}.calendar-day{min-height:9rem;background:#e9eef6;border-radius:9px;padding:.55rem}.calendar-day h4{margin:.1rem 0 .55rem}.calendar-event{background:#fff;border-radius:8px;padding:.6rem;margin:.45rem 0;border-left:4px solid #2854d7;overflow-wrap:anywhere}.calendar-event.available{border-left-color:#23804c}.calendar-event.booked{border-left-color:#7a5ab5}.calendar-event .muted{font-size:.9rem}.calendar-status{display:inline-block;border-radius:999px;background:#fff0d5;color:#633d00;padding:.15rem .55rem;margin:.25rem 0}.calendar-exception{background:#fff2e8;border-left:4px solid #a32626;padding:.6rem;border-radius:8px}.timezone-note{font-weight:600;color:#34405a}.appointment-actions{display:grid;gap:.45rem;margin-top:.5rem}
+    @media(max-width:680px){.calendar-grid:not(.day-view){display:flex;min-width:0;flex-direction:column}.calendar-day{min-height:0}.calendar-toolbar label{flex-basis:100%}.calendar-controls button{flex:1 1 35%}.calendar-event button,.appointment-actions button{width:100%;min-height:48px}}
   </style>
 </head>
 <body>
@@ -24,15 +27,29 @@
   </section>
 
   <section id="dashboard" hidden aria-labelledby="dashboard-title">
-    <h2 id="dashboard-title">校级概览</h2>
-    <div id="metrics" aria-live="polite"></div>
-    <p class="muted">聚合数据可能因小样本被抑制；此页面不展示学生心理分数。</p>
+    <h2 id="dashboard-title">工作台</h2>
+    <nav id="workspaceNav" class="workspace-nav" aria-label="工作台模块"></nav>
     <div><button id="refresh" type="button">刷新</button> <button id="logout" type="button" class="secondary">退出</button></div>
-    <h2>测评任务</h2>
+    <section id="work-overview" class="workspace-panel" data-roles="school_admin,professional_lead,privacy_auditor" aria-labelledby="overview-title">
+      <h2 id="overview-title">校级概览</h2>
+      <div id="metrics" aria-live="polite"></div>
+      <p class="muted">聚合数据可能因小样本被抑制；此页面不展示学生心理分数。</p>
+    </section>
+    <section id="work-students" class="workspace-panel" data-roles="school_admin,professional_lead,counselor" aria-labelledby="students-title">
+      <h2 id="students-title">查找学生</h2>
+      <p class="muted">输入姓名或班级查找。心理专业人员只会看到当前授权范围内的学生；结果用于选择对象，不提供全量下载。</p>
+      <form id="studentSearchForm" class="filter-row"><label for="student-search">姓名、年级或班级<input id="student-search" maxlength="80" autocomplete="off" placeholder="输入姓名、年级或班级"></label><button type="submit">搜索</button></form>
+      <p id="studentSearchStatus" class="status" role="status" aria-live="polite"></p>
+      <div id="studentSearchResults" aria-live="polite"><p class="muted">输入姓名或班级后搜索。</p></div>
+    </section>
+    <section id="work-campaigns" class="workspace-panel" data-roles="school_admin,professional_lead,teacher" aria-labelledby="campaigns-title">
+    <h2 id="campaigns-title">测评任务</h2>
     <div id="campaigns" aria-live="polite"></div>
     <p id="campaignStatus" class="status" role="status" aria-live="polite"></p>
-    <div id="campaignProgress" aria-live="polite"><p class="muted">选择任务可读取完成进度。</p></div>
-    <h2>量表版本目录</h2>
+    <div data-roles="teacher"><div id="campaignProgress" aria-live="polite"><p class="muted">选择任务可读取完成进度。</p></div></div>
+    </section>
+    <section id="work-scales" class="workspace-panel" data-roles="school_admin,professional_lead,counselor" aria-labelledby="scales-title">
+    <h2 id="scales-title">量表版本目录</h2>
     <p class="muted">这里只展示量表版本的治理元数据，不展示题目正文。真实量表必须先完成授权、适龄、计分金标准和专业审批；演示环境只能使用合成内容。</p>
     <form id="scaleCatalogForm">
       <label for="scale-catalog-status">版本状态</label><select id="scale-catalog-status" name="status"><option value="">全部</option><option value="draft">草稿</option><option value="approved">已批准</option><option value="revoked">已撤销</option></select>
@@ -65,124 +82,202 @@
         <button type="submit">保存版本草稿</button>
       </form>
     </details>
-    <label for="scale-revoke-reason">撤销原因（专业负责人操作时必填）</label><input id="scale-revoke-reason" maxlength="200" placeholder="例如：授权到期或适用性复核变更">
-    <h2>人员信息导入预检</h2>
-    <p class="muted">支持受限 CSV（字段：externalId、displayName、age、classId、guardianVerified）。服务端会再次校验；预检文件不应包含超出目的的敏感字段。</p>
+    <div data-roles="professional_lead"><label for="scale-revoke-reason">撤销原因（专业负责人操作时必填）</label><input id="scale-revoke-reason" maxlength="200" placeholder="例如：授权到期或适用性复核变更"></div>
+    </section>
+    <section id="work-import" class="workspace-panel" data-roles="school_admin" aria-labelledby="import-title">
+    <h2 id="import-title">人员信息导入与回滚</h2>
+    <p class="muted">支持受限 CSV（字段：externalId、displayName、age、grade、classId、guardianVerified；grade 为学校提供的可选年级标签，不会根据年龄推断）。错误 CSV 在本机生成，原始上传行不会由服务端保存；回滚只会停用没有后续关联记录的本批次新增学生。</p>
     <form id="importForm">
       <label for="import-file">CSV 文件（≤2 MB）</label><input id="import-file" type="file" accept=".csv,text/csv">
-      <label for="import-csv">或粘贴 CSV 内容</label><textarea id="import-csv" rows="5" maxlength="2000000" placeholder="externalId,displayName,age,classId,guardianVerified&#10;synthetic-new-001,合成学生甲,14,class-demo-1,false"></textarea>
-      <button type="submit">预检名单</button> <button id="importCommit" type="button" class="secondary" disabled>确认导入</button>
+      <label for="import-csv">或粘贴 CSV 内容</label><textarea id="import-csv" rows="5" maxlength="2000000" placeholder="externalId,displayName,age,grade,classId,guardianVerified&#10;synthetic-new-001,合成学生甲,14,初二,class-demo-1,false"></textarea>
+      <button type="submit">预检名单</button> <button id="importCommit" type="button" class="secondary" disabled>仅导入有效行</button>
     </form>
     <p id="importStatus" class="status" role="status" aria-live="polite"></p>
     <div id="importPreview" aria-live="polite"><p class="muted">尚未预检导入文件。</p></div>
+    <h3>最近导入批次</h3>
+    <div id="importHistory" aria-live="polite"><p class="muted">正在读取批次记录…</p></div>
+    </section>
+    <section id="work-campaign-setup" class="workspace-panel" data-roles="school_admin,professional_lead" aria-labelledby="campaign-setup-title">
+    <h2 id="campaign-setup-title">任务配置与复评审批</h2>
+    <div data-roles="school_admin">
     <form id="campaignForm">
       <label for="campaign-name">任务名称</label><input id="campaign-name" name="name" placeholder="任务名称" value="合成演示任务" required>
       <label for="academic-year">学年</label><input id="academic-year" name="academicYear" value="2026-2027" required>
       <label for="opens-at">开始时间</label><input id="opens-at" name="opensAt" type="datetime-local" required>
       <label for="closes-at">结束时间</label><input id="closes-at" name="closesAt" type="datetime-local" required>
       <label for="scale">量表版本</label><select name="scaleVersionId" id="scale" required></select>
+      <label for="campaign-students">参与学生（先用姓名/班级搜索，再多选）</label><select id="campaign-students" data-student-picker multiple size="5" required></select>
       <button type="submit">创建草稿</button>
     </form>
+    </div>
+    <div data-roles="professional_lead">
     <form id="frequencyForm">
-      <label for="frequency-campaign">需要复评例外的任务编号</label><input id="frequency-campaign" name="campaignId" value="campaign-demo" required>
-      <label for="frequency-student">学生编号</label><input id="frequency-student" name="studentId" value="student-demo" required>
+      <label for="frequency-campaign">任务</label><select id="frequency-campaign" name="campaignId" required><option value="">请先加载任务</option></select>
+      <label for="frequency-student">学生姓名 / 班级</label><select id="frequency-student" data-student-picker name="studentId" required><option value="">请先搜索并选择学生</option></select>
       <label for="frequency-reason">复评用途与依据</label><textarea id="frequency-reason" name="reason" rows="2" maxlength="1000" required placeholder="由专业负责人记录必要复评的依据"></textarea>
       <button type="submit" class="secondary">提交复评例外审批</button>
     </form>
     <p id="frequencyStatus" class="status" role="status" aria-live="polite"></p>
     <p class="muted">发布前仍需满足适龄、参与、频次、量表和专业门槛；校务账号不能查看分数。</p>
-    <h2>隐私保护统计</h2>
-    <p class="muted">仅显示批准维度的聚合计数；小样本会抑制，不展示个体分数或风险等级。</p>
+    </div>
+    </section>
+    <section id="work-analytics" class="workspace-panel" data-roles="school_admin,professional_lead,privacy_auditor" aria-labelledby="analytics-title">
+    <h2 id="analytics-title">隐私保护统计</h2>
+    <p class="muted">仅显示批准维度的聚合计数；样本不足 10 会抑制，不展示个体分数或风险等级。显示“已抑制”代表样本数不足，不等于 0 人或没有风险。</p>
     <form id="analyticsForm">
       <label for="analytics-group">统计维度</label><select id="analytics-group" name="groupBy"><option value="school">学校</option><option value="age_band">年龄段</option><option value="academic_year">学年</option></select>
       <button type="submit">读取聚合统计</button>
     </form>
     <p id="analyticsStatus" class="status" role="status" aria-live="polite"></p>
     <div id="analyticsView" aria-live="polite"><p class="muted">尚未读取统计。</p></div>
-    <h2>咨询排班与预约</h2>
-    <p class="muted">预约不是即时咨询或紧急救助。这里只展示时间、状态和最小身份引用，不展示心理说明。</p>
+    </section>
+    <section id="work-appointments" class="workspace-panel" data-roles="school_admin,professional_lead,counselor" aria-labelledby="appointments-title">
+    <h2 id="appointments-title">咨询排班与预约</h2>
+    <p class="muted">预约不是即时咨询或紧急救助。这里只展示时间、状态和最小身份引用，不展示心理说明。确认后预约变更和临近提醒会排队通知学生及负责咨询师；演示环境未接入外部通知服务。</p>
+    <p id="appointmentTimezone" class="timezone-note" aria-live="polite"></p>
     <form id="slotForm">
-      <label for="slot-counselor">咨询师用户编号</label><input id="slot-counselor" name="counselorId" value="user-counselor-demo" required>
+      <div data-roles="school_admin,professional_lead"><label for="slot-counselor">咨询师</label><select id="slot-counselor" name="counselorId"><option value="">正在加载咨询师…</option></select></div>
+      <p class="muted" data-roles="counselor">你正在管理自己的可预约时段。</p>
       <label for="slot-starts">开始时间</label><input id="slot-starts" name="startsAt" type="datetime-local" required>
       <label for="slot-ends">结束时间</label><input id="slot-ends" name="endsAt" type="datetime-local" required>
       <label for="slot-room">房间（可选）</label><input id="slot-room" name="room" maxlength="100" placeholder="合成咨询室">
       <button type="submit">创建排班</button>
     </form>
+    <h3>预约日历</h3>
+    <div class="calendar-toolbar" aria-label="日历筛选">
+      <label for="appointmentCounselorFilter">咨询师<select id="appointmentCounselorFilter"><option value="">全部咨询师</option></select></label>
+      <label for="appointmentRoomFilter">地点<input id="appointmentRoomFilter" type="search" maxlength="100" placeholder="搜索地点"></label>
+      <label for="appointmentFromFilter">时间从<input id="appointmentFromFilter" type="datetime-local"></label>
+      <label for="appointmentToFilter">到<input id="appointmentToFilter" type="datetime-local"></label>
+      <label for="appointmentStateFilter">队列<select id="appointmentStateFilter"><option value="all">全部预约</option><option value="requested">待确认</option><option value="confirmed">已确认</option><option value="exceptions">异常队列</option><option value="completed">已完成</option><option value="cancelled">已取消</option><option value="no_show">未到访</option></select></label>
+    </div>
+    <div class="calendar-controls" aria-label="日历视图与日期">
+      <button id="appointmentDayView" type="button" class="secondary" aria-pressed="false">日视图</button>
+      <button id="appointmentWeekView" type="button" aria-pressed="true">周视图</button>
+      <button id="appointmentPrevious" type="button" class="secondary">上一段</button>
+      <button id="appointmentToday" type="button" class="secondary">今天</button>
+      <button id="appointmentNext" type="button" class="secondary">下一段</button>
+    </div>
+    <p id="appointmentCalendarWindow" class="muted" aria-live="polite"></p>
+    <div id="appointmentCalendar" class="calendar-scroll" role="region" aria-live="polite" aria-label="预约日历"></div>
+    <h3>可用时段管理</h3>
     <div id="slotList" aria-live="polite"><p class="muted">暂无未来排班</p></div>
-    <h3>预约记录</h3>
+    <h3>预约确认与处理</h3>
+    <p class="muted">超过等待阈值仍待确认、通知重试或失败的预约会进入异常队列。待确认默认阈值为 24 小时，可用 CAMPMIND_APPOINTMENT_CONFIRMATION_SLA_MINUTES 调整；这不是响应承诺。</p>
     <div id="appointmentList" aria-live="polite"><p class="muted">暂无预约</p></div>
-    <h2>教育内容管理</h2>
+    </section>
+    <section id="work-content" class="workspace-panel" data-roles="school_admin,professional_lead" aria-labelledby="content-title-heading">
+    <h2 id="content-title-heading">教育内容管理</h2>
     <p class="muted">先保存草稿，再由具备专业审核权限的人员发布。内容仅用于一般心理教育，不承载个案信息。</p>
     <form id="contentForm">
       <label for="content-title">标题</label><input id="content-title" name="title" maxlength="200" required>
       <label for="content-kind">类型</label><select id="content-kind" name="kind"><option value="article">文章</option><option value="announcement">公告</option><option value="media">媒体</option></select>
+      <label for="content-category">教育主题分类</label><select id="content-category" name="category"><option value="wellbeing">身心健康</option><option value="emotion">认识与调节情绪</option><option value="stress">学习压力与复原</option><option value="relationships">同伴关系与沟通</option><option value="sleep">睡眠与生活习惯</option><option value="help_seeking">求助与支持</option><option value="general">其他</option></select>
       <label for="content-body">正文或文字稿</label><textarea id="content-body" name="body" rows="5" maxlength="30000" required></textarea>
       <label for="content-age-min">适用最小年龄</label><input id="content-age-min" name="ageMin" type="number" min="6" max="19" value="12" required>
       <label for="content-age-max">适用最大年龄</label><input id="content-age-max" name="ageMax" type="number" min="6" max="19" value="18" required>
       <label for="content-copyright">版权/来源</label><input id="content-copyright" name="copyrightSource" maxlength="500" placeholder="synthetic-only" required>
       <label for="content-file">媒体文件（媒体类型必填，≤1.5 MB）</label><input id="content-file" name="file" type="file" accept="image/png,image/jpeg,image/webp,audio/mpeg,audio/ogg,audio/wav,video/mp4,video/webm">
+      <label for="content-subtitle-file">字幕文件（可选 WebVTT .vtt，≤1.5 MB；音视频播放器可切换字幕）</label><input id="content-subtitle-file" name="subtitleFile" type="file" accept=".vtt,text/vtt">
       <label for="content-alt">图片文字替代（图片必填）</label><textarea id="content-alt" name="altText" rows="2" maxlength="2000"></textarea>
-      <label for="content-caption">音视频字幕/文字说明（音视频必填）</label><textarea id="content-caption" name="captionText" rows="2" maxlength="20000"></textarea>
+      <label for="content-caption">音视频文字稿（音视频需要 WebVTT 字幕或文字稿；填写后学生可展开阅读）</label><textarea id="content-caption" name="captionText" rows="4" maxlength="20000"></textarea>
       <button type="submit">保存教育内容草稿</button>
     </form>
     <p id="contentStatus" class="status" role="status" aria-live="polite"></p>
     <div id="contentList" aria-live="polite"><p class="muted">暂无教育内容</p></div>
-    <h2>危机线索工作台（心理专业角色）</h2>
+    </section>
+    <section id="work-cases" class="workspace-panel" data-roles="professional_lead,counselor" aria-labelledby="cases-title">
+    <h2 id="cases-title">危机线索工作台</h2>
     <p class="muted">自动识别仅生成待复核线索；此处不展示原始答卷，也不会自动诊断或结案。</p>
+    <p class="case-stage-note">结案必须由与申请人不同的专业人员独立审核。处理期限为演示流程目标，不构成响应承诺；接入真实工作前须由学校确认并配置正式时限。</p>
+    <div class="filter-row" aria-label="个案筛选">
+      <label for="case-view">工作队列<select id="case-view"><option value="default">我的个案 / 待审核 / 异常事项 / 逾期事项</option><option value="mine">我的个案</option><option value="pending_review">待复核</option><option value="confirmed">待指派</option><option value="assigned">待接单</option><option value="follow_up">随访中</option><option value="closure_requested">待结案</option><option value="exceptions">异常队列</option><option value="overdue">逾期事项</option><option value="all">全部</option></select></label>
+      <label for="case-state-filter">状态<select id="case-state-filter"><option value="">全部状态</option><option value="pending_review">待复核</option><option value="confirmed">待指派</option><option value="assigned">待接单</option><option value="in_support">已接单 · 待安排随访</option><option value="follow_up">随访中</option><option value="closure_requested">待结案</option><option value="closed">已结案</option><option value="dismissed">已排除</option></select></label>
+      <label for="case-priority-filter">优先级<select id="case-priority-filter"><option value="">全部优先级</option><option value="urgent">加急关注</option><option value="attention">一般关注</option></select></label>
+      <label for="case-time-filter">创建时间<select id="case-time-filter"><option value="all">不限</option><option value="7">最近 7 天</option><option value="30">最近 30 天</option></select></label>
+      <label for="case-grade-filter">年级<select id="case-grade-filter"><option value="">全部年级</option></select></label>
+      <label for="case-class-filter">班级<select id="case-class-filter"><option value="">全部班级</option></select></label>
+    </div>
     <label for="case-note">复核/支持说明</label><textarea id="case-note" rows="3" maxlength="4000" placeholder="请记录最小必要的人工依据"></textarea>
-    <label for="case-assignee">指派给（专业用户编号）</label><input id="case-assignee" value="user-counselor-demo">
+    <label for="case-follow-up-due">下次随访期限（记录随访时必填）</label><input id="case-follow-up-due" type="datetime-local">
+    <div data-roles="professional_lead"><label for="case-assignee">指派给</label><select id="case-assignee"><option value="">选择咨询师/专业负责人</option></select></div>
+    <div id="caseExceptionSummary" class="case-exception-summary" aria-live="polite"></div>
     <div id="caseList" aria-live="polite"><p class="muted">暂无待处理线索，或当前账号没有专业权限。</p></div>
-    <h2>表达与支持收件箱（心理专业角色）</h2>
+    </section>
+    <section id="work-support" class="workspace-panel" data-roles="professional_lead,counselor" aria-labelledby="support-title">
+    <h2 id="support-title">表达与支持收件箱</h2>
     <p class="muted">这里仅处理学生主动发起的表达分享和支持请求，与危机线索工作台分开。内容只对指定接收人可见；处理记录不会自动改变危机等级，也不会自动结案。</p>
-    <div class="actions"><button id="supportInboxRefresh" type="button" class="secondary">刷新支持请求</button><button id="supportEscalationsRefresh" type="button" class="secondary">查看逾期提醒</button></div>
+    <div class="actions"><button id="supportInboxRefresh" type="button" class="secondary">刷新支持请求</button><span data-roles="professional_lead"><button id="supportEscalationsRefresh" type="button" class="secondary">查看逾期提醒</button></span></div>
     <p id="supportInboxStatus" class="status" role="status" aria-live="polite"></p>
     <label for="support-note">支持记录（可选，写入指定请求的加密工作记录）</label><textarea id="support-note" rows="2" maxlength="2000" placeholder="只记录最小必要的沟通与跟进事实"></textarea>
-    <div id="supportEscalations" aria-live="polite"><p class="muted">尚未读取逾期提醒。</p></div>
+    <div data-roles="professional_lead"><div id="supportEscalations" aria-live="polite"><p class="muted">尚未读取逾期提醒。</p></div></div>
     <div id="supportInbox" aria-live="polite"><p class="muted">暂无主动支持请求，或当前账号没有接收权限。</p></div>
     <pre id="supportSharedView" hidden style="white-space:pre-wrap;background:#fff;padding:.75rem;border-radius:8px;max-height:16rem;overflow:auto"></pre>
-    <h2>专业报告与心理档案</h2>
+    </section>
+    <section id="work-report-queue" class="workspace-panel" data-roles="professional_lead,counselor" aria-labelledby="report-queue-title">
+    <h2 id="report-queue-title">专业报告审核队列</h2>
+    <p class="muted">仅列出当前专业角色授权范围内的报告；审核与发布仍由专业负责人完成。</p>
+    <label for="report-state-filter">报告状态</label><select id="report-state-filter"><option value="pending_review">待审核</option><option value="approved">已审核待发布</option><option value="released">已发布</option><option value="all">全部状态</option></select>
+    <label for="report-grade-filter">年级</label><select id="report-grade-filter"><option value="">全部年级</option></select>
+    <div id="professionalReports" aria-live="polite"><p class="muted">尚未读取报告队列。</p></div>
+    </section>
+    <section id="work-archive" class="workspace-panel" data-roles="professional_lead,counselor" aria-labelledby="archive-title">
+    <h2 id="archive-title">专业报告与心理档案 · 我的个案资料</h2>
     <p class="muted">仅获批心理专业角色可按用途读取个案档案；校务、班主任和运维账号会被服务端拒绝。</p>
     <form id="archiveForm">
-      <label for="archive-student">学生编号</label><input id="archive-student" name="studentId" value="student-demo" required>
+      <label for="archive-student">学生姓名 / 班级</label><select id="archive-student" data-student-picker name="studentId" required><option value="">请先搜索并选择学生</option></select>
       <label for="archive-purpose">查看用途</label><select id="archive-purpose" name="purpose"><option value="case_review">线索复核</option><option value="report_review">报告审核</option><option value="support_follow_up">支持与随访</option></select>
       <button type="submit">读取授权档案</button>
     </form>
     <p id="archiveStatus" class="status" role="status" aria-live="polite"></p>
-    <div id="professionalReports" aria-live="polite"><p class="muted">尚未读取报告。</p></div>
     <pre id="archiveView" hidden style="white-space:pre-wrap;background:#fff;padding:.75rem;border-radius:8px;max-height:24rem;overflow:auto"></pre>
-    <h2>隐私权利处理队列</h2>
+    </section>
+    <section id="work-rights" class="workspace-panel" data-roles="professional_lead,privacy_auditor" aria-labelledby="rights-title">
+    <h2 id="rights-title">隐私权利处理队列</h2>
     <p class="muted">仅隐私/权利管理角色可处理申请；结果正文不会出现在队列或审计列表中。</p>
     <label for="rights-decision-reason">处理说明（拒绝时必填）</label><textarea id="rights-decision-reason" rows="2" maxlength="2000" placeholder="记录身份、范围或法律依据核验结论"></textarea>
     <div id="rightsAdminList" aria-live="polite"><p class="muted">暂无待处理申请，或当前账号没有权利管理权限。</p></div>
-    <h2>运行接续与保留任务</h2>
+    </section>
+    <section id="work-operations" class="workspace-panel" data-roles="platform_ops" aria-labelledby="operations-title">
+    <h2 id="operations-title">运行接续与保留任务</h2>
     <p class="muted">仅运维角色可查看队列计数、补投死信、执行超时升级和保留重放；这些操作不会显示学生心理正文。</p>
     <div class="actions"><button id="operationsRefresh" type="button" class="secondary">刷新运行状态</button><button id="operationsRequeue" type="button" class="secondary">补投死信</button><button id="operationsEscalate" type="button" class="secondary">按 30 分钟生成升级提醒</button><button id="operationsRetention" type="button" class="secondary">运行保留重放</button></div>
     <p id="operationsStatus" class="status" role="status" aria-live="polite"></p>
     <div id="operationsView" aria-live="polite"><p class="muted">尚未读取运行状态，或当前账号没有运维权限。</p></div>
-    <h2>无手机学生凭证</h2>
+    </section>
+    <section id="work-security" class="workspace-panel" data-roles="school_admin" aria-labelledby="security-title">
+    <h2 id="security-title">学生账号安全</h2>
+    <h3>无手机学生凭证</h3>
     <form id="credentialForm">
-      <label for="credential-student">学生编号</label><input id="credential-student" name="studentId" value="student-demo" required>
+      <label for="credential-student">学生姓名 / 班级</label><select id="credential-student" data-student-picker name="studentId" required><option value="">请先搜索并选择学生</option></select>
       <label for="credential-ttl">有效期（分钟，5–1440）</label><input id="credential-ttl" name="ttlMinutes" type="number" min="5" max="1440" value="30" required>
       <button type="submit" class="secondary">签发一次性凭证</button>
     </form>
     <p id="credentialStatus" class="status" role="status" aria-live="polite">凭证只显示一次，请通过学校批准的线下渠道交付。</p>
-    <h2>会话安全</h2>
+    <h3>会话安全</h3>
     <form id="revokeForm">
-      <label for="revoke-user">用户编号</label><input id="revoke-user" name="userId" value="student-demo" required>
-      <button type="submit" class="secondary">撤销该用户会话</button>
+      <label for="revoke-user">学生姓名 / 班级</label><select id="revoke-user" data-student-picker name="userId" required><option value="">请先搜索并选择学生</option></select>
+      <button type="submit" class="secondary">撤销该学生会话</button>
     </form>
     <p id="revokeStatus" class="status" role="status" aria-live="polite">共享终端遗失或人员离岗时，可撤销活跃会话及未兑换凭证。</p>
+    </section>
   </section>
 
   <script>
     let token = '';
     let currentRole = '';
+    let currentUserId = '';
     let pendingImport = null;
     let sessionEpoch = 0;
+    let caseRecords = [];
     let sharedViewTimer = null;
     let sharedViewShareId = '';
     let sharedViewLastVerifiedAt = 0;
     let sharedViewFailures = 0;
+    let appointmentSlots = [];
+    let appointmentRecords = [];
+    let appointmentCalendarView = 'week';
+    let appointmentCalendarDate = new Date();
     const $ = (selector) => document.querySelector(selector);
     const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     const setStatus = (message) => { $('#status').textContent = message; };
@@ -199,9 +294,9 @@
       sessionEpoch += 1;
       pendingImport = null;
       clearSharedView();
-      const empty = ['metrics', 'campaigns', 'scale', 'scaleCatalog', 'importPreview', 'campaignProgress', 'analyticsView', 'slotList', 'appointmentList', 'contentList', 'caseList', 'supportInbox', 'supportEscalations', 'professionalReports', 'rightsAdminList', 'operationsView'];
+      const empty = ['metrics', 'campaigns', 'scale', 'scaleCatalog', 'importPreview', 'importHistory', 'campaignProgress', 'analyticsView', 'slotList', 'appointmentList', 'appointmentCalendar', 'contentList', 'caseList', 'caseExceptionSummary', 'supportInbox', 'supportEscalations', 'professionalReports', 'rightsAdminList', 'operationsView', 'studentSearchResults'];
       for (const id of empty) document.getElementById(id)?.replaceChildren();
-      for (const id of ['campaignStatus', 'scaleCatalogStatus', 'importStatus', 'frequencyStatus', 'analyticsStatus', 'contentStatus', 'archiveStatus', 'operationsStatus', 'supportInboxStatus']) {
+      for (const id of ['campaignStatus', 'scaleCatalogStatus', 'importStatus', 'frequencyStatus', 'analyticsStatus', 'contentStatus', 'archiveStatus', 'operationsStatus', 'supportInboxStatus', 'studentSearchStatus']) {
         const node = document.getElementById(id); if (node) node.textContent = '';
       }
       const archive = document.getElementById('archiveView');
@@ -209,10 +304,25 @@
       const shared = document.getElementById('supportSharedView');
       if (shared) { shared.textContent = ''; shared.hidden = true; }
       for (const form of document.querySelectorAll('#dashboard form')) form.reset();
+      caseRecords = [];
+      cachedProfessionalReports = [];
+      const reportFilter = document.getElementById('report-state-filter'); if (reportFilter) reportFilter.value = 'pending_review';
+      $('#report-grade-filter').replaceChildren(new Option('全部年级', ''));
+      $('#case-view').value = 'default'; $('#case-state-filter').value = ''; $('#case-priority-filter').value = ''; $('#case-time-filter').value = 'all';
+      $('#case-grade-filter').replaceChildren(new Option('全部年级', '')); $('#case-class-filter').replaceChildren(new Option('全部班级', ''));
+      $('#workspaceNav').replaceChildren();
+      for (const node of document.querySelectorAll('#dashboard [data-roles]')) node.hidden = false;
+      for (const select of document.querySelectorAll('#dashboard select[data-student-picker]')) select.replaceChildren(new Option('请先搜索并选择学生', ''));
       const commit = document.getElementById('importCommit'); if (commit) commit.disabled = true;
+      if (commit) commit.textContent = '仅导入有效行';
       const supportNote = document.getElementById('support-note'); if (supportNote) supportNote.value = '';
+      for (const id of ['case-note', 'case-follow-up-due', 'rights-decision-reason', 'scale-revoke-reason', 'student-search']) { const field = document.getElementById(id); if (field) field.value = ''; }
       $('#credentialStatus').textContent = '凭证只显示一次，请通过学校批准的线下渠道交付。';
       $('#revokeStatus').textContent = '共享终端遗失或人员离岗时，可撤销活跃会话及未兑换凭证。';
+      appointmentSlots = []; appointmentRecords = []; appointmentCalendarDate = new Date(); appointmentCalendarView = 'week';
+      $('#appointmentCounselorFilter').replaceChildren(new Option('全部咨询师', ''));
+      $('#appointmentRoomFilter').value = ''; $('#appointmentFromFilter').value = ''; $('#appointmentToFilter').value = ''; $('#appointmentStateFilter').value = 'all';
+      $('#appointmentCalendarWindow').textContent = ''; $('#appointmentTimezone').textContent = '';
     }
 
     $('#login').addEventListener('submit', async (event) => {
@@ -227,6 +337,8 @@
         clearDashboard();
         token = payload.data.token;
         currentRole = payload.data.user.role || '';
+        currentUserId = payload.data.user.id || '';
+        applyRoleWorkspace();
         $('#scaleDraftDetails').hidden = currentRole !== 'professional_lead';
         $('#dashboard').hidden = false;
         setStatus('已登录：' + payload.data.user.displayName);
@@ -234,38 +346,118 @@
       } catch (error) { if (loginEpoch === sessionEpoch) setStatus(error.message); }
     });
 
+    function applyRoleWorkspace() {
+      const panels = [...document.querySelectorAll('#dashboard .workspace-panel')];
+      for (const node of document.querySelectorAll('#dashboard [data-roles]')) {
+        const roles = node.dataset.roles.split(',').map((role) => role.trim());
+        node.hidden = !roles.includes(currentRole);
+      }
+      $('#slot-counselor').required = currentRole !== 'counselor';
+      const visiblePanels = panels.filter((panel) => !panel.hidden);
+      $('#workspaceNav').innerHTML = visiblePanels.map((panel) => `<a href="#${esc(panel.id)}">${esc(panel.querySelector('h2')?.textContent || '工作台')}</a>`).join('');
+      if (!visiblePanels.length) $('#workspaceNav').innerHTML = '<span class="muted">当前角色没有可显示的工作台模块。</span>';
+    }
+
     async function load() {
       const epoch = sessionEpoch;
       if (!isActiveSession(epoch)) return;
       try {
         const headers = { authorization: 'Bearer ' + token };
-        const overview = await fetch('/v1/admin/overview', { headers }).then((response) => response.json());
-        if (!overview.data) throw new Error(overview.error?.message || '无权访问');
+        const is = (...roles) => roles.includes(currentRole);
+        const jobs = {};
+        const get = async (path) => {
+          const response = await fetch(path, { headers });
+          const result = await readJson(response);
+          if (!response.ok) throw new Error(result.error?.message || '工作台数据暂时不可用');
+          return result.data;
+        };
+        if (is('school_admin', 'professional_lead', 'privacy_auditor')) jobs.overview = get('/v1/admin/overview');
+        if (is('school_admin')) jobs.importBatches = get('/v1/imports?limit=20');
+        if (is('school_admin', 'professional_lead', 'counselor', 'teacher')) jobs.campaigns = get('/v1/admin/campaigns');
+        if (is('school_admin', 'professional_lead', 'counselor')) jobs.scales = get('/v1/admin/scales');
+        if (is('school_admin', 'professional_lead', 'counselor')) {
+          jobs.slots = get('/v1/availability-slots');
+          jobs.appointments = get('/v1/appointments');
+          if (is('school_admin', 'professional_lead')) jobs.appointmentDirectory = get('/v1/admin/professionals?purpose=appointment');
+        }
+        if (is('school_admin', 'professional_lead')) {
+          jobs.content = get('/v1/content');
+        }
+        if (is('professional_lead')) jobs.caseDirectory = get('/v1/admin/professionals?purpose=case_assignment');
+        if (is('professional_lead', 'counselor')) {
+          jobs.cases = get('/v1/cases');
+          jobs.supportRequests = get('/v1/professional/support-requests');
+          jobs.reports = get('/v1/reports');
+        }
+        if (is('professional_lead', 'privacy_auditor')) jobs.rights = get('/v1/admin/rights-requests');
+        const data = await Object.fromEntries(await Promise.all(Object.entries(jobs).map(async ([key, promise]) => [key, await promise])));
         if (!isActiveSession(epoch)) return;
-        $('#metrics').innerHTML = Object.entries(overview.data).filter(([key]) => key !== 'note').map(([key, value]) => `<span class="metric"><b>${esc(key)}</b><br>${esc(value === null ? '已抑制' : value)}</span>`).join('');
-        const [campaigns, scales, slots, appointments, content, cases, rights, supportRequests] = await Promise.all([
-          fetch('/v1/admin/campaigns', { headers }).then((response) => response.json()),
-          fetch('/v1/admin/scales', { headers }).then((response) => response.json()),
-          fetch('/v1/availability-slots', { headers }).then((response) => response.json()),
-          fetch('/v1/appointments', { headers }).then((response) => response.json()),
-          fetch('/v1/content', { headers }).then((response) => response.json()),
-          fetch('/v1/cases', { headers }).then((response) => response.json()),
-          fetch('/v1/admin/rights-requests', { headers }).then((response) => response.json()),
-          fetch('/v1/professional/support-requests', { headers }).then((response) => response.json()),
-        ]);
-        if (!isActiveSession(epoch)) return;
-        renderCampaigns(campaigns.data || []);
-        setScaleOptions(scales.data || []);
-        renderScaleCatalog(scales.data || []);
-        renderSlots(slots.data || []);
-        renderAppointments(appointments.data || []);
-        renderContent(content.data || []);
-        renderCases(cases.data || []);
-        renderRightsAdmin(rights.data || []);
-        renderSupportInbox(supportRequests.data || [], supportRequests.error?.message);
-        await loadSupportEscalations();
+        if (data.overview) $('#metrics').innerHTML = Object.entries(data.overview).filter(([key]) => key !== 'note').map(([key, value]) => `<span class="metric"><b>${esc(key)}</b><br>${esc(value === null ? '已抑制' : value)}</span>`).join('');
+        if (data.campaigns) {
+          renderCampaigns(data.campaigns);
+          setCampaignOptions(data.campaigns);
+        }
+        if (data.scales) { setScaleOptions(data.scales); renderScaleCatalog(data.scales); }
+        if (data.importBatches) renderImportBatches(data.importBatches);
+        if (data.slots) { appointmentSlots = data.slots; renderSlots(data.slots); }
+        if (data.appointments) { appointmentRecords = data.appointments; renderAppointments(data.appointments); }
+        if (data.appointmentDirectory) setProfessionalOptions(data.appointmentDirectory, ['slot-counselor']);
+        if (data.slots || data.appointments || data.appointmentDirectory) populateAppointmentFilters(data.appointmentDirectory || []);
+        if (data.caseDirectory) setProfessionalOptions(data.caseDirectory, ['case-assignee']);
+        if (data.content) renderContent(data.content);
+        if (data.cases) { caseRecords = data.cases; populateCaseGradeFilter(caseRecords); populateCaseClassFilter(caseRecords); applyCaseFilters(); }
+        if (data.rights) renderRightsAdmin(data.rights);
+        if (data.supportRequests) renderSupportInbox(data.supportRequests);
+        if (data.reports) { cachedProfessionalReports = data.reports; populateReportGradeFilter(cachedProfessionalReports); renderProfessionalReports(cachedProfessionalReports); }
+        if (is('professional_lead')) await loadSupportEscalations();
+        if (is('platform_ops')) await loadOperations();
       } catch (error) { if (isActiveSession(epoch)) setStatus(error.message); }
     }
+
+    function setCampaignOptions(campaigns) {
+      const options = campaigns.map((campaign) => new Option(`${campaign.name} · ${campaignStateLabel[campaign.state] || campaign.state}`, campaign.id));
+      const select = $('#frequency-campaign');
+      select.replaceChildren(new Option('选择任务', ''), ...options);
+    }
+    function setProfessionalOptions(professionals, ids) {
+      for (const id of ids) {
+        const select = $('#' + id);
+        if (!select) continue;
+        select.replaceChildren(new Option('请选择咨询师', ''), ...professionals.map((person) => new Option(`${person.displayName} · ${person.role === 'professional_lead' ? '专业负责人' : '咨询师'}`, person.id)));
+      }
+    }
+    function fillStudentPickers(students) {
+      const pickers = document.querySelectorAll('#dashboard select[data-student-picker]');
+      for (const select of pickers) {
+        const previous = select.multiple ? [...select.selectedOptions].map((option) => option.value) : [select.value];
+        const options = students.map((student) => new Option(`${student.displayName} · ${student.grade || '年级未登记'} · ${student.classId || '班级未登记'}`, student.id));
+        select.replaceChildren(...(select.multiple ? options : [new Option('请选择学生', ''), ...options]));
+        for (const option of select.options) option.selected = previous.includes(option.value);
+      }
+    }
+    $('#studentSearchForm').onsubmit = async (event) => {
+      event.preventDefault();
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
+      const search = $('#student-search').value.trim();
+      if (!search) { $('#studentSearchStatus').textContent = '请先输入学生姓名或班级。'; return; }
+      $('#studentSearchStatus').textContent = '正在搜索授权范围内的学生…';
+      try {
+        const response = await fetch('/v1/admin/students?search=' + encodeURIComponent(search), { headers: { authorization: 'Bearer ' + token } });
+        const result = await readJson(response);
+        if (!response.ok) throw new Error(result.error?.message || '学生搜索暂时不可用');
+        if (!isActiveSession(epoch)) return;
+        const students = result.data || [];
+        fillStudentPickers(students);
+        $('#studentSearchResults').innerHTML = students.length ? `<ul>${students.map((student) => `<li>${esc(student.displayName)} · ${esc(student.grade || '年级未登记')} · ${esc(student.classId || '班级未登记')}</li>`).join('')}</ul>` : '<p class="muted">当前搜索没有匹配结果；或当前角色对这些学生没有访问权限。</p>';
+        $('#studentSearchStatus').textContent = `找到 ${students.length} 位授权范围内的学生。请在对应任务中选择对象。`;
+      } catch (error) {
+        if (!isActiveSession(epoch)) return;
+        fillStudentPickers([]);
+        $('#studentSearchResults').innerHTML = '<p class="muted">没有加载学生名单。</p>';
+        $('#studentSearchStatus').textContent = error.message || '学生搜索暂时不可用';
+      }
+    };
 
     const scaleStateLabel = { draft: '草稿', approved: '已批准', revoked: '已撤销' };
     const scalePopulationLabel = { primary: '小学', middle: '初中', high: '高中', mixed: '混合' };
@@ -336,8 +528,53 @@
       } catch (error) { if (isActiveSession(epoch)) $('#scaleCatalogStatus').textContent = error.message || '量表版本草稿保存失败'; }
     };
 
-    const appointmentStateLabel = { requested: '待确认', confirmed: '已确认', completed: '已完成', cancelled: '已取消', no_show: '未到访' };
-    const formatWhen = (value) => { const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString() : '时间不可用'; };
+    const appointmentStateLabel = { requested: '待咨询师确认', confirmed: '已确认', completed: '已完成', cancelled: '已取消', no_show: '未到访' };
+    const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const offsetLabel = (date) => { const minutes = -date.getTimezoneOffset(); const sign = minutes >= 0 ? '+' : '-'; const absolute = Math.abs(minutes); return `UTC${sign}${String(Math.floor(absolute / 60)).padStart(2, '0')}:${String(absolute % 60).padStart(2, '0')}`; };
+    const formatWhen = (value) => { const date = new Date(value); return Number.isFinite(date.getTime()) ? `${date.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })} (${localTimeZone}, ${offsetLabel(date)})` : '时间不可用'; };
+    const calendarDayKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    function calendarWeekStart(value) { const date = new Date(value); date.setHours(0, 0, 0, 0); date.setDate(date.getDate() - ((date.getDay() + 6) % 7)); return date; }
+    function appointmentCalendarRange() { const start = appointmentCalendarView === 'week' ? calendarWeekStart(appointmentCalendarDate) : new Date(appointmentCalendarDate); start.setHours(0, 0, 0, 0); const count = appointmentCalendarView === 'week' ? 7 : 1; return Array.from({ length: count }, (_, index) => { const day = new Date(start); day.setDate(start.getDate() + index); return day; }); }
+    function appointmentPassesFilters(item) {
+      const counselor = $('#appointmentCounselorFilter').value;
+      const room = $('#appointmentRoomFilter').value.trim().toLocaleLowerCase();
+      const fromValue = $('#appointmentFromFilter').value;
+      const toValue = $('#appointmentToFilter').value;
+      const time = new Date(item.startsAt).getTime();
+      const from = fromValue ? new Date(fromValue).getTime() : -Infinity;
+      const to = toValue ? new Date(toValue).getTime() : Infinity;
+      return (!counselor || item.counselorId === counselor) && (!room || item.room?.toLocaleLowerCase().includes(room)) && time >= from && time <= to;
+    }
+    function populateAppointmentFilters(directory = []) {
+      const select = $('#appointmentCounselorFilter'); const selected = select.value;
+      const people = new Map(directory.map((person) => [person.id, person.displayName]));
+      for (const record of [...appointmentSlots, ...appointmentRecords]) if (record.counselorId) people.set(record.counselorId, record.counselorName || people.get(record.counselorId) || '咨询师');
+      const options = [...people].sort((left, right) => left[1].localeCompare(right[1], 'zh-CN')).map(([id, name]) => new Option(name, id));
+      select.replaceChildren(new Option('全部咨询师', ''), ...options);
+      if (people.has(selected)) select.value = selected;
+      $('#appointmentTimezone').textContent = `所有预约时间按本机时区 ${localTimeZone} 显示（${offsetLabel(new Date())}）；服务器以 UTC 保存，确认后为双方安排 24 小时、1 小时和 15 分钟提醒。`;
+    }
+    function appointmentException(appointment) { return appointment.confirmationOverdue || appointment.notificationIssue; }
+    function renderAppointmentCalendar() {
+      const days = appointmentCalendarRange(); const first = days[0]; const last = days[days.length - 1];
+      $('#appointmentCalendarWindow').textContent = appointmentCalendarView === 'day' ? `${calendarDayKey(first)} · 日视图` : `${calendarDayKey(first)} 至 ${calendarDayKey(last)} · 周视图`;
+      $('#appointmentDayView').setAttribute('aria-pressed', String(appointmentCalendarView === 'day'));
+      $('#appointmentWeekView').setAttribute('aria-pressed', String(appointmentCalendarView === 'week'));
+      const queue = $('#appointmentStateFilter').value;
+      const slots = appointmentSlots.filter((slot) => appointmentPassesFilters(slot) && slot.status !== 'held' && queue === 'all');
+      const appointments = appointmentRecords.filter((appointment) => appointmentPassesFilters(appointment) && (queue === 'all' || queue === 'exceptions' && appointmentException(appointment) || appointment.state === queue));
+      const dayMarkup = days.map((day) => {
+        const key = calendarDayKey(day);
+        const daySlots = slots.filter((slot) => calendarDayKey(new Date(slot.startsAt)) === key);
+        const dayAppointments = appointments.filter((appointment) => calendarDayKey(new Date(appointment.startsAt)) === key);
+        const slotMarkup = daySlots.map((slot) => `<article class="calendar-event ${slot.status === 'available' ? 'available' : ''}"><b>${slot.status === 'blocked' ? '已停用' : '可用时段'} · ${esc(slot.counselorName)}</b><br>${esc(formatWhen(slot.startsAt))}–${esc(formatWhen(slot.endsAt))}${slot.room ? `<br>地点：${esc(slot.room)}` : ''}</article>`).join('');
+        const appointmentMarkup = dayAppointments.map((appointment) => `<article class="calendar-event booked"><b>${esc(appointment.studentName || '学生')} · ${esc(appointmentStateLabel[appointment.state] || appointment.state)}</b><br>${esc(formatWhen(appointment.startsAt))}–${esc(formatWhen(appointment.endsAt))} · ${esc(appointment.counselorName)}${appointment.room ? ` · ${esc(appointment.room)}` : ''}${appointmentException(appointment) ? '<br><span class="calendar-exception">需人工跟进</span>' : ''}</article>`).join('');
+        return `<section class="calendar-day"><h4>${esc(new Intl.DateTimeFormat('zh-CN', { weekday: 'short', month: 'numeric', day: 'numeric' }).format(day))}</h4>${slotMarkup}${appointmentMarkup}${!slotMarkup && !appointmentMarkup ? '<p class="muted">暂无预约或可用时段</p>' : ''}</section>`;
+      }).join('');
+      $('#appointmentCalendar').innerHTML = `<div class="calendar-grid ${appointmentCalendarView === 'day' ? 'day-view' : ''}">${dayMarkup}</div>`;
+    }
+    const elapsedLabel = (value) => { const minutes = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 60_000)); return minutes < 60 ? `${minutes} 分钟` : minutes < 1440 ? `${Math.floor(minutes / 60)} 小时` : `${Math.floor(minutes / 1440)} 天`; };
+    const elapsedMinutesLabel = (value) => { const minutes = Math.max(0, Number.isFinite(Number(value)) ? Math.floor(Number(value)) : 0); return minutes < 60 ? `${minutes} 分钟` : minutes < 1440 ? `${Math.floor(minutes / 60)} 小时` : `${Math.floor(minutes / 1440)} 天`; };
     function parseCsvClient(text) {
       const source = text.replace(/^\uFEFF/, '');
       if (new Blob([source]).size > 2_000_000) throw new Error('CSV 文件大小超出限制');
@@ -372,14 +609,68 @@
       if (rows.length < 2) throw new Error('CSV 至少需要表头和一行数据');
       const headers = rows[0].map((header) => header.trim());
       if (!headers.length || headers.length > 100 || headers.some((header) => !header) || new Set(headers).size !== headers.length || rows.slice(1).some((values) => values.length > headers.length)) throw new Error('CSV 表头无效或数据列超出范围');
-      return rows.slice(1).map((values) => {
-        const raw = Object.fromEntries(headers.map((header, index) => [header, values[index] || '']));
-        return { ...raw, age: Number(raw.age), guardianVerified: raw.guardianVerified === 'true' };
+      const originalRows = rows.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] || ''])));
+      const mappedRows = originalRows.map((raw) => {
+        const guardianText = String(raw.guardianVerified ?? '').trim();
+        const normalizedGuardian = guardianText.toLowerCase();
+        const guardianVerified = normalizedGuardian === '' || normalizedGuardian === 'false' ? false : normalizedGuardian === 'true' ? true : guardianText;
+        return { ...raw, guardianVerified };
+      });
+      return { rows: mappedRows, originalRows };
+    }
+    function csvCell(value) {
+      let text = String(value ?? '');
+      if (/^\s*[=+\-@]/.test(text)) text = `'${text}`;
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    function downloadImportErrors() {
+      const pending = pendingImport;
+      if (!pending || !pending.errorRows?.length) return;
+      const headers = [...new Set(pending.originalRows.flatMap((row) => Object.keys(row)))];
+      const rows = [['文件行号', '错误原因', ...headers], ...pending.errorRows.map((result) => {
+        const source = pending.originalRows[result.rowNumber - 1] || {};
+        return [result.rowNumber + 1, result.message || '字段无效', ...headers.map((header) => source[header])];
+      })];
+      const csv = '\uFEFF' + rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+      const link = document.createElement('a');
+      link.href = url; link.download = `campus-mind-import-errors-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    const importBatchStatusLabel = { previewed: '待导入', committed: '已导入', rejected: '已取消', partially_rolled_back: '部分回滚', rolled_back: '已回滚' };
+    function renderImportBatches(batches) {
+      $('#importHistory').innerHTML = batches.length ? batches.map((batch) => {
+        const canRollback = ['committed', 'partially_rolled_back'].includes(batch.status) && (batch.createdCount !== undefined || batch.auditEventId);
+        const stats = batch.status === 'previewed' ? `${batch.rowCount} 行 · ${batch.validRowCount} 行有效待导入 · ${batch.duplicateCount || 0} 行重复 · ${batch.errorCount} 行错误` : batch.createdCount === undefined ? `${batch.rowCount} 行 · ${batch.validRowCount} 行预检有效 · ${batch.errorCount} 行错误` : `${batch.createdCount} 新增 · ${batch.duplicateCount || 0} 重复 · ${batch.skippedCount || 0} 跳过`;
+        return `<article class="metric"><b>${esc(importBatchStatusLabel[batch.status] || batch.status)}</b> · ${esc(new Date(batch.createdAt).toLocaleString('zh-CN'))}<br>${stats}<br>批次：${esc(batch.id)}${batch.auditEventId ? `<br>导入审计编号：${esc(batch.auditEventId)}` : ''}${batch.rolledBackCount !== undefined ? `<br>已回滚：${esc(batch.rolledBackCount)} · 因关联记录保留：${esc(batch.rollbackBlockedCount || 0)}${batch.rollbackAuditEventId ? ` · 回滚审计编号：${esc(batch.rollbackAuditEventId)}` : ''}` : ''}${canRollback ? `<br><button type="button" class="secondary" data-import-rollback="${esc(batch.id)}">回滚此批次</button>` : ''}</article>`;
+      }).join('') : '<p class="muted">暂无导入批次。</p>';
+      document.querySelectorAll('[data-import-rollback]').forEach((button) => {
+        button.onclick = () => rollbackImportBatch(button.dataset.importRollback);
       });
     }
+    async function rollbackImportBatch(batchId) {
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch) || !window.confirm('系统只会停用本批次新建且没有后续关联记录的学生；有关联记录的学生会保留并列入部分回滚结果。确定继续？')) return;
+      try {
+        const response = await fetch(`/v1/imports/${encodeURIComponent(batchId)}/rollback`, { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: '{}' });
+        const result = await readJson(response);
+        if (!response.ok) throw new Error(result.error?.message || '批次回滚失败');
+        if (!isActiveSession(epoch)) return;
+        $('#importStatus').textContent = `批次${result.data.status === 'rolled_back' ? '回滚完成' : '部分回滚'}：${result.data.rolledBackCount || 0} 名已停用，${result.data.rollbackBlockedCount || 0} 名因已有后续记录而保留。回滚审计编号：${result.data.rollbackAuditEventId || '已记录'}`;
+        await load();
+      } catch (error) { if (isActiveSession(epoch)) $('#importStatus').textContent = error.message || '批次回滚失败'; }
+    }
+    $('#import-csv').addEventListener('input', () => {
+      if (!pendingImport) return;
+      pendingImport = null;
+      $('#importCommit').disabled = true;
+      $('#importCommit').textContent = '仅导入有效行';
+      $('#importPreview').innerHTML = '<p class="muted">名单内容已修改，请重新预检后再导入。</p>';
+    });
     $('#import-file').onchange = async (event) => {
       const file = event.target.files[0];
       if (!file) return;
+      pendingImport = null; $('#importCommit').disabled = true; $('#importCommit').textContent = '仅导入有效行';
       const epoch = sessionEpoch;
       if (!isActiveSession(epoch)) return;
       try { if (file.size > 2_000_000) throw new Error('CSV 文件大小超出限制'); const text = await file.text(); if (!isActiveSession(epoch)) return; $('#import-csv').value = text; $('#importStatus').textContent = '已读取文件，请先预检。'; }
@@ -390,19 +681,27 @@
       const epoch = sessionEpoch;
       if (!isActiveSession(epoch)) return;
       try {
-        const rows = parseCsvClient($('#import-csv').value);
+        const parsed = parseCsvClient($('#import-csv').value);
+        const rows = parsed.rows;
         const file = $('#import-file').files[0];
         const response = await fetch('/v1/imports/preview', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ schoolId: 'school-demo', filename: file?.name || 'pasted-students.csv', rows }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '导入预检失败');
         if (!isActiveSession(epoch)) return;
-        pendingImport = { batchId: result.data.batch.id, rows };
-        $('#importCommit').disabled = false;
+        const errorRows = (result.data.rows || []).filter((row) => row.status === 'error');
+        const duplicateRows = (result.data.rows || []).filter((row) => row.status === 'duplicate');
+        pendingImport = { batchId: result.data.batch.id, rows, originalRows: parsed.originalRows, errorRows };
         const batch = result.data.batch;
-        const errors = (result.data.rows || []).filter((row) => row.status === 'error').slice(0, 50);
-        const errorList = errors.length ? `<ul>${errors.map((row) => `<li>第 ${esc(row.rowNumber)} 行：${esc(row.message || '字段无效')}</li>`).join('')}</ul>${batch.errorCount > errors.length ? `<p class="muted">仅显示前 ${errors.length} 条错误。</p>` : ''}` : '<p class="muted">没有发现字段错误。</p>';
-        $('#importPreview').innerHTML = `<p>批次 ${esc(batch.id)}：共 ${esc(batch.rowCount)} 行，${esc(batch.validRowCount)} 行可导入，${esc(batch.errorCount)} 行有错误。</p>${errorList}`;
-        $('#importStatus').textContent = '预检完成；确认前可修改内容并重新预检。';
+        $('#importCommit').disabled = batch.validRowCount === 0;
+        $('#importCommit').textContent = batch.validRowCount ? `仅导入 ${batch.validRowCount} 行有效记录` : '没有可导入的有效行';
+        const errors = errorRows.slice(0, 50);
+        const errorList = errors.length ? `<details open><summary>错误行原因（${batch.errorCount}）</summary><ul>${errors.map((row) => `<li>文件第 ${esc(row.rowNumber + 1)} 行：${esc(row.message || '字段无效')}</li>`).join('')}</ul>${batch.errorCount > errors.length ? `<p class="muted">仅展示前 ${errors.length} 条；可下载完整错误 CSV。</p>` : ''}</details><button id="downloadImportErrors" type="button" class="secondary">下载错误 CSV（${batch.errorCount} 行）</button>` : '<p class="muted">没有发现字段错误。</p>';
+        const duplicates = duplicateRows.slice(0, 50);
+        const duplicateList = duplicates.length ? `<details><summary>重复行（${batch.duplicateCount}，提交时会跳过）</summary><ul>${duplicates.map((row) => `<li>文件第 ${esc(row.rowNumber + 1)} 行：${esc(row.message || '与现有名单重复')}</li>`).join('')}</ul>${batch.duplicateCount > duplicates.length ? '<p class="muted">仅展示前 50 条重复行。</p>' : ''}</details>` : '<p class="muted">未发现重复行。</p>';
+        $('#importPreview').innerHTML = `<p>预检结果：共 ${esc(batch.rowCount)} 行 · ${esc(batch.validRowCount)} 行有效可导入 · ${esc(batch.duplicateCount || 0)} 行重复 · ${esc(batch.errorCount)} 行错误。</p><p class="muted">确认后只创建有效新记录；错误行和重复行会分别计数并跳过，原上传内容不会保存在服务端。</p>${errorList}${duplicateList}`;
+        $('#downloadImportErrors')?.addEventListener('click', downloadImportErrors);
+        $('#importStatus').textContent = batch.validRowCount ? '预检完成；可仅导入有效行，也可修正后重新预检。' : '预检完成；没有有效新记录可导入。';
+        await load();
       } catch (error) { if (isActiveSession(epoch)) { pendingImport = null; $('#importCommit').disabled = true; $('#importStatus').textContent = error.message || '导入预检失败'; } }
     };
     $('#importCommit').onclick = async () => {
@@ -414,17 +713,17 @@
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '确认导入失败');
         if (!isActiveSession(epoch)) return;
-        $('#importStatus').textContent = `名单导入完成（${result.data.id}），新学生仍需参与/监护流程后才能进入测评。`;
-        pendingImport = null; $('#importCommit').disabled = true; await load();
+        $('#importStatus').textContent = `导入完成：${result.data.createdCount || 0} 新增、${result.data.duplicateCount || 0} 重复、${result.data.skippedCount || 0} 跳过。审计编号：${result.data.auditEventId || '已记录'}。新学生仍需参与/监护流程后才能进入测评。`;
+        pendingImport = null; $('#importCommit').disabled = true; $('#importCommit').textContent = '仅导入有效行'; await load();
       } catch (error) { if (isActiveSession(epoch)) $('#importStatus').textContent = error.message || '确认导入失败'; }
     };
     const campaignStateLabel = { draft: '草稿', approved: '已批准', scheduled: '已排期', open: '开放中', paused: '已暂停', closed: '已关闭', cancelled: '已取消', archived: '已归档' };
     function renderCampaigns(campaigns) {
       $('#campaigns').innerHTML = campaigns.length ? campaigns.map((campaign) => {
-        const publish = ['draft', 'approved'].includes(campaign.state) ? `<button type="button" data-campaign-id="${esc(campaign.id)}" data-campaign-action="publish">发布任务</button>` : '';
-        const pause = ['scheduled', 'open'].includes(campaign.state) ? `<button type="button" class="secondary" data-campaign-id="${esc(campaign.id)}" data-campaign-action="paused">暂停</button>` : '';
-        const progress = `<button type="button" class="secondary" data-campaign-id="${esc(campaign.id)}" data-campaign-action="progress">查看进度</button>`;
-        return `<article class="metric"><b>${esc(campaign.name)}</b><br>${esc(campaignStateLabel[campaign.state] || campaign.state)} · ${esc(campaign.purpose)} · ${esc(campaign.participantCount)} 人<br><span class="muted">编号：${esc(campaign.id)}</span>${publish || pause || progress ? `<br>${publish} ${pause} ${progress}` : ''}</article>`;
+        const publish = currentRole === 'school_admin' && ['draft', 'approved'].includes(campaign.state) ? `<button type="button" data-campaign-id="${esc(campaign.id)}" data-campaign-action="publish">发布任务</button>` : '';
+        const pause = currentRole === 'school_admin' && ['scheduled', 'open'].includes(campaign.state) ? `<button type="button" class="secondary" data-campaign-id="${esc(campaign.id)}" data-campaign-action="paused">暂停</button>` : '';
+        const progress = currentRole === 'teacher' ? `<button type="button" class="secondary" data-campaign-id="${esc(campaign.id)}" data-campaign-action="progress">查看进度</button>` : '';
+        return `<article class="metric"><b>${esc(campaign.name)}</b><br>${esc(campaignStateLabel[campaign.state] || campaign.state)} · ${esc(campaign.purpose)} · ${esc(campaign.participantCount)} 人${publish || pause || progress ? `<br>${publish} ${pause} ${progress}` : ''}</article>`;
       }).join('') : '<p class="muted">暂无任务</p>';
       document.querySelectorAll('[data-campaign-id]').forEach((button) => { button.onclick = () => updateCampaign(button.dataset.campaignId, button.dataset.campaignAction); });
     }
@@ -454,7 +753,8 @@
     function renderAnalytics(value) {
       if (!value) { $('#analyticsView').innerHTML = '<p class="muted">尚未读取统计。</p>'; return; }
       const rows = Array.isArray(value.rows) ? value.rows : [];
-      $('#analyticsView').innerHTML = rows.length ? rows.map((row) => `<article class="metric">${Object.entries(row).map(([key, item]) => `<b>${esc(key)}</b>：${esc(item === null ? '已抑制' : item)} `).join('')}</article>`).join('') + `<p class="muted">${esc(value.note || '')}</p>` : '<p class="muted">当前范围暂无可展示聚合。</p>';
+      const threshold = Number.isInteger(value.suppressionThreshold) ? value.suppressionThreshold : 10;
+      $('#analyticsView').innerHTML = rows.length ? rows.map((row) => `<article class="metric">${Object.entries(row).map(([key, item]) => `<b>${esc(key)}</b>：${esc(item === null ? `已抑制（样本少于 ${threshold}）` : item)} `).join('')}</article>`).join('') + `<p class="muted">${esc(value.note || '')}</p>` : '<p class="muted">当前范围暂无可展示聚合。</p>';
     }
     async function loadAnalytics() {
       const epoch = sessionEpoch;
@@ -477,11 +777,28 @@
       document.querySelectorAll('[data-slot-id]').forEach((button) => { button.onclick = () => updateSlot(button.dataset.slotId, button.dataset.slotStatus); });
     }
     function renderAppointments(appointments) {
-      $('#appointmentList').innerHTML = appointments.length ? appointments.map((appointment) => {
-        const actions = appointment.state === 'requested' ? `<button type="button" data-appointment-id="${esc(appointment.id)}" data-appointment-state="confirmed">确认</button> <button type="button" class="secondary" data-appointment-id="${esc(appointment.id)}" data-appointment-state="cancelled">取消</button>` : appointment.state === 'confirmed' ? `<button type="button" data-appointment-id="${esc(appointment.id)}" data-appointment-state="completed">完成</button> <button type="button" class="secondary" data-appointment-id="${esc(appointment.id)}" data-appointment-state="no_show">标记未到访</button>` : '';
-        return `<p class="task"><b>${esc(appointment.studentId || '学生')}</b> · ${esc(appointmentStateLabel[appointment.state] || appointment.state)}<br>${esc(formatWhen(appointment.startsAt))}–${esc(formatWhen(appointment.endsAt))} · ${esc(appointment.counselorName)}${appointment.room ? ` · ${esc(appointment.room)}` : ''}<br>${actions}</p>`;
-      }).join('') : '<p class="muted">暂无预约</p>';
+      const queue = $('#appointmentStateFilter').value;
+      const filtered = appointments.filter((appointment) => appointmentPassesFilters(appointment) && (queue === 'all' || queue === 'exceptions' && appointmentException(appointment) || appointment.state === queue));
+      $('#appointmentList').innerHTML = filtered.length ? filtered.map((appointment) => {
+        const appointmentEnded = new Date(appointment.endsAt).getTime() <= Date.now();
+        const appointmentFuture = new Date(appointment.startsAt).getTime() > Date.now();
+        const actions = appointment.state === 'requested'
+          ? `${appointmentFuture ? `<button type="button" data-appointment-id="${esc(appointment.id)}" data-appointment-state="confirmed">确认预约</button>` : '<span class="muted">预约时间已开始，不能再确认</span>'}<button type="button" class="secondary" data-appointment-id="${esc(appointment.id)}" data-appointment-state="cancelled">${appointmentFuture ? '取消' : '关闭已过期申请'}</button>`
+          : appointment.state === 'confirmed' && appointmentEnded
+            ? `<button type="button" data-appointment-id="${esc(appointment.id)}" data-appointment-state="completed">记录已完成</button> <button type="button" class="secondary" data-appointment-id="${esc(appointment.id)}" data-appointment-state="no_show">标记未到访</button>`
+            : appointment.state === 'confirmed' && appointmentFuture
+              ? `<button type="button" class="secondary" data-appointment-id="${esc(appointment.id)}" data-appointment-state="cancelled">取消</button>` : '';
+        const choices = appointmentSlots.filter((slot) => slot.status === 'available' && slot.startsAt !== appointment.startsAt).map((slot) => `<option value="${esc(slot.id)}">${esc(formatWhen(slot.startsAt))} · ${esc(slot.counselorName)}${slot.room ? ` · ${esc(slot.room)}` : ''}</option>`).join('');
+        const canReschedule = ['requested', 'confirmed'].includes(appointment.state) && appointmentFuture && choices;
+        const reschedule = canReschedule ? `<div class="appointment-actions"><label for="rescheduleSlot-${esc(appointment.id)}">改期到<select id="rescheduleSlot-${esc(appointment.id)}" data-reschedule-slot="${esc(appointment.id)}"><option value="">选择可用时段</option>${choices}</select></label><button type="button" class="secondary" data-reschedule-appointment="${esc(appointment.id)}">提交改期（需重新确认）</button></div>` : '';
+        const exception = appointment.confirmationOverdue ? `<p class="calendar-exception">异常队列：已等待确认 ${esc(elapsedMinutesLabel(appointment.waitingMinutes))}（分流阈值 ${esc(elapsedMinutesLabel(appointment.confirmationSlaMinutes))}）。</p>` : '';
+        const notification = appointment.notificationIssue === 'failed' ? '<p class="calendar-exception">通知发送失败：请人工联系学生和咨询师确认。</p>' : appointment.notificationIssue === 'retrying' ? '<p class="calendar-exception">通知发送重试中：如临近预约，请人工确认双方已知情。</p>' : '';
+        const waiting = appointment.state === 'requested' ? `<span class="muted">等待 ${esc(appointment.waitingMinutes)} 分钟 · 下一责任人：${esc(appointment.counselorName)}</span>` : '';
+        return `<article class="task"><b>${esc(appointment.studentName || '学生')}</b> · ${esc(appointment.classId || '班级未登记')} · ${esc(appointmentStateLabel[appointment.state] || appointment.state)}<br>${esc(formatWhen(appointment.startsAt))}–${esc(formatWhen(appointment.endsAt))} · ${esc(appointment.counselorName)}${appointment.room ? ` · ${esc(appointment.room)}` : ''}<br>${waiting}${exception}${notification}${actions || reschedule ? `<div class="appointment-actions">${actions}</div>${reschedule}` : ''}</article>`;
+      }).join('') : queue === 'exceptions' ? '<p class="muted">异常队列为空。</p>' : '<p class="muted">当前筛选范围暂无预约。</p>';
       document.querySelectorAll('[data-appointment-id]').forEach((button) => { button.onclick = () => updateAppointment(button.dataset.appointmentId, button.dataset.appointmentState); });
+      document.querySelectorAll('[data-reschedule-appointment]').forEach((button) => { button.onclick = () => rescheduleStaffAppointment(button.dataset.rescheduleAppointment); });
+      renderAppointmentCalendar();
     }
     async function updateSlot(slotId, status) {
       const epoch = sessionEpoch;
@@ -498,6 +815,8 @@
     async function updateAppointment(appointmentId, state) {
       const epoch = sessionEpoch;
       if (!isActiveSession(epoch)) return;
+      const actionLabel = { confirmed: '确认这个预约并通知学生与咨询师吗？', cancelled: '确认取消这个预约并释放时段吗？', completed: '确认记录为已完成吗？', no_show: '确认记录为未到访吗？' }[state] || '确认更新预约状态吗？';
+      if (!window.confirm(actionLabel)) return;
       try {
         const response = await fetch('/v1/appointments/' + encodeURIComponent(appointmentId) + '/state', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ state }) });
         const result = await response.json();
@@ -507,13 +826,37 @@
         await load();
       } catch (error) { if (isActiveSession(epoch)) setStatus(error.message); }
     }
+    async function rescheduleStaffAppointment(appointmentId) {
+      const slotId = document.querySelector(`[data-reschedule-slot="${CSS.escape(appointmentId)}"]`)?.value;
+      const slot = appointmentSlots.find((candidate) => candidate.id === slotId);
+      if (!slotId || !slot) { setStatus('请先选择一个可用时段。'); return; }
+      if (!window.confirm(`将该预约改期至 ${formatWhen(slot.startsAt)} · ${slot.counselorName}？双方会收到变更提醒，预约需重新确认。`)) return;
+      const epoch = sessionEpoch;
+      if (!isActiveSession(epoch)) return;
+      try {
+        const response = await fetch('/v1/appointments/' + encodeURIComponent(appointmentId) + '/reschedule', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ slotId }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || '预约改期失败');
+        if (!isActiveSession(epoch)) return;
+        setStatus('改期已提交；旧时段已释放，新时段等待重新确认。');
+        await load();
+      } catch (error) { if (isActiveSession(epoch)) setStatus(error.message); }
+    }
+    for (const id of ['appointmentCounselorFilter', 'appointmentRoomFilter', 'appointmentFromFilter', 'appointmentToFilter', 'appointmentStateFilter']) {
+      const control = $('#' + id); control.addEventListener(control.tagName === 'SELECT' ? 'change' : 'input', () => renderAppointments(appointmentRecords));
+    }
+    $('#appointmentDayView').addEventListener('click', () => { appointmentCalendarView = 'day'; renderAppointmentCalendar(); });
+    $('#appointmentWeekView').addEventListener('click', () => { appointmentCalendarView = 'week'; renderAppointmentCalendar(); });
+    $('#appointmentPrevious').addEventListener('click', () => { appointmentCalendarDate.setDate(appointmentCalendarDate.getDate() - (appointmentCalendarView === 'week' ? 7 : 1)); renderAppointmentCalendar(); });
+    $('#appointmentNext').addEventListener('click', () => { appointmentCalendarDate.setDate(appointmentCalendarDate.getDate() + (appointmentCalendarView === 'week' ? 7 : 1)); renderAppointmentCalendar(); });
+    $('#appointmentToday').addEventListener('click', () => { appointmentCalendarDate = new Date(); renderAppointmentCalendar(); });
 
     const contentStateLabel = { draft: '草稿', professional_review: '待专业审核', published: '已发布', retired: '已下架' };
     function renderContent(items) {
       $('#contentList').innerHTML = items.length ? items.map((item) => {
-        const action = item.state === 'published' ? `<button type="button" class="secondary" data-content-id="${esc(item.id)}" data-content-action="retire">下架</button>` : ['draft', 'professional_review'].includes(item.state) ? `<button type="button" data-content-id="${esc(item.id)}" data-content-action="publish">提交发布审核</button>` : '';
-        const media = item.media ? `<br>媒体：${esc(item.media.filename)}（${esc(item.media.kind)}）` : '';
-        return `<article class="metric"><b>${esc(item.title)}</b><br>${esc(contentStateLabel[item.state] || item.state)} · ${esc(item.kind)} · ${esc(item.ageMin)}–${esc(item.ageMax)} 岁${media}<br><span class="muted">${esc(item.body || '')}</span>${action ? `<br>${action}` : ''}</article>`;
+        const action = item.state === 'published' ? `<button type="button" class="secondary" data-content-id="${esc(item.id)}" data-content-action="retire">下架</button>` : currentRole === 'professional_lead' && ['draft', 'professional_review'].includes(item.state) ? `<button type="button" data-content-id="${esc(item.id)}" data-content-action="publish">提交发布审核</button>` : '';
+        const media = item.media ? `<br>媒体：${esc(item.media.filename)}（${esc(item.media.kind)}）${item.subtitle ? ` · 字幕：${esc(item.subtitle.filename)}` : ''}` : '';
+        return `<article class="metric"><b>${esc(item.title)}</b><br>${esc(contentStateLabel[item.state] || item.state)} · ${esc(item.kind)} · ${esc(item.category || 'general')} · ${esc(item.ageMin)}–${esc(item.ageMax)} 岁${media}<br><span class="muted">${esc(item.body || '')}</span>${action ? `<br>${action}` : ''}</article>`;
       }).join('') : '<p class="muted">暂无教育内容</p>';
       document.querySelectorAll('[data-content-id]').forEach((button) => { button.onclick = () => updateContent(button.dataset.contentId, button.dataset.contentAction); });
     }
@@ -537,20 +880,118 @@
       return btoa(binary);
     }
 
-    const caseStateLabel = { pending_review: '待人工复核', dismissed: '已排除', confirmed: '已确认', assigned: '已指派', in_support: '支持中', follow_up: '随访中', closure_requested: '待独立结案审批', closed: '已结案' };
+    const caseStateLabel = { pending_review: '待复核', dismissed: '已排除', confirmed: '待指派', assigned: '待接单', in_support: '已接单·待安排随访', follow_up: '随访中', closure_requested: '待独立结案审核', closed: '已结案' };
     const casePriorityLabel = { attention: '一般关注', urgent: '加急关注' };
+    const caseLaneDefinitions = [
+      { id: 'pending_review', title: '待复核', states: ['pending_review'] },
+      { id: 'pending_assignment', title: '待指派', states: ['confirmed'] },
+      { id: 'pending_acknowledgement', title: '待接单', states: ['assigned'] },
+      { id: 'follow_up', title: '随访中', states: ['in_support', 'follow_up'] },
+      { id: 'pending_closure', title: '待结案', states: ['closure_requested'] },
+    ];
+    const caseExceptionLabel = { unassigned: '尚未指派', not_accepted: '逾期未接单', notification_failed: '通知发送失败', deadline_overdue: '处理期限已逾期', deadline_unconfigured: '处理期限未配置', closure_request_unattributed: '缺少结案申请人' };
+    function populateCaseClassFilter(cases) {
+      const select = $('#case-class-filter');
+      const selected = select.value;
+      const classes = [...new Set(cases.map((riskCase) => riskCase.classId).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+      select.replaceChildren(new Option('全部班级', ''), ...classes.map((classId) => new Option(classId, classId)));
+      if (classes.includes(selected)) select.value = selected;
+    }
+    function populateCaseGradeFilter(cases) {
+      const select = $('#case-grade-filter');
+      const selected = select.value;
+      const grades = [...new Set(cases.map((riskCase) => riskCase.grade || '__missing__'))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+      select.replaceChildren(new Option('全部年级', ''), ...grades.map((grade) => new Option(grade === '__missing__' ? '年级未登记' : grade, grade)));
+      if (grades.includes(selected)) select.value = selected;
+    }
+    function applyCaseFilters() {
+      const queue = $('#case-view').value;
+      const state = $('#case-state-filter').value;
+      const priority = $('#case-priority-filter').value;
+      const days = $('#case-time-filter').value;
+      const grade = $('#case-grade-filter').value;
+      const classId = $('#case-class-filter').value;
+      const cutoff = days === 'all' ? 0 : Date.now() - Number(days) * 86_400_000;
+      const filtered = caseRecords.filter((riskCase) => {
+        if (queue === 'mine' && riskCase.assignedTo !== currentUserId) return false;
+        if (queue === 'pending_review' && riskCase.state !== 'pending_review') return false;
+        if (queue === 'confirmed' && riskCase.state !== 'confirmed') return false;
+        if (queue === 'assigned' && riskCase.state !== 'assigned') return false;
+        if (queue === 'follow_up' && !['in_support', 'follow_up'].includes(riskCase.state)) return false;
+        if (queue === 'closure_requested' && riskCase.state !== 'closure_requested') return false;
+        if (queue === 'exceptions' && !riskCase.exception) return false;
+        if (queue === 'overdue' && !riskCase.overdue) return false;
+        if (queue === 'default' && riskCase.assignedTo !== currentUserId && !['pending_review', 'closure_requested'].includes(riskCase.state) && !riskCase.overdue && !riskCase.exception) return false;
+        if (state && riskCase.state !== state) return false;
+        if (priority && riskCase.priority !== priority) return false;
+        if (cutoff && Date.parse(riskCase.createdAt) < cutoff) return false;
+        if (grade && (riskCase.grade || '__missing__') !== grade) return false;
+        if (classId && riskCase.classId !== classId) return false;
+        return true;
+      });
+      renderCases(filtered);
+    }
     function renderCases(cases) {
-      $('#caseList').innerHTML = cases.length ? cases.map((riskCase) => {
+      const exceptions = caseRecords.filter((riskCase) => riskCase.exception);
+      $('#caseExceptionSummary').innerHTML = `<b>异常队列：${exceptions.length} 项</b> · 包含未指派、逾期未接单、通知发送失败、缺少结案申请人或期限未配置事项。<button type="button" class="secondary" data-open-exceptions>查看异常队列</button>`;
+      const queue = $('#case-view').value;
+      if (queue === 'exceptions') {
+        $('#caseList').innerHTML = cases.length ? `<h3>异常事项</h3>${cases.map(renderCaseCard).join('')}` : '<p class="muted">当前没有异常事项。</p>';
+        bindCaseCardActions();
+        return;
+      }
+      const visibleCases = cases.filter((riskCase) => !['closed', 'dismissed'].includes(riskCase.state));
+      const terminalCases = cases.filter((riskCase) => ['closed', 'dismissed'].includes(riskCase.state));
+      const lanes = caseLaneDefinitions.map((lane) => {
+        const laneCases = visibleCases.filter((riskCase) => lane.states.includes(riskCase.state));
+        return `<section class="case-lane" aria-labelledby="case-lane-${lane.id}"><h3 id="case-lane-${lane.id}">${lane.title} <span class="case-lane-count">${laneCases.length}</span></h3>${laneCases.length ? laneCases.map(renderCaseCard).join('') : '<p class="case-board-empty">暂无事项</p>'}</section>`;
+      }).join('');
+      const history = terminalCases.length ? `<section class="case-history" aria-labelledby="case-history-heading"><h3 id="case-history-heading">已结案 / 已排除</h3>${terminalCases.map(renderCaseCard).join('')}</section>` : '';
+      $('#caseList').innerHTML = visibleCases.length || terminalCases.length ? `<div class="case-board" aria-label="危机线索处理分栏">${lanes}</div>${history}` : '<p class="muted">当前筛选条件下没有个案事项。</p>';
+      bindCaseCardActions();
+    }
+    function renderCaseCard(riskCase) {
         let actions = '';
         if (riskCase.state === 'pending_review') actions = '<button type="button" data-case-id="' + esc(riskCase.id) + '" data-case-action="confirm">确认线索</button> <button type="button" class="secondary" data-case-id="' + esc(riskCase.id) + '" data-case-action="dismiss">排除误报</button>';
-        else if (riskCase.state === 'confirmed') actions = '<button type="button" data-case-id="' + esc(riskCase.id) + '" data-case-action="assign">指派</button>';
-        else if (riskCase.state === 'assigned') actions = '<button type="button" data-case-id="' + esc(riskCase.id) + '" data-case-action="acknowledge">确认接单</button>';
+        else if (riskCase.state === 'confirmed' && currentRole === 'professional_lead') actions = '<button type="button" data-case-id="' + esc(riskCase.id) + '" data-case-action="assign">指派</button>';
+        else if (riskCase.state === 'assigned' && riskCase.assignedTo === currentUserId) actions = '<button type="button" data-case-id="' + esc(riskCase.id) + '" data-case-action="acknowledge">确认接单</button>';
+        else if (riskCase.state === 'assigned') actions = `<span class="muted">等待 ${esc(riskCase.assignedName || '指派对象')} 确认接单</span>`;
         else if (['in_support', 'follow_up'].includes(riskCase.state)) actions = '<button type="button" data-case-id="' + esc(riskCase.id) + '" data-case-action="follow_up">记录随访</button> <button type="button" class="secondary" data-case-id="' + esc(riskCase.id) + '" data-case-action="request_closure">申请结案</button>';
-        else if (riskCase.state === 'closure_requested') actions = '<button type="button" data-case-id="' + esc(riskCase.id) + '" data-case-action="approve_closure">独立审批结案</button>';
-        return `<article class="task"><b>${esc(casePriorityLabel[riskCase.priority] || riskCase.priority)}</b> · ${esc(caseStateLabel[riskCase.state] || riskCase.state)} · ${esc(riskCase.signalCount)} 条线索<br>学生引用：${esc(riskCase.studentId)}<br>${actions}</article>`;
-      }).join('') : '<p class="muted">暂无待处理线索，或当前账号没有专业权限。</p>';
-      document.querySelectorAll('[data-case-id]').forEach((button) => { button.onclick = () => updateCase(button.dataset.caseId, button.dataset.caseAction); });
+        else if (riskCase.state === 'closure_requested' && riskCase.canApproveClosure) actions = '<button type="button" data-case-id="' + esc(riskCase.id) + '" data-case-action="approve_closure">人工独立审核并结案</button>';
+        else if (riskCase.state === 'closure_requested') actions = '<span class="muted">等待非申请人专业人员独立审核</span>';
+        const exceptionBadges = (riskCase.exceptionReasons || []).map((reason) => `<span class="case-badge">${esc(caseExceptionLabel[reason] || reason)}</span>`).join('');
+        const deadline = riskCase.deadlineAt ? (riskCase.overdue ? `已逾期 · ${formatWhen(riskCase.deadlineAt)}` : `目标期限 · ${formatWhen(riskCase.deadlineAt)}`) : ['closed', 'dismissed'].includes(riskCase.state) ? '当前阶段无需后续处理' : '处理期限未配置';
+        const cardClass = `case-card${riskCase.overdue ? ' is-overdue' : ''}${riskCase.exception ? ' has-exception' : ''}`;
+        const closureNote = riskCase.state === 'closure_requested' ? '<p class="case-stage-note">结案申请待另一位专业人员人工独立审核；系统不会自动结案。</p>' : '';
+        return `<article class="${cardClass}"><b>${esc(riskCase.studentName || '学生')}</b> · ${esc(riskCase.grade || '年级未登记')} · ${esc(riskCase.classId || '班级未登记')}<div class="case-badges">${exceptionBadges}</div><div class="case-meta">${esc(casePriorityLabel[riskCase.priority] || riskCase.priority)} · ${esc(caseStateLabel[riskCase.state] || riskCase.state)} · ${esc(riskCase.signalCount)} 条线索<br>已等待 ${esc(elapsedMinutesLabel(riskCase.waitingMinutes))} · 下一责任人：${esc(riskCase.nextOwner || '待确认')}<br>${esc(deadline)}<br>创建于 ${esc(formatWhen(riskCase.createdAt))}</div>${closureNote}<div class="case-toolbar"><button type="button" class="secondary" data-case-brief="${esc(riskCase.id)}" aria-expanded="false">查看最小必要背景</button>${actions}</div><div class="case-brief" data-case-brief-content="${esc(riskCase.id)}" hidden aria-live="polite"></div></article>`;
     }
+    function bindCaseCardActions() {
+      document.querySelectorAll('[data-case-id]').forEach((button) => { button.onclick = () => updateCase(button.dataset.caseId, button.dataset.caseAction); });
+      document.querySelectorAll('[data-case-brief]').forEach((button) => { button.onclick = () => loadCaseBrief(button); });
+      const exceptionButton = document.querySelector('[data-open-exceptions]');
+      if (exceptionButton) exceptionButton.onclick = () => { $('#case-view').value = 'exceptions'; applyCaseFilters(); };
+    }
+    async function loadCaseBrief(button) {
+      const caseId = button.dataset.caseBrief;
+      const panel = document.querySelector(`[data-case-brief-content="${CSS.escape(caseId)}"]`);
+      if (!panel) return;
+      if (!panel.hidden) { panel.hidden = true; button.setAttribute('aria-expanded', 'false'); return; }
+      panel.hidden = false; panel.textContent = '正在读取最小必要背景…'; button.setAttribute('aria-expanded', 'true');
+      const epoch = sessionEpoch;
+      try {
+        const response = await fetch('/v1/cases/' + encodeURIComponent(caseId) + '/brief', { headers: { authorization: 'Bearer ' + token } });
+        const result = await readJson(response);
+        if (!response.ok) throw new Error(result.error?.message || '背景信息暂时不可用');
+        if (!isActiveSession(epoch)) return;
+        const brief = result.data;
+        const followUp = brief.latestFollowUp ? `${brief.latestFollowUp.kind} · ${formatWhen(brief.latestFollowUp.createdAt)}${brief.latestFollowUp.dueAt ? ` · 下次期限 ${formatWhen(brief.latestFollowUp.dueAt)}` : ''}` : '尚无随访记录';
+        const acknowledgement = brief.acknowledgement?.acknowledgedAt ? `已于 ${formatWhen(brief.acknowledgement.acknowledgedAt)} 接单` : brief.acknowledgement?.pending ? '等待被指派人员确认接单' : '未记录接单信息';
+        panel.innerHTML = `<b>最小必要背景</b><dl><dt>年级 / 班级</dt><dd>${esc(brief.grade || '未登记')} / ${esc(brief.classId || '未登记')}</dd><dt>线索</dt><dd>${esc(brief.linkedSignalCount)} 条 · ${esc(formatWhen(brief.openedAt))} 创建</dd><dt>此前相关个案</dt><dd>${esc(brief.relatedCaseCount)} 项，其中进行中 ${esc(brief.openRelatedCaseCount)} 项</dd><dt>接单状态</dt><dd>${esc(acknowledgement)}</dd><dt>最近随访</dt><dd>${esc(followUp)}</dd></dl><span class="muted">${esc(brief.boundary)}</span>`;
+      } catch (error) {
+        if (isActiveSession(epoch)) panel.textContent = error.message || '背景信息暂时不可用';
+      }
+    }
+    for (const id of ['case-view', 'case-state-filter', 'case-priority-filter', 'case-time-filter', 'case-grade-filter', 'case-class-filter']) $('#' + id).onchange = applyCaseFilters;
     async function updateCase(caseId, action) {
       const epoch = sessionEpoch;
       if (!isActiveSession(epoch)) return;
@@ -560,7 +1001,12 @@
       const config = paths[action];
       if (!config) return;
       if (['confirm', 'dismiss', 'follow_up', 'request_closure'].includes(action) && !note) { setStatus('请先填写最小必要的人工说明'); return; }
-      if (action === 'assign' && !assigneeId) { setStatus('请填写专业用户编号'); return; }
+      if (action === 'assign' && !assigneeId) { setStatus('请从咨询师/专业负责人名单中选择负责人'); return; }
+      if (action === 'follow_up') {
+        const dueAt = $('#case-follow-up-due').value;
+        if (!dueAt || !Number.isFinite(Date.parse(dueAt)) || Date.parse(dueAt) <= Date.now()) { setStatus('记录随访前请设置一个未来的下次随访期限'); return; }
+        config[1].dueAt = new Date(dueAt).toISOString();
+      }
       if (action === 'approve_closure' && !window.confirm('确认由当前独立专业角色审批结案？')) return;
       try {
         const response = await fetch('/v1/cases/' + encodeURIComponent(caseId) + '/' + config[0], { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(config[1]) });
@@ -582,7 +1028,7 @@
               : request.state === 'follow_up' ? `<button type="button" data-support-id="${esc(request.id)}" data-support-action="complete">标记完成</button>` : '';
         const noteAction = ['requested', 'acknowledged', 'in_contact', 'follow_up'].includes(request.state) ? `<button type="button" class="secondary" data-support-id="${esc(request.id)}" data-support-action="note">保存支持记录</button>` : '';
         const shareAction = request.shareId && request.shareAccessible ? `<button type="button" class="secondary" data-support-share="${esc(request.shareId)}">查看已授权表达</button>` : '';
-        return `<article class="task"><b>${esc(supportStateLabel[request.state] || request.state)}</b> · 学生引用 ${esc(request.studentId)}<br><span class="muted">提交于 ${esc(formatWhen(request.createdAt))} · 响应目标 ${esc(formatWhen(request.ackDueAt))} · 版本 ${esc(request.version)}</span>${request.shareId ? `<br><span class="muted">附带表达分享：${esc(request.shareId.slice(0, 8))}（${request.shareAccessible ? '当前可读' : '已失效'}）</span>` : ''}${action || noteAction || shareAction ? `<br>${action} ${noteAction} ${shareAction}` : ''}</article>`;
+        return `<article class="task"><b>${esc(request.studentName || '学生')}</b> · ${esc(request.classId || '班级未登记')} · ${esc(supportStateLabel[request.state] || request.state)}<br><span class="muted">已等待 ${esc(elapsedLabel(request.createdAt))} · 响应目标 ${esc(formatWhen(request.ackDueAt))} · 提交于 ${esc(formatWhen(request.createdAt))}</span>${request.shareId ? `<br><span class="muted">附带表达分享：${esc(request.shareId.slice(0, 8))}（${request.shareAccessible ? '当前可读' : '已失效'}）</span>` : ''}${action || noteAction || shareAction ? `<br>${action} ${noteAction} ${shareAction}` : ''}</article>`;
       }).join('') : '<p class="muted">暂无主动支持请求，或当前账号没有接收权限。</p>';
       document.querySelectorAll('[data-support-id]').forEach((button) => { button.onclick = () => updateSupportRequest(button.dataset.supportId, button.dataset.supportAction, button); });
       document.querySelectorAll('[data-support-share]').forEach((button) => { button.onclick = () => loadSharedExpression(button.dataset.supportShare); });
@@ -642,7 +1088,7 @@
         const result = await response.json();
         if (!isActiveSession(epoch)) return;
         const items = result.data || [];
-        $('#supportEscalations').innerHTML = response.ok ? (items.length ? items.map((item) => `<p class="muted">逾期支持请求 ${esc(item.requestId)} · 目标 ${esc(formatWhen(item.ackDueAt))} · ${esc(item.reasonCode)}</p>`).join('') : '<p class="muted">暂无逾期提醒。</p>') : `<p class="muted">${esc(result.error?.message || '逾期提醒暂时不可用')}</p>`;
+        $('#supportEscalations').innerHTML = response.ok ? (items.length ? items.map((item) => `<p class="muted">逾期支持事项 · 响应目标 ${esc(formatWhen(item.ackDueAt))} · ${esc(item.reasonCode)}</p>`).join('') : '<p class="muted">暂无逾期提醒。</p>') : `<p class="muted">${esc(result.error?.message || '逾期提醒暂时不可用')}</p>`;
       } catch (error) { if (isActiveSession(epoch)) $('#supportEscalations').innerHTML = `<p class="muted">${esc(error.message || '逾期提醒暂时不可用')}</p>`; }
     }
     async function updateSupportRequest(requestId, action, button) {
@@ -680,7 +1126,7 @@
     function renderRightsAdmin(requests) {
       $('#rightsAdminList').innerHTML = requests.length ? requests.map((request) => {
         const action = ['open', 'processing'].includes(request.status) ? `<button type="button" data-rights-id="${esc(request.id)}" data-rights-decision="complete">完成</button> <button type="button" class="secondary" data-rights-id="${esc(request.id)}" data-rights-decision="reject">拒绝</button>` : '';
-        return `<article class="task"><b>${esc(rightsKindLabel[request.kind] || request.kind)}</b> · ${esc(rightsStateLabel[request.status] || request.status)} · ${esc(request.id)}<br><span class="muted">提交于 ${esc(formatWhen(request.createdAt))}${request.hasReason ? ` · 已记录说明` : ''}</span>${request.resultReady ? '<br><span class="muted">结果已准备</span>' : ''}${action ? `<br>${action}` : ''}</article>`;
+        return `<article class="task"><b>${esc(rightsKindLabel[request.kind] || request.kind)}</b> · ${esc(rightsStateLabel[request.status] || request.status)}<br><span class="muted">提交于 ${esc(formatWhen(request.createdAt))}${request.hasReason ? ` · 已记录说明` : ''}</span>${request.resultReady ? '<br><span class="muted">结果已准备</span>' : ''}${action ? `<br>${action}` : ''}</article>`;
       }).join('') : '<p class="muted">暂无待处理申请，或当前账号没有权利管理权限。</p>';
       document.querySelectorAll('[data-rights-id]').forEach((button) => { button.onclick = () => updateRights(button.dataset.rightsId, button.dataset.rightsDecision); });
     }
@@ -700,32 +1146,52 @@
       } catch (error) { if (isActiveSession(epoch)) setStatus(error.message || '权利请求操作失败'); }
     }
 
+    const reportStateLabel = { pending_review: '待专业审核', approved: '已审核待发布', released: '已发布', revoked: '已撤回' };
+    function populateReportGradeFilter(reports) {
+      const select = $('#report-grade-filter');
+      const selected = select.value;
+      const grades = [...new Set(reports.map((report) => report.grade || '__missing__'))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+      select.replaceChildren(new Option('全部年级', ''), ...grades.map((grade) => new Option(grade === '__missing__' ? '年级未登记' : grade, grade)));
+      if (grades.includes(selected)) select.value = selected;
+    }
     function renderProfessionalReports(reports) {
-      $('#professionalReports').innerHTML = reports.length ? reports.map((report) => {
-        const actions = report.state === 'pending_review' ? `<button type="button" data-report-id="${esc(report.id)}" data-report-action="approve">审核通过</button>` : report.state === 'approved' ? `<button type="button" data-report-id="${esc(report.id)}" data-report-action="release">发布给学生</button>` : report.state === 'released' ? `<button type="button" class="secondary" data-report-id="${esc(report.id)}" data-report-action="revoke">撤回</button>` : '';
-        return `<article class="metric"><b>${esc(report.title)}</b><br>${esc(report.state)} · ${esc(formatWhen(report.releasedAt || report.createdAt))}<br><span class="muted">${esc(report.summary?.text || '')}</span>${actions ? `<br>${actions}` : ''}</article>`;
-      }).join('') : '<p class="muted">该范围暂无报告，或当前账号没有访问权限。</p>';
+      const filter = $('#report-state-filter').value;
+      const grade = $('#report-grade-filter').value;
+      const visible = reports.filter((report) => (filter === 'all' || report.state === filter) && (!grade || (report.grade || '__missing__') === grade));
+      $('#professionalReports').innerHTML = visible.length ? visible.map((report) => {
+        const mayManage = currentRole === 'professional_lead';
+        const actions = mayManage && report.state === 'pending_review' ? `<button type="button" data-report-id="${esc(report.id)}" data-report-action="approve">审核通过</button>` : mayManage && report.state === 'approved' ? `<button type="button" data-report-id="${esc(report.id)}" data-report-action="release">发布给学生</button>` : mayManage && report.state === 'released' ? `<button type="button" class="secondary" data-report-id="${esc(report.id)}" data-report-action="revoke">撤回</button>` : '';
+        const archiveAction = report.studentId ? `<button type="button" class="secondary" data-report-student="${esc(report.studentId)}">查看个案资料</button>` : '';
+        return `<article class="metric"><b>${esc(report.studentName || '学生')} · ${esc(report.grade || '年级未登记')} · ${esc(report.classId || '班级未登记')}</b><br>${esc(report.title)} · ${esc(reportStateLabel[report.state] || report.state)}<br><span class="muted">${esc(formatWhen(report.releasedAt || report.createdAt))} · ${esc(report.summary?.text || '')}</span><br>${actions} ${archiveAction}</article>`;
+      }).join('') : filter === 'pending_review' ? '<p class="muted">暂无待审核报告。</p>' : '<p class="muted">当前状态没有报告，或当前账号没有访问权限。</p>';
       document.querySelectorAll('[data-report-id]').forEach((button) => { button.onclick = () => updateProfessionalReport(button.dataset.reportId, button.dataset.reportAction); });
+      document.querySelectorAll('[data-report-student]').forEach((button) => { button.onclick = () => openReportArchive(button.dataset.reportStudent); });
+    }
+    for (const id of ['report-state-filter', 'report-grade-filter']) $('#' + id).onchange = () => { if (cachedProfessionalReports) renderProfessionalReports(cachedProfessionalReports); };
+    let cachedProfessionalReports = [];
+    function openReportArchive(studentId) {
+      const report = cachedProfessionalReports.find((item) => item.studentId === studentId);
+      if (!report) return;
+      const select = $('#archive-student');
+      if (![...select.options].some((option) => option.value === studentId)) select.add(new Option(`${report.studentName || '学生'} · ${report.classId || '班级未登记'}`, studentId));
+      select.value = studentId;
+      $('#archive-purpose').value = 'report_review';
+      $('#work-archive').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      loadProfessionalData();
     }
     async function loadProfessionalData() {
       const epoch = sessionEpoch;
       if (!isActiveSession(epoch)) return;
       const studentId = $('#archive-student').value.trim();
       const purpose = $('#archive-purpose').value;
-      if (!studentId) { $('#archiveStatus').textContent = '请输入学生编号'; return; }
+      if (!studentId) { $('#archiveStatus').textContent = '请先搜索并选择学生姓名/班级'; return; }
       $('#archiveStatus').textContent = '正在按用途读取…';
       $('#archiveView').hidden = true;
       try {
-        const [reportsResponse, archiveResponse] = await Promise.all([
-          fetch('/v1/reports?studentId=' + encodeURIComponent(studentId), { headers: { authorization: 'Bearer ' + token } }),
-          fetch('/v1/students/' + encodeURIComponent(studentId) + '/archive?purpose=' + encodeURIComponent(purpose), { headers: { authorization: 'Bearer ' + token } }),
-        ]);
-        const reports = await reportsResponse.json();
-        const archive = await archiveResponse.json();
-        if (!reportsResponse.ok) throw new Error(reports.error?.message || '报告暂时不可用');
+        const archiveResponse = await fetch('/v1/students/' + encodeURIComponent(studentId) + '/archive?purpose=' + encodeURIComponent(purpose), { headers: { authorization: 'Bearer ' + token } });
+        const archive = await readJson(archiveResponse);
         if (!archiveResponse.ok) throw new Error(archive.error?.message || '档案暂时不可用');
         if (!isActiveSession(epoch)) return;
-        renderProfessionalReports(reports.data || []);
         $('#archiveView').textContent = JSON.stringify(archive.data, null, 2);
         $('#archiveView').hidden = false;
         $('#archiveStatus').textContent = '已按用途记录读取审计。';
@@ -743,7 +1209,7 @@
         if (!response.ok) throw new Error(result.error?.message || '报告操作失败');
         if (!isActiveSession(epoch)) return;
         setStatus(action === 'approve' ? '报告已审核' : action === 'release' ? '报告已发布' : '报告已撤回');
-        await loadProfessionalData();
+        await load();
       } catch (error) { if (isActiveSession(epoch)) setStatus(error.message || '报告操作失败'); }
     }
 
@@ -788,7 +1254,9 @@
       if (!isActiveSession(epoch)) return;
       try {
         const form = Object.fromEntries(new FormData(event.target));
-        const payload = { ...form, schoolId: 'school-demo', purpose: 'screening', participantStudentIds: ['student-demo'], opensAt: new Date(form.opensAt).toISOString(), closesAt: new Date(form.closesAt).toISOString() };
+        const participantStudentIds = [...$('#campaign-students').selectedOptions].map((option) => option.value).filter(Boolean);
+        if (!participantStudentIds.length) throw new Error('请先搜索并选择至少一位学生');
+        const payload = { ...form, schoolId: 'school-demo', purpose: 'screening', participantStudentIds, opensAt: new Date(form.opensAt).toISOString(), closesAt: new Date(form.closesAt).toISOString() };
         const response = await fetch('/v1/campaigns', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
         const result = await response.json();
         if (!isActiveSession(epoch)) return;
@@ -818,7 +1286,7 @@
       if (!isActiveSession(epoch)) return;
       try {
         const form = Object.fromEntries(new FormData(event.target));
-        const response = await fetch('/v1/availability-slots', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ counselorId: form.counselorId, startsAt: new Date(form.startsAt).toISOString(), endsAt: new Date(form.endsAt).toISOString(), room: form.room || undefined }) });
+        const response = await fetch('/v1/availability-slots', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ counselorId: form.counselorId || currentUserId, startsAt: new Date(form.startsAt).toISOString(), endsAt: new Date(form.endsAt).toISOString(), room: form.room || undefined }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '排班创建失败');
         if (!isActiveSession(epoch)) return;
@@ -834,16 +1302,20 @@
       try {
         const form = Object.fromEntries(new FormData(event.target));
         const file = $('#content-file').files[0];
+        const subtitleFile = $('#content-subtitle-file').files[0];
         let mediaAssetId;
-        if (file) {
-          if (file.size > 1_500_000) throw new Error('媒体文件大小不能超过 1.5 MB');
-          const mediaResponse = await fetch('/v1/media-assets', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ filename: file.name, mediaType: file.type, base64: arrayBufferToBase64(await file.arrayBuffer()) }) });
+        let subtitleAssetId;
+        const uploadMedia = async (assetFile, fallbackType) => {
+          if (assetFile.size > 1_500_000) throw new Error('媒体文件大小不能超过 1.5 MB');
+          const mediaResponse = await fetch('/v1/media-assets', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ filename: assetFile.name, mediaType: assetFile.type || fallbackType, base64: arrayBufferToBase64(await assetFile.arrayBuffer()) }) });
           const mediaResult = await mediaResponse.json();
           if (!mediaResponse.ok) throw new Error(mediaResult.error?.message || '媒体上传失败');
-          if (!isActiveSession(epoch)) return;
-          mediaAssetId = mediaResult.data.id;
-        }
-        const response = await fetch('/v1/content', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ title: form.title, kind: form.kind, body: form.body, ageMin: Number(form.ageMin), ageMax: Number(form.ageMax), copyrightSource: form.copyrightSource, mediaAssetId, altText: form.altText || undefined, captionText: form.captionText || undefined }) });
+          if (!isActiveSession(epoch)) throw new Error('登录状态已变化，请重新操作。');
+          return mediaResult.data.id;
+        };
+        if (file) mediaAssetId = await uploadMedia(file, file.type);
+        if (subtitleFile) subtitleAssetId = await uploadMedia(subtitleFile, 'text/vtt');
+        const response = await fetch('/v1/content', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ title: form.title, kind: form.kind, category: form.category, body: form.body, ageMin: Number(form.ageMin), ageMax: Number(form.ageMax), copyrightSource: form.copyrightSource, mediaAssetId, subtitleAssetId, altText: form.altText || undefined, captionText: form.captionText || undefined }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error?.message || '教育内容保存失败');
         if (!isActiveSession(epoch)) return;
@@ -887,7 +1359,7 @@
       try { if (logoutToken) await fetch('/v1/auth/logout', { method: 'POST', headers: { authorization: 'Bearer ' + logoutToken } }); }
       finally {
         if (logoutEpoch !== sessionEpoch) return;
-        token = ''; currentRole = ''; clearDashboard(); $('#dashboard').hidden = true; $('#scaleDraftDetails').hidden = true; $('#login').reset(); setStatus('已退出');
+        token = ''; currentRole = ''; currentUserId = ''; clearDashboard(); $('#dashboard').hidden = true; $('#scaleDraftDetails').hidden = true; $('#login').reset(); setStatus('已退出');
       }
     };
   </script>

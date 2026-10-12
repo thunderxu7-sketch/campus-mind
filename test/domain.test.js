@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { acknowledgeCase, addFollowUp, approveFrequencyException, approveScale, beginAttempt, createCampaign, createConsent, createRiskSignal, createScale, createSelfScreening, listAvailableScales, listMyTasks, listScaleCatalog, listStudents, publishCampaign, requestClosure, reviewCase, revokeScale, saveAnswers, updateCampaignState, withdrawConsent } from '../dist/apps/api/src/domain/service.js';
+import { acknowledgeCase, addFollowUp, approveClosure, approveFrequencyException, approveScale, assignCase, beginAttempt, createAvailabilitySlot, createCampaign, createConsent, createRiskSignal, createScale, createSelfScreening, drainOutbox, getCaseBriefing, getMyConsentContext, listAvailableScales, listAppointments, listAvailabilitySlots, listCases, listMyTasks, listScaleCatalog, listStudents, listProfessionalDirectory, publishCampaign, requestAppointment, requestClosure, rescheduleAppointment, reviewCase, revokeScale, saveAnswers, updateAppointment, updateCampaignState, withdrawConsent, verifyGuardianLink } from '../dist/apps/api/src/domain/service.js';
 import { JsonStore } from '../dist/apps/api/src/domain/store.js';
 import { DEMO_IDS, seedDemoState } from '../dist/apps/api/src/domain/seed.js';
 
@@ -22,6 +22,96 @@ test('file adapter reloads encrypted state without losing new collections', asyn
   assert.ok(snapshot.auditEvents.some((event) => event.id === 'persist-test'));
   assert.ok(Array.isArray(snapshot.profileResponses));
   assert.ok(Array.isArray(snapshot.exportJobs));
+});
+
+test('appointments support counselor-scoped calendars, rescheduling and mutual reminders', async () => {
+  const delivered = [];
+  const store = new JsonStore({ initial: seedDemoState(), notificationDispatcher: { async deliver(input) { delivered.push(input); return { status: 'sent', provider: 'synthetic-test' }; } } });
+  const snapshot = store.snapshot();
+  const admin = authFor(snapshot, 'user-professional-demo');
+  const counselor = authFor(snapshot, 'user-counselor-demo');
+  const student = authFor(snapshot, 'student-demo');
+  const timeAt = (hours, durationMinutes = 60) => ({ startsAt: new Date(Date.now() + hours * 3_600_000).toISOString(), endsAt: new Date(Date.now() + hours * 3_600_000 + durationMinutes * 60_000).toISOString() });
+  const firstWindow = timeAt(10);
+  const nextWindow = timeAt(36);
+  const overlappingWindow = timeAt(10);
+  const otherWindow = timeAt(14);
+  await assert.rejects(() => createAvailabilitySlot(store, admin, { counselorId: 'user-counselor-demo', startsAt: '2030-01-01T10:00', endsAt: '2030-01-01T11:00' }), (error) => error.code === 'SLOT_INVALID');
+  const first = await createAvailabilitySlot(store, admin, { counselorId: 'user-counselor-demo', ...firstWindow, room: '合成咨询室 A' });
+  const next = await createAvailabilitySlot(store, admin, { counselorId: 'user-counselor-demo', ...nextWindow, room: '合成咨询室 A' });
+  const overlapping = await createAvailabilitySlot(store, admin, { counselorId: 'user-professional-demo', ...overlappingWindow, room: '合成咨询室 B' });
+  const other = await createAvailabilitySlot(store, admin, { counselorId: 'user-professional-demo', ...otherWindow, room: '合成咨询室 B' });
+  const counselorOwnedSlot = await createAvailabilitySlot(store, counselor, { counselorId: 'user-counselor-demo', ...timeAt(18) });
+  assert.equal(counselorOwnedSlot.counselorId, 'user-counselor-demo');
+  await assert.rejects(() => createAvailabilitySlot(store, counselor, { counselorId: 'user-professional-demo', ...timeAt(20) }), (error) => error.code === 'SLOT_INVALID');
+  const counselorSlots = await listAvailabilitySlots(store, counselor);
+  assert.ok(counselorSlots.some((slot) => slot.id === first.id));
+  assert.equal(counselorSlots.some((slot) => slot.id === other.id), false, 'counselor sees only their own slots');
+  assert.equal((await listAvailabilitySlots(store, student, { room: '咨询室 A' })).length, 2);
+  await assert.rejects(() => listAvailabilitySlots(store, student, { startsFrom: '2030-01-01T00:00' }), (error) => error.code === 'SLOT_FILTER_INVALID');
+
+  const appointment = await requestAppointment(store, student, { slotId: first.id, idempotencyKey: 'synthetic-calendar-001' });
+  await assert.rejects(() => rescheduleAppointment(store, counselor, appointment.id, other.id), (error) => error.code === 'FORBIDDEN');
+  await assert.rejects(() => requestAppointment(store, student, { slotId: overlapping.id }), (error) => error.code === 'APPOINTMENT_CONFLICT');
+  await drainOutbox(store, 5);
+  assert.deepEqual(delivered[0].recipientIds.sort(), ['student-demo', 'user-counselor-demo']);
+  await updateAppointment(store, counselor, appointment.id, 'confirmed');
+  const reminders = store.snapshot().outboxEvents.filter((event) => event.aggregateId === appointment.id && event.type === 'appointment.reminder_due' && event.status === 'pending');
+  assert.deepEqual(reminders.map((event) => event.payload.reminderMinutes).sort((a, b) => a - b), [15, 60], 'already-passed reminder offsets are skipped');
+  assert.equal((await listAppointments(store, counselor)).some((item) => item.id === appointment.id), true);
+  await drainOutbox(store, 5);
+  assert.deepEqual(delivered[1].recipientIds.sort(), ['student-demo', 'user-counselor-demo']);
+  assert.equal(delivered[1].context.state, 'confirmed');
+  assert.equal(Object.hasOwn(delivered[1].context, 'note'), false, 'private appointment notes never reach the notification adapter');
+
+  await rescheduleAppointment(store, student, appointment.id, next.id);
+  const rescheduleEventCount = store.snapshot().outboxEvents.filter((event) => event.aggregateId === appointment.id && event.type === 'appointment.rescheduled').length;
+  await rescheduleAppointment(store, student, appointment.id, next.id);
+  assert.equal(store.snapshot().outboxEvents.filter((event) => event.aggregateId === appointment.id && event.type === 'appointment.rescheduled').length, rescheduleEventCount, 'retrying the same reschedule does not duplicate notices');
+  const rescheduled = store.snapshot();
+  const changed = rescheduled.appointments.find((item) => item.id === appointment.id);
+  assert.equal(changed.state, 'requested', 'a changed time must be confirmed again');
+  assert.equal(changed.slotId, next.id);
+  assert.equal(rescheduled.availabilitySlots.find((item) => item.id === first.id).status, 'available');
+  assert.ok(rescheduled.outboxEvents.filter((event) => event.aggregateId === appointment.id && event.type === 'appointment.reminder_due').every((event) => event.status === 'cancelled'));
+  await drainOutbox(store, 5);
+  assert.equal(delivered.some((item) => item.eventType === 'appointment.rescheduled'), true);
+  await updateAppointment(store, counselor, appointment.id, 'confirmed');
+  const allReminders = store.snapshot().outboxEvents.filter((event) => event.aggregateId === appointment.id && event.type === 'appointment.reminder_due' && event.status === 'pending');
+  assert.deepEqual(allReminders.map((event) => event.payload.reminderMinutes).sort((a, b) => a - b), [15, 60, 1440], 'all future reminder offsets are queued for the rescheduled time');
+  await assert.rejects(() => updateAppointment(store, counselor, appointment.id, 'no_show'), (error) => error.code === 'APPOINTMENT_NOT_ENDED');
+  await store.transaction((state) => {
+    const slot = state.availabilitySlots.find((item) => item.id === next.id);
+    slot.startsAt = new Date(Date.now() - 2 * 60_000).toISOString();
+    slot.endsAt = new Date(Date.now() - 60_000).toISOString();
+  });
+  assert.equal((await updateAppointment(store, counselor, appointment.id, 'no_show')).state, 'no_show');
+  await drainOutbox(store, 5);
+  assert.ok(delivered.some((item) => item.eventType === 'appointment.no_show' && item.recipientIds.includes('student-demo')));
+
+  const otherAppointment = await requestAppointment(store, student, { slotId: other.id });
+  assert.equal((await listAppointments(store, counselor)).some((item) => item.id === otherAppointment.id), false, 'counselor cannot see another counselor\'s appointment');
+  await assert.rejects(() => updateAppointment(store, counselor, otherAppointment.id, 'confirmed'), (error) => error.code === 'FORBIDDEN');
+});
+
+test('appointment notification failures appear in the scoped exception queue', async () => {
+  const store = new JsonStore({ initial: seedDemoState(), notificationDispatcher: { async deliver() { return { status: 'failed', provider: 'synthetic-test', errorCode: 'TEST_DELIVERY_FAILED' }; } } });
+  const state = store.snapshot();
+  const manager = authFor(state, 'user-professional-demo');
+  const student = authFor(state, 'student-demo');
+  const window = { startsAt: new Date(Date.now() + 3_600_000).toISOString(), endsAt: new Date(Date.now() + 4_200_000).toISOString() };
+  const slot = await createAvailabilitySlot(store, manager, { counselorId: 'user-counselor-demo', ...window });
+  const appointment = await requestAppointment(store, student, { slotId: slot.id });
+  const result = await drainOutbox(store, 1);
+  assert.equal(result.failed, 1);
+  await store.transaction((state) => {
+    const record = state.appointments.find((item) => item.id === appointment.id);
+    record.updatedAt = new Date(Date.now() - 20 * 24 * 3_600_000).toISOString();
+  });
+  const records = await listAppointments(store, student);
+  assert.equal(records.find((item) => item.id === appointment.id).notificationIssue, 'retrying');
+  assert.equal(records.find((item) => item.id === appointment.id).confirmationOverdue, true);
+  assert.equal((await listAppointments(store, student, { exceptionOnly: true })).length, 1);
 });
 
 test('frequency reservation is atomic when two campaigns publish concurrently', async () => {
@@ -71,6 +161,46 @@ test('self screening uses the same consent and academic-year frequency guard', a
   await assert.rejects(() => createSelfScreening(store, auth, 'scale-synthetic-demo-v1'), (error) => error.code === 'FREQUENCY_REVIEW_REQUIRED');
 });
 
+test('consent is purpose-specific, task-scoped, age-aware and guardian-verification-aware', async () => {
+  const state = seedDemoState();
+  const student = state.students.find((candidate) => candidate.id === DEMO_IDS.student);
+  student.age = 13;
+  student.guardianVerified = false;
+  const store = new JsonStore({ initial: state });
+  const studentAuth = authFor(store.snapshot(), DEMO_IDS.student);
+  const guardianAuth = authFor(store.snapshot(), 'user-guardian-demo');
+  const adminAuth = authFor(store.snapshot(), 'user-admin-demo');
+
+  const beforeVerification = await getMyConsentContext(store, studentAuth);
+  assert.equal(beforeVerification.ageBand, 'under_14');
+  assert.equal(beforeVerification.guardianConsentRequired, true);
+  assert.equal(beforeVerification.guardianVerificationStatus, 'pending');
+  await assert.rejects(() => createConsent(store, studentAuth, { studentId: DEMO_IDS.student, actorType: 'student', noticeVersion: 'notice-demo-v1', purpose: 'assessment' }), (error) => error.code === 'GUARDIAN_CONSENT_REQUIRED');
+
+  await verifyGuardianLink(store, adminAuth, 'guardian-link-demo');
+  const guardianContext = await getMyConsentContext(store, guardianAuth);
+  assert.equal(guardianContext.role, 'guardian');
+  assert.equal(guardianContext.linkedStudents.length, 1);
+  assert.equal(guardianContext.linkedStudents[0].guardianVerificationStatus, 'verified');
+  assert.ok(Array.isArray(guardianContext.linkedStudents[0].assessmentTasks));
+  assert.equal(Object.hasOwn(guardianContext.linkedStudents[0], 'reports'), false);
+  assert.equal(Object.hasOwn(guardianContext.linkedStudents[0], 'answers'), false);
+
+  const guardianConsent = await createConsent(store, guardianAuth, { studentId: DEMO_IDS.student, actorType: 'guardian', noticeVersion: 'notice-demo-v1', purpose: 'assessment' });
+  assert.equal(guardianConsent.actorType, 'guardian');
+  const tasksAfterConsent = await listMyTasks(store, studentAuth);
+  assert.equal(tasksAfterConsent[0].available, true);
+  assert.equal(tasksAfterConsent[0].guardianVerificationStatus, 'verified');
+
+  const expressionConsent = await createConsent(store, guardianAuth, { studentId: DEMO_IDS.student, actorType: 'guardian', noticeVersion: 'expression-demo-v1', purpose: 'self_expression' });
+  assert.equal(expressionConsent.purpose, 'self_expression');
+  assert.equal(store.snapshot().consents.find((record) => record.id === guardianConsent.id).status, 'active', 'separate-purpose consent must not replace assessment participation');
+  await withdrawConsent(store, studentAuth, expressionConsent.id);
+  const history = await getMyConsentContext(store, studentAuth);
+  assert.equal(history.consentHistory.find((record) => record.id === expressionConsent.id).status, 'withdrawn');
+  assert.equal(history.consentHistory.find((record) => record.id === guardianConsent.id).status, 'active');
+});
+
 test('professional frequency exceptions are explicit and scoped to one draft campaign', async () => {
   const store = new JsonStore({ initial: seedDemoState() });
   const snapshot = store.snapshot();
@@ -107,6 +237,7 @@ test('closing an unfinished campaign expires drafts and releases unused frequenc
   const staleTasks = await listMyTasks(store, student);
   assert.equal(staleTasks[0].available, false);
   assert.equal(staleTasks[0].availabilityReason, 'outside_window');
+  assert.equal(staleTasks[0].nextAction, 'wait_for_window');
   await assert.rejects(() => saveAnswers(store, student, started.attempt.id, { expectedRevision: 1, answers: { q1: 0 } }), (error) => error.code === 'CAMPAIGN_CLOSED');
   await updateCampaignState(store, admin, campaign.id, 'closed');
   assert.equal(store.snapshot().assignments[0].status, 'expired');
@@ -227,9 +358,80 @@ test('counselor object scope rejects unassigned students and cases', async () =>
   assert.deepEqual(await listStudents(store, counselor), []);
   await assert.rejects(() => createRiskSignal(store, counselor, { studentId: DEMO_IDS.student, level: 'attention', reason: '合成测试：咨询师越权线索' }), (error) => error.code === 'NOT_FOUND');
   await reviewCase(store, lead, riskCase.id, { decision: 'confirm', note: '合成测试：负责人完成初步复核。' });
+  await assignCase(store, lead, riskCase.id, 'user-professional-demo');
   await acknowledgeCase(store, lead, riskCase.id);
   await assert.rejects(() => addFollowUp(store, counselor, riskCase.id, { kind: 'follow_up', note: '合成测试：未授权随访。' }), (error) => error.code === 'NOT_FOUND');
   await assert.rejects(() => requestClosure(store, counselor, riskCase.id, '合成测试：未授权结案申请。'), (error) => error.code === 'NOT_FOUND');
+});
+
+test('case workflow exposes stage ownership, deadlines, exceptions, and minimum context only', async () => {
+  const store = new JsonStore({ initial: seedDemoState() });
+  const lead = authFor(store.snapshot(), 'user-professional-demo');
+  const counselor = authFor(store.snapshot(), 'user-counselor-demo');
+  const riskCase = await createRiskSignal(store, lead, { studentId: DEMO_IDS.student, level: 'attention', source: 'staff_observation', reason: '合成测试：仅用于工作流异常队列验证。' });
+
+  const reviewBrief = await getCaseBriefing(store, lead, riskCase.id);
+  assert.equal(reviewBrief.linkedSignalCount, 1);
+  assert.equal(Object.hasOwn(reviewBrief, 'reason'), false);
+  assert.equal(Object.hasOwn(reviewBrief, 'answers'), false);
+  assert.equal(Object.hasOwn(reviewBrief, 'notes'), false);
+  await assert.rejects(() => getCaseBriefing(store, counselor, riskCase.id), (error) => error.code === 'NOT_FOUND');
+
+  await reviewCase(store, lead, riskCase.id, { decision: 'confirm', note: '合成测试：确认后进入待指派队列。' });
+  const unassignedCase = (await listCases(store, lead)).find((record) => record.id === riskCase.id);
+  assert.equal(unassignedCase.lane, 'pending_assignment');
+  assert.equal(unassignedCase.nextOwner, '专业负责人（待指派）');
+  assert.ok(unassignedCase.exceptionReasons.includes('unassigned'));
+
+  await assignCase(store, lead, riskCase.id, 'user-counselor-demo');
+  const assignedBrief = await getCaseBriefing(store, counselor, riskCase.id);
+  assert.equal(assignedBrief.acknowledgement.pending, true);
+  await store.transaction((state) => {
+    const record = state.riskCases.find((candidate) => candidate.id === riskCase.id);
+    record.updatedAt = new Date(Date.now() - 5 * 60 * 60_000).toISOString();
+    const event = state.outboxEvents.find((candidate) => candidate.aggregateId === riskCase.id && candidate.type === 'risk.signal_created');
+    event.status = 'dead_letter';
+    state.deliveryAttempts.push({ id: 'synthetic-case-delivery-failure', tenantId: record.tenantId, outboxEventId: event.id, channel: 'in_app', status: 'failed', attemptedAt: new Date(Date.now() - 5 * 60 * 60_000).toISOString(), errorCode: 'SYNTHETIC_FAILURE' });
+  });
+  const assigned = (await listCases(store, lead)).find((record) => record.id === riskCase.id);
+  assert.equal(assigned.lane, 'pending_acknowledgement');
+  assert.equal(assigned.nextOwner, '演示心理咨询师');
+  assert.equal(assigned.overdue, true);
+  assert.ok(assigned.waitingMinutes >= 0);
+  assert.ok(assigned.exceptionReasons.includes('not_accepted'));
+  assert.ok(assigned.exceptionReasons.includes('notification_failed'));
+  assert.ok(assigned.exceptionReasons.includes('deadline_overdue'));
+  await store.transaction((state) => {
+    const record = state.riskCases.find((candidate) => candidate.id === riskCase.id);
+    record.state = 'closure_requested';
+    delete record.closureRequestedBy;
+  });
+  await assert.rejects(() => reviewCase(store, lead, riskCase.id, { decision: 'confirm', note: '合成测试：不能绕过独立结案审核。' }), (error) => error.code === 'CASE_STATE_INVALID');
+  await assert.rejects(() => approveClosure(store, lead, riskCase.id), (error) => error.code === 'SEPARATION_OF_DUTIES_REQUIRED');
+});
+
+test('staff pickers search names/classes and return only purpose-scoped directories', async () => {
+  const store = new JsonStore({ initial: seedDemoState() });
+  const snapshot = store.snapshot();
+  const admin = authFor(snapshot, 'user-admin-demo');
+  const lead = authFor(snapshot, 'user-professional-demo');
+  const counselor = authFor(snapshot, 'user-counselor-demo');
+  const teacher = authFor(snapshot, 'user-teacher-demo');
+
+  assert.deepEqual(await listStudents(store, admin), [], 'the directory must not enumerate students without a query');
+  const byName = await listStudents(store, admin, { search: '演示学生' });
+  assert.deepEqual(byName.map(({ displayName, classId }) => ({ displayName, classId })), [{ displayName: '演示学生', classId: 'class-demo-1' }]);
+  assert.deepEqual((await listStudents(store, admin, { grade: '高一' })).map((row) => row.id), [DEMO_IDS.student]);
+  assert.deepEqual(await listStudents(store, admin, { search: 'class-demo-1' }).then((rows) => rows.map((row) => row.id)), [DEMO_IDS.student]);
+  await assert.rejects(() => listStudents(store, teacher, { search: '演示学生' }), (error) => error.code === 'FORBIDDEN');
+
+  const professionals = await listProfessionalDirectory(store, admin, 'appointment');
+  assert.deepEqual(professionals.map((person) => person.id), ['user-counselor-demo']);
+  await assert.rejects(() => listProfessionalDirectory(store, counselor, 'case_assignment'), (error) => error.code === 'FORBIDDEN');
+  const assignees = await listProfessionalDirectory(store, lead, 'case_assignment');
+  assert.deepEqual(assignees.map((person) => person.id).sort(), ['user-counselor-demo', 'user-professional-demo']);
+  await createRiskSignal(store, lead, { studentId: DEMO_IDS.student, level: 'attention', source: 'staff_observation', reason: '合成测试：年级过滤元数据' });
+  assert.equal((await listCases(store, lead))[0].grade, '高一');
 });
 
 test('assessment consent withdrawal stops an in-progress draft and pending processing', async () => {

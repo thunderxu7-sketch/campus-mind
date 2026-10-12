@@ -85,7 +85,7 @@ const requiredSnippets = [
   [studentWeb, "$('#rightsList').replaceChildren()", 'student rights cleanup'],
   [studentWeb, 'let sessionEpoch = 0', 'student async session epoch'],
   [studentWeb, 'isActiveSession(epoch)', 'student stale-response guard'],
-  [studentWeb, 'active.noticeVersion === currentNoticeVersion', 'student consent notice refresh'],
+  [studentWeb, "record.noticeVersion === version", 'student consent notice refresh'],
   [studentWeb, 'let helpSubmitted = false', 'student help debounce state'],
   [studentWeb, '/student/visual-interaction.js', 'explicit visual lifecycle module'],
   [pagesHome, '这是合成数据参考站点', 'public Pages synthetic-data warning'],

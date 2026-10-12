@@ -16,6 +16,7 @@ export type SignalSource = 'score_rule' | 'self_request' | 'staff_observation' |
 export type RightsKind = 'access' | 'correct' | 'delete' | 'withdraw';
 export type AppointmentState = 'requested' | 'confirmed' | 'completed' | 'cancelled' | 'no_show';
 export type ContentState = 'draft' | 'professional_review' | 'published' | 'retired';
+export type EducationContentCategory = 'wellbeing' | 'emotion' | 'stress' | 'relationships' | 'sleep' | 'help_seeking' | 'general';
 export type MediaKind = 'image' | 'audio' | 'video' | 'subtitle';
 export type ExpressionPurpose = 'self_expression' | 'visual_interaction';
 export type ExpressionTopic = 'study' | 'peers' | 'family' | 'school_life' | 'general';
@@ -82,6 +83,8 @@ export interface Student {
   tenantId: string;
   schoolId: string;
   classId: string;
+  /** School-provided grade label (e.g. 七年级/高一); never inferred from age. */
+  grade?: string;
   displayNameCiphertext: string;
   externalRefHash: string;
   age?: number;
@@ -135,6 +138,8 @@ export interface ScaleVersion {
   maxAge: number;
   scoringVersion: string;
   noticeVersion: string;
+  /** Student-facing time estimate, reviewed with the scale version. */
+  estimatedMinutes?: number;
   /** Optional catalog metadata used for age/grade suitability review. */
   dimensions?: string[];
   population?: 'primary' | 'middle' | 'high' | 'mixed';
@@ -465,11 +470,20 @@ export interface ImportBatch {
   schoolId: string;
   createdBy: string;
   filename: string;
-  status: 'previewed' | 'committed' | 'rejected';
+  status: 'previewed' | 'committed' | 'rejected' | 'partially_rolled_back' | 'rolled_back';
   mappingVersion: number;
   rowCount: number;
   validRowCount: number;
   errorCount: number;
+  /** Actual counts after commit; optional for batches created by older versions. */
+  createdCount?: number;
+  duplicateCount?: number;
+  skippedCount?: number;
+  rolledBackCount?: number;
+  rollbackBlockedCount?: number;
+  /** Append-only audit event identifiers, not user or row identifiers. */
+  auditEventId?: string;
+  rollbackAuditEventId?: string;
   /** Stable hash of the exact preview payload; commit must match it. */
   previewHash?: string;
   createdAt: string;
@@ -558,6 +572,7 @@ export interface ContentItem {
   tenantId: string;
   title: string;
   kind: 'article' | 'announcement' | 'media';
+  category?: EducationContentCategory;
   ageMin: number;
   ageMax: number;
   bodyCiphertext: string;
@@ -565,11 +580,25 @@ export interface ContentItem {
   copyrightSource: string;
   createdBy: string;
   mediaAssetId?: string;
+  /** Optional reviewed WebVTT asset attached to audio/video content. */
+  subtitleAssetId?: string;
   altText?: string;
   captionText?: string;
   reviewedBy?: string;
   publishedAt?: string;
   createdAt: string;
+}
+
+/** Minimal student-owned education engagement state; no reading text or
+ * behavioral analytics are stored. It is removed with subject data deletion. */
+export interface ContentEngagement {
+  id: string;
+  tenantId: string;
+  studentId: string;
+  contentId: string;
+  readAt?: string;
+  favoriteAt?: string;
+  updatedAt: string;
 }
 
 export interface MediaAsset {
@@ -612,9 +641,10 @@ export interface ImportRowResult {
   tenantId: string;
   batchId: string;
   rowNumber: number;
-  status: 'valid' | 'error';
+  status: 'valid' | 'error' | 'duplicate' | 'imported' | 'skipped' | 'rolled_back' | 'rollback_blocked';
   message?: string;
-  syntheticStudentId?: string;
+  /** Internal pointer to a record created by this batch, used only for safe rollback. */
+  createdStudentId?: string;
 }
 
 export interface DatabaseState {
@@ -659,6 +689,7 @@ export interface DatabaseState {
   availabilitySlots: AvailabilitySlot[];
   appointments: Appointment[];
   contentItems: ContentItem[];
+  contentEngagements: ContentEngagement[];
   mediaAssets: MediaAsset[];
   profileSchemas: ProfileSchemaVersion[];
   profileResponses: ProfileResponse[];

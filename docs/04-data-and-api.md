@@ -22,7 +22,7 @@
 | 风险 | RiskSignal、RiskCase、RiskReview、CaseAssignment | 信号有来源和版本；活跃个案可关联多个信号；复核和业务等级分开 |
 | 支持 | CarePlan、ContactNote、Referral、FollowUp、ClosureApproval | 最小化接触记录、外部转介状态、随访到期；结案申请人单独留痕并由独立专业人员审批 |
 | 预约 | CounselorProfile、AvailabilitySlot、Appointment、Room | 资质审定状态；咨询师/房间时间窗不可冲突；不在预约提醒带心理原因 |
-| 内容 | ArticleVersion、MediaAsset、ContentReview | 适龄、版权、审核、有效期；公共教育内容与私有个案附件分开；媒体限制类型/大小、哈希与安全检查，并要求文字替代或字幕 |
+| 内容 | ArticleVersion、MediaAsset、ContentReview、ContentEngagement | 适龄、主题分类、版权、审核、有效期；公共教育内容与私有个案附件分开；媒体限制类型/大小、哈希与安全检查，并要求图片文字替代或音视频字幕/文字稿；学生已读/收藏只保存最小状态 |
 | 横切 | AuditEvent、OutboxEvent、DeliveryAttempt、ExportJob、RetentionPolicy、DeletionTombstone | 访问行为审计、投递/接单分别记录、下载再鉴权、保留与删除链路 |
 
 ## 2. 主要关系
@@ -69,11 +69,13 @@ erDiagram
 | `POST /v1/auth/login`、`POST /v1/auth/logout` | 具名会话 | 令牌只存 hash；启用 MFA 的职员需 RFC 6238 验证码并拒绝即时重放（生产由 IdP/密钥注册接管）；无手机学生可兑换一次性短期凭证；登录按来源限流并返回 `Retry-After`；退登撤销会话 |
 | `POST /v1/admin/student-credentials` | 签发无手机学生登录凭证 | 仅校务授权人员可签发；默认 30 分钟、最长 24 小时，原码仅返回一次，重新签发会使旧码失效并写入审计 |
 | `POST /v1/admin/users/{userId}/sessions/revoke` | 撤销指定用户的活跃会话与未兑换学生凭证 | 仅同租户/学校的校务授权人员；服务端写入撤销时间、使未兑换凭证失效并记录 `session.revoked` 审计；不返回令牌或学生资料 |
-| `POST /v1/imports/preview` | 导入预检 | 文件隔离、限额、不执行公式/宏、字段合法性 |
-| `POST /v1/imports/{id}/commit` | 确认导入 | 审批、幂等、校验预览内容 hash；组织映射人工确认 |
+| `POST /v1/imports/preview` | 导入预检 | 文件隔离、限额、不执行公式/宏、字段合法性；逐行给错误原因，并标识批次内/已有名单重复；原始行只在浏览器内存保留 |
+| `POST /v1/imports/{id}/commit` | 仅导入有效行 | 校验预览内容 hash；返回新增/重复/跳过数量及审计编号，不在服务端保留原始上传行 |
+| `GET /v1/imports` | 查看最近批次 | 仅同租户/学校的导入授权人员可查看批次状态、计数和审计编号，不返回预览 hash 或行内容 |
+| `POST /v1/imports/{id}/rollback` | 安全回滚批次 | 仅停用本批次创建且没有后续关联记录的学生；有依赖记录者保留并报告部分回滚；写入独立审计编号，重复调用幂等 |
 | `POST /v1/guardian-links/verify` | 监护关系核验 | 经确认渠道、限流，不以学号为验证凭据 |
 | `POST /v1/guardian-links` | 建立待核验监护关系 | 校务账号只能关联本租户的监护账号与学生；未核验前不能记录监护同意 |
-| `GET/POST /v1/me/consents`、`POST /v1/me/consents/{id}/withdraw` | 同意与撤回 | 主体可查看目的绑定的参与元数据；记录时校验目的/版本/主体/年龄，当前告知版本变化会保留历史并生成新的 active 记录，任务只接受与量表 `noticeVersion` 匹配的参与记录，撤回触发权限与任务更新 |
+| `GET/POST /v1/me/consents`、`GET /v1/me/consent-context`、`POST /v1/me/consents/{id}/withdraw` | 任务内分用途同意、历史与撤回 | 测评、表达、视觉互动分别记录；任务首次进入时展示目的/可见范围/保留说明；本人或已核验监护人只看自身范围历史；新版建立新记录并保留旧版本元数据；14 岁以下仅允许已核验监护人作出所需同意，14–17 岁由学生本人决定；撤回仅影响所选用途 |
 | `POST /v1/rights-requests`、`GET /v1/me/rights-requests`、`GET /v1/rights-requests/{id}/result` | 查阅/更正/删除申请与结果 | 便捷提交、身份核验、时限跟踪；处理人必须保存加密决定说明，主体只能查看自己提交的申请及完成/拒绝结果，查阅结果只含基本资料与已发布报告，不含原始答卷 |
 | `POST /v1/admin/retention/run` | 过期导出/导入预检失效与删除台账重放 | 仅运维指标权限；预检元数据 24 小时后清理，恢复备份后先重放，再开放服务；重复执行幂等 |
 | `GET /v1/admin/operations/status`、`POST /v1/admin/operations/requeue-dead-letters` | 队列/通知运行状态与死信补投 | 仅运维指标权限；返回计数和时间，不返回学生或风险正文 |
@@ -96,7 +98,9 @@ erDiagram
 | `POST /v1/cases/{id}/follow-ups` | 支持与随访 | 个案范围、记录版本、到期提醒；响应只返回 `hasNote`，不返回随访正文或作者内部标识 |
 | `POST /v1/cases/{id}/closure-requests`、`POST /v1/cases/{id}/closure-approvals` | 申请/审批结案 | 独立专业复核、证据；响应不返回加密结案依据，拒绝自动结案 |
 | `GET /v1/analytics/summary` | 聚合指标 | 固定维度、小样本/互补抑制、查询预算、不支持任意 SQL |
-| `GET /v1/content/public?age=` | 公开教育内容 | 可选年龄筛选仅接受 6–19 周岁整数；无效筛选返回 `CONTENT_AGE_INVALID`，内容仍须专业审核发布 |
+| `GET /v1/content/public?age=&kind=&category=` | 公开教育内容 | 可选年龄筛选仅接受 6–19 周岁整数；资源类型和教育主题必须使用批准枚举；无效筛选返回稳定错误码，内容仍须专业审核发布 |
+| `GET /v1/me/content-engagements`、`PUT /v1/me/content-engagements/{contentId}` | 学生教育内容状态 | 仅本人；只保存已读/收藏时间，不记录正文、停留时长或行为画像；内容必须已发布 |
+| `GET /v1/me/data-access-history` | 本人资料访问记录 | 仅学生本人；仅返回有目的的反馈、个案最小背景和授权档案查看摘要，不返回对象 ID、正文、答卷或其他学生事件 |
 | `POST /v1/exports`、`GET /v1/exports/{id}/download` | 导出 | 记录有限用途、范围与独立审批；受控产物带 job/purpose/时间水印，到期与授权实时校验 |
 | `GET /v1/availability-slots`、`POST /v1/availability-slots`、`POST /v1/availability-slots/{id}/state` | 咨询师排班 | 仅返回同租户未来时段；咨询师/房间不可重叠；已占用时段不能直接停用 |
 | `GET /v1/appointments`、`POST /v1/appointments`、`POST /v1/appointments/{id}/state` | 咨询预约 | 资源排他、可选幂等键、资质与可预约窗口；列表不返回预约说明正文；学生只能取消自己的预约 |

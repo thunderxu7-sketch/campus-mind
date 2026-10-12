@@ -7,7 +7,7 @@ function fakePool() {
   const client = {
     async query(sql, values) {
       calls.push({ sql, values });
-      if (sql.includes("from pg_class where relnamespace")) return { rows: [{ count: 41 }] };
+      if (sql.includes("from pg_class where relnamespace")) return { rows: [{ count: 42 }] };
       return { rows: [] };
     },
     release() { calls.push({ release: true }); },
@@ -17,9 +17,10 @@ function fakePool() {
 
 test('normalized PostgreSQL repository exposes the complete fixed table set', () => {
   const names = postgresStateTableNames();
-  assert.equal(names.length, 41);
+  assert.equal(names.length, 42);
   assert.ok(names.includes('expression_entries'));
   assert.ok(names.includes('support_requests'));
+  assert.ok(names.includes('content_engagements'));
   assert.ok(names.includes('outbox_events'));
   assert.equal(new Set(names).size, names.length);
 });
@@ -28,12 +29,12 @@ test('normalized PostgreSQL repository wraps loads and writes in tenant transact
   const pool = fakePool();
   const repository = new NormalizedPostgresStateRepository({ pool });
   const health = await repository.healthCheck();
-  assert.deepEqual(health, { schemaVersion: 2, rlsEnforced: true });
+  assert.deepEqual(health, { schemaVersion: 5, rlsEnforced: true });
   const result = await repository.transaction('tenant-a', (state) => {
     state.tenants.push({ id: 'tenant-a', name: 'synthetic tenant', createdAt: new Date().toISOString() });
     return state.schemaVersion;
   });
-  assert.equal(result, 2);
+  assert.equal(result, 5);
   assert.equal(pool.calls.filter((call) => call.sql === 'BEGIN').length, 1);
   assert.equal(pool.calls.filter((call) => call.sql === 'COMMIT').length, 1);
   assert.ok(pool.calls.some((call) => typeof call.sql === 'string' && call.sql.includes("set_config('app.tenant_id', $1, true)") && call.values[0] === 'tenant-a'));
@@ -77,7 +78,7 @@ test('normalized PostgreSQL repository fails closed when any mapped table lacks 
   const pool = fakePool();
   pool.connect = async () => ({
     async query(sql) {
-      if (sql.includes('from pg_class')) return { rows: [{ count: 40 }] };
+      if (sql.includes('from pg_class')) return { rows: [{ count: 41 }] };
       return { rows: [] };
     },
     release() {},

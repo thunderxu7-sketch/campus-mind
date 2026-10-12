@@ -33,9 +33,9 @@ export function seedDemoState(): DatabaseState {
     user('user-guardian-demo', 'guardian@campus-mind.demo', '演示监护人', 'guardian', DEMO_IDS.school),
     user(DEMO_IDS.student, 'student@campus-mind.demo', '演示学生', 'student', DEMO_IDS.school),
   );
-  state.students.push({ id: DEMO_IDS.student, tenantId: DEMO_IDS.tenant, schoolId: DEMO_IDS.school, classId: 'class-demo-1', externalRefHash: 'synthetic-demo-ref', displayNameCiphertext: encrypt('演示学生'), age: 15, guardianVerified: true, active: true, createdAt });
+  state.students.push({ id: DEMO_IDS.student, tenantId: DEMO_IDS.tenant, schoolId: DEMO_IDS.school, classId: 'class-demo-1', grade: '高一', externalRefHash: 'synthetic-demo-ref', displayNameCiphertext: encrypt('演示学生'), age: 15, guardianVerified: true, active: true, createdAt });
   state.guardianLinks.push({ id: 'guardian-link-demo', tenantId: DEMO_IDS.tenant, studentId: DEMO_IDS.student, guardianUserId: 'user-guardian-demo', status: 'pending', createdAt });
-  state.consents.push({ id: 'consent-demo', tenantId: DEMO_IDS.tenant, studentId: DEMO_IDS.student, purpose: 'assessment', noticeVersion: 'notice-demo-v1', actorType: 'guardian', actorId: 'synthetic-guardian', status: 'active', recordedAt: createdAt });
+  state.consents.push({ id: 'consent-demo', tenantId: DEMO_IDS.tenant, studentId: DEMO_IDS.student, purpose: 'assessment', noticeVersion: 'notice-demo-v1', actorType: 'student', actorId: DEMO_IDS.student, status: 'active', recordedAt: createdAt });
   state.expressionPolicies.push({
     id: DEMO_IDS.expressionPolicy,
     tenantId: DEMO_IDS.tenant,
@@ -96,6 +96,7 @@ export function seedDemoState(): DatabaseState {
     maxAge: 18,
     scoringVersion: 'synthetic-scoring-v1',
     noticeVersion: 'notice-demo-v1',
+    estimatedMinutes: 5,
     dimensions: ['情绪支持', '压力觉察', '求助资源'],
     population: 'middle',
     language: 'zh-CN',
